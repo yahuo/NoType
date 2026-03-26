@@ -1,0 +1,17 @@
+# Lessons
+
+- 2026-03-26: 火山豆包语音接入前，先确认当前采用的是旧版 `appid/token/cluster` 协议还是新版 `API Key + X-Api-Resource-Id` 协议；不要根据控制台里的“实例ID/名称”去猜 `cluster` 或 `resource_id`。
+- 2026-03-26: `MenuBarExtra` 的 accessory app 里不要依赖 SwiftUI `Settings` scene 或同步弹出设置窗口；优先用自管的 `NSWindow`，并把打开动作放到 `DispatchQueue.main.async` 里，等菜单栏弹层收起后再前置窗口。
+- 2026-03-26: 从菜单栏面板跳到独立窗口时，先只收起当前 `keyWindow` 对应的菜单栏面板，不要顺手隐藏 `mainWindow`，否则会误伤其他业务窗口。
+- 2026-03-26: WebSocket 的 HTTP 预探测结果不能直接当成真实握手结论；如果预探测和原始 HTTP/1.1 或真实 websocket 行为冲突，优先相信后者，不要因为预探测非 101 就提前中止诊断。
+- 2026-03-26: Keychain 凭证保存不要用“先删再加”的乐观写法；空值应直接删除，有值优先 `SecItemUpdate`，仅在 `errSecItemNotFound` 时再 `SecItemAdd`，否则很容易把重复项错误直接暴露给用户。
+- 2026-03-26: 对有显式 final 包的流式协议，停止录音时不要通过异步 chunk 回调再补发尾包；尾包和 final 必须由同一条停止流程串行发送，否则服务端很容易报“last packet has been received already”。
+- 2026-03-26: 回答“当前快捷键/配置是什么”这类运行态问题时，先区分代码默认值和用户本机已保存值；必要时直接读取本地偏好，而不是只看源码默认值。
+- 2026-03-26: 改 app 的默认展示模式时，要同时检查 `applicationDidFinishLaunching` 里的 activation policy 是否还在无条件覆盖；否则新默认值会只闪一下就被启动逻辑改回去。
+- 2026-03-26: 给菜单栏 app 增加 Dock 图标模式时，不能只切 activation policy；还要定义 Dock 点击后的 reopen 行为，否则用户会看到 Dock 图标但点击没有任何反馈。
+- 2026-03-26: 当界面同时维护 `errorMessage` 和 `diagnosticsMessage` 这类并行状态时，新的诊断/成功流程必须主动清掉旧错误，否则用户会看到“当前成功日志 + 历史失败红字”并误判当前结果。
+- 2026-03-26: 设置保存里如果某个副作用（如登录启动注册、热键注册）失败，不要整份回滚表单状态；应只恢复失败的那一项，避免把用户刚输入的 `App ID` 等无关字段一起清空。
+- 2026-03-26: 非核心的辅助热键失败（如取消热键）不应拖垮主热键注册；主热键能用时应继续保留，只把辅助热键失败作为 warning 暴露出来。
+- 2026-03-26: 依赖 App 事件循环/系统目标对象的注册（如 Carbon 全局热键）不要放在 SwiftUI App 的 model init 里做；应等到 `applicationDidFinishLaunching` 之后再初始化，并检查安装事件处理器的返回值。
+- 2026-03-27: 全局热键这类强依赖运行时的功能，不能只靠代码审查、build/test 或生命周期推断就宣布修好；必须拿安装版做真实触发验证，或在产品里加可见的运行时注册/触发日志再下结论。
+- 2026-03-27: 用户说“提交到 GitHub，创建项目”时，不要默认只做本地 `git init`；先覆盖远程仓库创建、首个提交和默认分支要求，尤其不要擅自用 `main`，应先确认或遵循用户指定的 `master`。

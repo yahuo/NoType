@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bg" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 420) rotate(90) scale(560)">
+      <stop offset="0" stop-color="#1A1E25"/>
+      <stop offset="1" stop-color="#080A0E"/>
+    </radialGradient>
+    <linearGradient id="pill" x1="278" y1="584" x2="746" y2="584" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FBFBFD"/>
+      <stop offset="1" stop-color="#C4CBD9"/>
+    </linearGradient>
+    <linearGradient id="wave" x1="352" y1="562" x2="672" y2="562" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF5E57"/>
+      <stop offset="0.5" stop-color="#7AF0D1"/>
+      <stop offset="1" stop-color="#4CE7FF"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="52" y="52" width="920" height="920" rx="224" fill="url(#bg)"/>
+  <circle cx="512" cy="548" r="236" fill="#7AF0D1" opacity="0.05"/>
+
+  <rect x="244" y="482" width="536" height="172" rx="86" fill="url(#pill)"/>
+  <circle cx="344" cy="568" r="44" fill="#12151C"/>
+  <path d="M320 568H368" stroke="#F6F7FA" stroke-width="14" stroke-linecap="round"/>
+
+  <path d="M428 568H458L476 530L496 606L520 520L542 604L566 548L588 584H618" stroke="url(#wave)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="704" cy="568" r="18" fill="#FF5E57"/>
+</svg>

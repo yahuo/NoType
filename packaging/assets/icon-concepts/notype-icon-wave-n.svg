@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <radialGradient id="bgGlow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(512 420) rotate(90) scale(560)">
+      <stop offset="0" stop-color="#1D2430"/>
+      <stop offset="0.55" stop-color="#0C1018"/>
+      <stop offset="1" stop-color="#05070B"/>
+    </radialGradient>
+    <linearGradient id="mark" x1="260" y1="240" x2="780" y2="780" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7AF0D1"/>
+      <stop offset="0.5" stop-color="#4CE7FF"/>
+      <stop offset="1" stop-color="#B8F7F0"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="760" y1="200" x2="880" y2="320" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FF5E57"/>
+      <stop offset="1" stop-color="#FF9B92"/>
+    </linearGradient>
+    <filter id="softShadow" x="96" y="96" width="832" height="832" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="28" stdDeviation="34" flood-color="#000000" flood-opacity="0.55"/>
+    </filter>
+  </defs>
+
+  <rect x="52" y="52" width="920" height="920" rx="224" fill="url(#bgGlow)"/>
+  <rect x="52" y="52" width="920" height="920" rx="224" fill="url(#bgGlow)" opacity="0.48"/>
+
+  <circle cx="744" cy="268" r="164" fill="#65F0D4" opacity="0.07"/>
+  <circle cx="744" cy="268" r="92" fill="#65F0D4" opacity="0.12"/>
+
+  <g filter="url(#softShadow)">
+    <path d="M268 740V284L756 740V284" stroke="url(#mark)" stroke-width="96" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M320 702L436 586L512 638L608 540L704 606" stroke="#081018" stroke-width="24" stroke-linecap="round" stroke-linejoin="round" opacity="0.55"/>
+    <path d="M768 240C801.137 240 828 212.137 828 179C828 145.863 801.137 118 768 118C734.863 118 708 145.863 708 179C708 212.137 734.863 240 768 240Z" fill="url(#accent)"/>
+  </g>
+</svg>
