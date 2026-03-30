@@ -17,6 +17,32 @@ cleanup() {
   rm -rf "$STAGING_DIR"
 }
 
+select_codesign_identity() {
+  if [[ -n "${NOTYPE_CODESIGN_IDENTITY:-}" ]]; then
+    echo "$NOTYPE_CODESIGN_IDENTITY"
+    return
+  fi
+
+  local identity_output
+  identity_output="$(security find-identity -v -p codesigning 2>/dev/null || true)"
+
+  local developer_id
+  developer_id="$(printf '%s\n' "$identity_output" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -n 1)"
+  if [[ -n "$developer_id" ]]; then
+    echo "$developer_id"
+    return
+  fi
+
+  local apple_development
+  apple_development="$(printf '%s\n' "$identity_output" | sed -n 's/.*"\(Apple Development:.*\)"/\1/p' | head -n 1)"
+  if [[ -n "$apple_development" ]]; then
+    echo "$apple_development"
+    return
+  fi
+
+  echo "-"
+}
+
 trap cleanup EXIT
 
 echo "Building NoType (Release)..."
@@ -37,11 +63,22 @@ cp "$ROOT_DIR/packaging/NoTypeIcon.icns" "$RESOURCES_DIR/NoTypeIcon.icns"
 
 chmod +x "$MACOS_DIR/NoType"
 
-echo "Applying ad-hoc signature..."
-codesign --force --deep --sign - "$APP_DIR"
+SIGN_IDENTITY="$(select_codesign_identity)"
+if [[ "$SIGN_IDENTITY" == "-" ]]; then
+  echo "No signing certificate found. Falling back to ad-hoc signature..."
+else
+  echo "Applying signature with identity: $SIGN_IDENTITY"
+fi
+codesign --force --deep --sign "$SIGN_IDENTITY" --timestamp=none "$APP_DIR"
 
 echo "Copying signed bundle to dist/..."
-cp -R "$APP_DIR" "$DIST_APP_DIR"
+rm -rf "$DIST_APP_DIR"
+ditto "$APP_DIR" "$DIST_APP_DIR"
+
+if [[ ! -d "$DIST_APP_DIR" ]]; then
+  echo "Failed to copy signed bundle to $DIST_APP_DIR" >&2
+  exit 1
+fi
 
 echo "Done."
 echo "Bundle: $DIST_APP_DIR"

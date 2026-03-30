@@ -576,8 +576,10 @@ final class NoTypeAppModel: ObservableObject {
 
             switch outcome {
             case .pasted:
-                transition(to: .inserted)
-                scheduleFeedbackReset(after: 1.2)
+                feedbackTask?.cancel()
+                waveformLevel = 0
+                resetRewritePreviewThrottle()
+                transition(to: permissionSnapshot.ready ? .idle : .onboarding)
             case .copiedToClipboard:
                 transition(to: .copiedToClipboard)
                 scheduleFeedbackReset(after: 1.8)

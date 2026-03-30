@@ -12,8 +12,7 @@ run: build
 
 install: build
 	rm -rf "$(INSTALL_APP)"
-	cp -R "$(DIST_APP)" "$(INSTALL_APP)"
-	codesign --force --deep --sign - "$(INSTALL_APP)"
+	ditto "$(DIST_APP)" "$(INSTALL_APP)"
 
 clean:
 	rm -rf .build dist
