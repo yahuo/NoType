@@ -248,7 +248,9 @@ struct MenuBarContentView: View {
             .green
         case .failed:
             .yellow
-        case .idle, .onboarding:
+        case .idle:
+            .green
+        case .onboarding:
             .secondary
         }
     }
