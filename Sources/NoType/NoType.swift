@@ -28,10 +28,12 @@ struct NoTypeApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("NoType", systemImage: model.menuBarSymbolName) {
+        MenuBarExtra {
             MenuBarContentView(model: model) {
                 settingsWindowController.show()
             }
+        } label: {
+            Image(nsImage: model.menuBarIcon)
         }
         .menuBarExtraStyle(.window)
 

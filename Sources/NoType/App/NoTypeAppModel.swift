@@ -89,18 +89,18 @@ final class NoTypeAppModel: ObservableObject {
         hudController.attach(to: self)
     }
 
-    var menuBarSymbolName: String {
+    var menuBarIcon: NSImage {
         switch phase {
         case .recording:
-            "waveform.circle.fill"
+            MenuBarIconProvider.recording
         case .transcribing, .refining:
-            "ellipsis.circle.fill"
+            MenuBarIconProvider.transcribing
         case .inserted, .copiedToClipboard:
-            "checkmark.circle.fill"
+            MenuBarIconProvider.success
         case .failed:
-            "exclamationmark.triangle.fill"
+            MenuBarIconProvider.failed
         case .idle, .onboarding:
-            "mic.circle"
+            MenuBarIconProvider.idle
         }
     }
 
