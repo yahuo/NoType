@@ -1,5 +1,7 @@
 .DS_Store
 .codex/
+.superpowers/
+/docs/superpowers/
 /.build
 /Packages
 xcuserdata/

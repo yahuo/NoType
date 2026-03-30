@@ -158,7 +158,7 @@ struct AppSettings: Codable, Equatable {
     }
 }
 
-struct LLMSettingsDraft: Equatable {
+struct LLMSettingsDraft: Equatable, Sendable {
     var baseURL: String
     var apiKey: String
     var model: String

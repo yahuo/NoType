@@ -34,9 +34,9 @@ struct SettingsView: View {
                 }
             }
 
-            Section("LLM Refinement") {
+            Section("AI Rewrite") {
                 Toggle(
-                    "Enable conservative LLM refinement",
+                    "Enable AI Rewrite",
                     isOn: Binding(
                         get: { model.settings.llmRefinementEnabled },
                         set: { model.settings.llmRefinementEnabled = $0 }
@@ -84,7 +84,7 @@ struct SettingsView: View {
 
             Section {
                 HStack {
-                    Button("Test LLM") {
+                    Button("Test AI Rewrite") {
                         Task {
                             await model.testLLMSettings()
                         }

@@ -141,11 +141,11 @@ struct MenuBarContentView: View {
 
             Menu {
                 Button {
-                    model.setLLMRefinementEnabled(!model.llmRefinementEnabled)
+                    model.setAIRewriteEnabled(!model.aiRewriteEnabled)
                 } label: {
                     Label(
-                        model.llmRefinementEnabled ? "Enabled" : "Disabled",
-                        systemImage: model.llmRefinementEnabled ? "checkmark.circle.fill" : "circle"
+                        model.aiRewriteEnabled ? "Enabled" : "Disabled",
+                        systemImage: model.aiRewriteEnabled ? "checkmark.circle.fill" : "circle"
                     )
                 }
 
@@ -154,14 +154,14 @@ struct MenuBarContentView: View {
                 }
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("LLM")
+                    Text("AI REWRITE")
                         .font(.system(size: 9, weight: .medium))
                         .foregroundStyle(.secondary)
                     HStack(spacing: 4) {
                         Circle()
-                            .fill(model.llmRefinementEnabled ? Color.green : Color.secondary)
+                            .fill(model.aiRewriteEnabled ? Color.green : Color.secondary)
                             .frame(width: 6, height: 6)
-                        Text("\(model.llmRefinementEnabled ? "On" : "Off") ▾")
+                        Text("\(model.aiRewriteEnabled ? "On" : "Off") ▾")
                             .font(.caption)
                     }
                 }
@@ -228,7 +228,7 @@ struct MenuBarContentView: View {
         case .transcribing:
             "Transcribing"
         case .refining:
-            "Refining"
+            "Rewriting"
         case .inserted:
             "Inserted"
         case .copiedToClipboard:

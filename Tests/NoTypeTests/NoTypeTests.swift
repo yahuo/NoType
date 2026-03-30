@@ -196,6 +196,56 @@ func inputSourceServiceRecognizesCJKLanguagesAndInputSourceMarkers() {
 }
 
 @Test
+func aiRewriteStreamAccumulatorBuildsPartialTextFromSSEChunks() throws {
+    var accumulator = AIRewriteStreamAccumulator()
+
+    let first = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{"content":"你好"}}]}"#
+    )
+    let second = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{"content":"，世界"}}]}"#
+    )
+    let done = try accumulator.consume(line: "data: [DONE]")
+
+    #expect(first == "你好")
+    #expect(second == "你好，世界")
+    #expect(done == nil)
+    #expect(accumulator.accumulatedText == "你好，世界")
+    #expect(accumulator.sawDone)
+}
+
+@Test
+func aiRewriteStreamAccumulatorIgnoresRoleOnlyAndEmptyDeltaEvents() throws {
+    var accumulator = AIRewriteStreamAccumulator()
+
+    let roleOnly = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{"role":"assistant"}}]}"#
+    )
+    let emptyDelta = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{}}]}"#
+    )
+    let blankLine = try accumulator.consume(line: "")
+
+    #expect(roleOnly == nil)
+    #expect(emptyDelta == nil)
+    #expect(blankLine == nil)
+    #expect(accumulator.accumulatedText.isEmpty)
+    #expect(!accumulator.sawDone)
+}
+
+@Test
+func aiRewriteChatCompletionsURLAppendsEndpointOnlyOnce() {
+    #expect(
+        AIRewriteService.chatCompletionsURL(from: "https://example.com/v1")?.absoluteString
+            == "https://example.com/v1/chat/completions"
+    )
+    #expect(
+        AIRewriteService.chatCompletionsURL(from: "https://example.com/v1/chat/completions")?.absoluteString
+            == "https://example.com/v1/chat/completions"
+    )
+}
+
+@Test
 func cancelHotkeyFailureOnlyProducesWarningAndKeepsPrimaryHotkeyUsable() throws {
     let result = try HotkeyService.registrationResult(
         primaryStatus: noErr,

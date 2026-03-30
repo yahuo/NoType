@@ -29,7 +29,7 @@ final class NoTypeAppModel: ObservableObject {
     private let hotkeyService: HotkeyService
     private let audioCaptureService: AudioCaptureService
     private let textInsertionService: TextInsertionService
-    private let llmRefinementService: LLMRefinementService
+    private let aiRewriteService: AIRewriteService
     private let hudController: HUDPanelController
     private let providerFactory: () -> ASRProvider
     private let doubaoAccessTokenAccount = "doubao.access-token"
@@ -42,6 +42,10 @@ final class NoTypeAppModel: ObservableObject {
     private var storedAccessTokenPresence: Bool?
     private var hasStoredLLMAPIKey: Bool?
     private var feedbackTask: Task<Void, Never>?
+    private var completionTask: Task<Void, Never>?
+    private var pendingRewritePreviewTask: Task<Void, Never>?
+    private var pendingRewritePreviewText: String?
+    private var lastRewritePreviewUpdate = 0.0
     private var sessionID = UUID()
 
     init(
@@ -51,7 +55,7 @@ final class NoTypeAppModel: ObservableObject {
         hotkeyService: HotkeyService = HotkeyService(),
         audioCaptureService: AudioCaptureService = AudioCaptureService(),
         textInsertionService: TextInsertionService = TextInsertionService(),
-        llmRefinementService: LLMRefinementService = LLMRefinementService(),
+        aiRewriteService: AIRewriteService = AIRewriteService(),
         hudController: HUDPanelController = HUDPanelController(),
         providerFactory: @escaping () -> ASRProvider = { DoubaoStreamingASRProvider() }
     ) {
@@ -61,7 +65,7 @@ final class NoTypeAppModel: ObservableObject {
         self.hotkeyService = hotkeyService
         self.audioCaptureService = audioCaptureService
         self.textInsertionService = textInsertionService
-        self.llmRefinementService = llmRefinementService
+        self.aiRewriteService = aiRewriteService
         self.hudController = hudController
         self.providerFactory = providerFactory
 
@@ -100,7 +104,7 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
-    var llmRefinementEnabled: Bool {
+    var aiRewriteEnabled: Bool {
         settings.llmRefinementEnabled
     }
 
@@ -132,9 +136,9 @@ final class NoTypeAppModel: ObservableObject {
                 )
                 : preview
         case .transcribing:
-            return localizedText(zh: "Transcribing…", en: "Transcribing…")
+            return preview.isEmpty ? localizedText(zh: "Transcribing…", en: "Transcribing…") : preview
         case .refining:
-            return localizedText(zh: "Refining…", en: "Refining…")
+            return preview.isEmpty ? localizedText(zh: "正在改写…", en: "Rewriting…") : preview
         case .inserted:
             return localizedText(zh: "已粘贴到当前输入框", en: "Pasted into the focused field")
         case .copiedToClipboard:
@@ -181,8 +185,8 @@ final class NoTypeAppModel: ObservableObject {
             )
         case .refining:
             return localizedText(
-                zh: "正在进行 LLM 保守纠错，再按 \(hotkeyDisplayName) 可取消。",
-                en: "Running conservative LLM refinement. Press \(hotkeyDisplayName) again to cancel."
+                zh: "正在进行 AI 改写，再按 \(hotkeyDisplayName) 可取消。",
+                en: "AI Rewrite is running. Press \(hotkeyDisplayName) again to cancel."
             )
         case .inserted:
             return localizedText(zh: "已完成文本注入。", en: "Text pasted.")
@@ -239,15 +243,15 @@ final class NoTypeAppModel: ObservableObject {
         scheduleHUDLayoutUpdate(animated: true)
     }
 
-    func setLLMRefinementEnabled(_ enabled: Bool) {
+    func setAIRewriteEnabled(_ enabled: Bool) {
         guard settings.llmRefinementEnabled != enabled else { return }
         settings.llmRefinementEnabled = enabled
         persistSettings()
 
         if enabled && !llmConfigured {
             errorMessage = localizedText(
-                zh: "LLM Refinement 已启用，但 API 信息尚未配置完整，当前会继续直接使用原始转写。",
-                en: "LLM refinement is enabled but not fully configured, so raw transcripts will still be used."
+                zh: "AI Rewrite 已启用，但 API 信息尚未配置完整，当前会继续直接使用原始转写。",
+                en: "AI Rewrite is enabled but not fully configured, so raw transcripts will still be used."
             )
         }
     }
@@ -359,8 +363,8 @@ final class NoTypeAppModel: ObservableObject {
         defer { isTestingLLMSettings = false }
 
         do {
-            try await llmRefinementService.testConnection(using: llmSettingsDraft)
-            llmSettingsStatusMessage = localizedText(zh: "连接测试成功。", en: "Connection test passed.")
+            try await aiRewriteService.testConnection(using: llmSettingsDraft)
+            llmSettingsStatusMessage = localizedText(zh: "AI Rewrite 连接测试成功。", en: "AI Rewrite connection test passed.")
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }
@@ -469,9 +473,11 @@ final class NoTypeAppModel: ObservableObject {
 
     private func cancelCurrentSession() {
         feedbackTask?.cancel()
+        completionTask?.cancel()
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""
+        resetRewritePreviewThrottle()
         errorMessage = nil
 
         do {
@@ -497,8 +503,9 @@ final class NoTypeAppModel: ObservableObject {
                 scheduleHUDLayoutUpdate()
             }
         case .finalTranscript(let transcript):
-            Task {
-                await completeSession(with: transcript, sessionID: activeSessionID)
+            completionTask?.cancel()
+            completionTask = Task { [weak self] in
+                await self?.completeSession(with: transcript, sessionID: activeSessionID)
             }
         case .error(let message):
             failSession(message)
@@ -526,19 +533,34 @@ final class NoTypeAppModel: ObservableObject {
 
         var finalText = normalizedTranscript
 
-        if settings.llmRefinementEnabled, let refinementDraft = loadActiveLLMDraftIfConfigured() {
+        if settings.llmRefinementEnabled, let rewriteDraft = loadActiveLLMDraftIfConfigured() {
             transition(to: .refining)
+            resetRewritePreviewThrottle()
 
             do {
-                let refined = try await llmRefinementService.refine(normalizedTranscript, with: refinementDraft)
+                let rewritten = try await aiRewriteService.rewrite(
+                    normalizedTranscript,
+                    with: rewriteDraft,
+                    onPartial: { [weak self] partial in
+                        Task { @MainActor in
+                            self?.handleRewritePartial(partial, sessionID: activeSessionID)
+                        }
+                    }
+                )
                 guard activeSessionID == sessionID else { return }
-                finalText = refined
-                transcriptPreview = refined
+                pendingRewritePreviewTask?.cancel()
+                pendingRewritePreviewText = nil
+                finalText = rewritten
+                transcriptPreview = rewritten
+            } catch is CancellationError {
+                return
             } catch {
                 guard activeSessionID == sessionID else { return }
+                resetRewritePreviewThrottle()
+                transcriptPreview = normalizedTranscript
                 errorMessage = localizedText(
-                    zh: "LLM 纠错失败，已继续使用原始转写结果。",
-                    en: "LLM refinement failed. Using the raw transcript instead."
+                    zh: "AI 改写失败，已继续使用原始转写结果。",
+                    en: "AI Rewrite failed. Using the raw transcript instead."
                 )
             }
         }
@@ -586,8 +608,10 @@ final class NoTypeAppModel: ObservableObject {
 
     private func failSession(_ message: String) {
         feedbackTask?.cancel()
+        completionTask?.cancel()
         sessionID = UUID()
         waveformLevel = 0
+        resetRewritePreviewThrottle()
 
         do {
             try audioCaptureService.stopCapture(flushRemainder: false)
@@ -604,9 +628,11 @@ final class NoTypeAppModel: ObservableObject {
 
     private func resetSessionStateForStart() {
         feedbackTask?.cancel()
+        completionTask?.cancel()
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""
+        resetRewritePreviewThrottle()
         errorMessage = nil
         hotkeyWarningMessage = nil
         audioCaptureService.clearRecording(at: audioCaptureService.recordingURL)
@@ -618,6 +644,46 @@ final class NoTypeAppModel: ObservableObject {
         let smoothing = incomingLevel > waveformLevel ? 0.40 : 0.15
         waveformLevel += (incomingLevel - waveformLevel) * smoothing
         scheduleHUDLayoutUpdate()
+    }
+
+    private func handleRewritePartial(_ partial: String, sessionID activeSessionID: UUID) {
+        guard activeSessionID == sessionID else { return }
+
+        let now = CFAbsoluteTimeGetCurrent()
+        let minimumInterval = 0.05
+        let elapsed = now - lastRewritePreviewUpdate
+
+        if elapsed >= minimumInterval {
+            transcriptPreview = partial
+            pendingRewritePreviewText = nil
+            lastRewritePreviewUpdate = now
+            scheduleHUDLayoutUpdate()
+            return
+        }
+
+        pendingRewritePreviewText = partial
+        guard pendingRewritePreviewTask == nil else { return }
+
+        pendingRewritePreviewTask = Task { @MainActor [weak self] in
+            let remainingDelay = max(0, minimumInterval - elapsed)
+            try? await Task.sleep(for: .seconds(remainingDelay))
+
+            guard let self else { return }
+            self.pendingRewritePreviewTask = nil
+            guard self.sessionID == activeSessionID, let latestPartial = self.pendingRewritePreviewText else { return }
+
+            self.pendingRewritePreviewText = nil
+            self.transcriptPreview = latestPartial
+            self.lastRewritePreviewUpdate = CFAbsoluteTimeGetCurrent()
+            self.scheduleHUDLayoutUpdate()
+        }
+    }
+
+    private func resetRewritePreviewThrottle() {
+        pendingRewritePreviewTask?.cancel()
+        pendingRewritePreviewTask = nil
+        pendingRewritePreviewText = nil
+        lastRewritePreviewUpdate = 0
     }
 
     private func persistSettings() {
@@ -681,6 +747,7 @@ final class NoTypeAppModel: ObservableObject {
             guard let self else { return }
             self.waveformLevel = 0
             self.transcriptPreview = ""
+            self.resetRewritePreviewThrottle()
             self.errorMessage = nil
             self.transition(to: self.permissionSnapshot.ready ? .idle : .onboarding)
         }

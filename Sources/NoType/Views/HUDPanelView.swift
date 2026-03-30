@@ -26,22 +26,29 @@ struct HUDPanelView: View {
 
     @ViewBuilder
     private var statusPill: some View {
-        Text(topStatusLine)
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(.white)
-            .lineLimit(1)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .frame(maxWidth: .infinity)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(Color.black.opacity(0.84))
-                    .overlay(
-                        Capsule(style: .continuous)
-                            .strokeBorder(Color.white.opacity(0.10))
-                    )
-            )
-            .shadow(color: .black.opacity(0.22), radius: 22, y: 10)
+        VStack(alignment: .leading, spacing: 4) {
+            Text(topStatusLine)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.72))
+
+            Text(model.hudDisplayText)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.white)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .fill(Color.black.opacity(0.84))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 22, style: .continuous)
+                        .strokeBorder(Color.white.opacity(0.10))
+                )
+        )
+        .shadow(color: .black.opacity(0.22), radius: 22, y: 10)
     }
 
     @ViewBuilder
@@ -85,7 +92,7 @@ struct HUDPanelView: View {
         case .transcribing:
             progressIndicator(label: isChinese ? "处理中" : "Processing")
         case .refining:
-            progressIndicator(label: isChinese ? "处理中" : "Processing")
+            progressIndicator(label: isChinese ? "改写中" : "Rewriting")
         case .inserted:
             Label(isChinese ? "已插入" : "Inserted", systemImage: "checkmark.circle.fill")
                 .font(.system(size: 11, weight: .medium))
@@ -161,9 +168,9 @@ struct HUDPanelView: View {
 
     private var showsStatusPill: Bool {
         switch model.phase {
-        case .recording, .transcribing:
+        case .recording, .transcribing, .refining:
             true
-        case .refining, .failed, .inserted, .copiedToClipboard, .idle, .onboarding:
+        case .failed, .inserted, .copiedToClipboard, .idle, .onboarding:
             false
         }
     }
@@ -179,7 +186,7 @@ struct HUDPanelView: View {
         case .transcribing:
             return isChinese ? "正在转写语音" : "Transcribing audio"
         case .refining:
-            return isChinese ? "正在进行保守纠错" : "Running conservative refinement"
+            return isChinese ? "正在改写" : "Rewriting"
         case .failed:
             return isChinese ? "听写失败" : "Dictation failed"
         case .inserted:
