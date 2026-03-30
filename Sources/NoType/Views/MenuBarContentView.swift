@@ -8,194 +8,211 @@ struct MenuBarContentView: View {
 
     var body: some View {
         VStack(spacing: 10) {
-            // MARK: Zone 1 — Header Row
-            HStack {
-                Text("NoType")
-                    .font(.headline)
-
-                Spacer()
-
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(statusColor)
-                        .frame(width: 8, height: 8)
-                    Text(statusLabel)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            // MARK: Zone 2 — Main Card
-            VStack(spacing: 12) {
-                // Hotkey hero / permission states
-                if !model.permissionSnapshot.ready {
-                    Button("Open Setup") {
-                        activateAndOpenWindow(id: "onboarding")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else if !model.hasASRCredentials {
-                    HStack(spacing: 4) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .font(.caption)
-                        Text("Missing Doubao credentials")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.orange)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                    Button("Open Settings") {
-                        openSettingsWindow()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    HStack(spacing: 10) {
-                        Image(systemName: "mic.circle")
-                            .font(.system(size: 36))
-                            .foregroundStyle(statusColor)
-                            .frame(width: 40, height: 40)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(.quaternary)
-                            )
-
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(model.statusLine)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                            Text(model.hotkeyDisplayName)
-                                .font(.subheadline.monospaced())
-                        }
-
-                        Spacer()
-                    }
-                }
-
-                if let warning = model.hotkeyWarningMessage {
-                    Text(warning)
-                        .font(.caption)
-                        .foregroundStyle(.orange)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if let errorMessage = model.errorMessage, model.phase == .failed {
-                    Text(errorMessage)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                // Language & LLM tiles
-                HStack(spacing: 8) {
-                    Menu {
-                        ForEach(DictationLanguage.allCases) { language in
-                            Button {
-                                model.selectLanguage(language)
-                            } label: {
-                                Label(language.displayName, systemImage: model.settings.language == language ? "checkmark" : "")
-                            }
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("LANGUAGE")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            Text("\(model.settings.language.displayName) ▾")
-                                .font(.caption)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                        )
-                    }
-                    .buttonStyle(.plain)
-
-                    Menu {
-                        Button {
-                            model.setLLMRefinementEnabled(!model.llmRefinementEnabled)
-                        } label: {
-                            Label(
-                                model.llmRefinementEnabled ? "Enabled" : "Disabled",
-                                systemImage: model.llmRefinementEnabled ? "checkmark.circle.fill" : "circle"
-                            )
-                        }
-
-                        Button("Settings…") {
-                            openSettingsWindow()
-                        }
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("LLM")
-                                .font(.system(size: 9, weight: .medium))
-                                .foregroundStyle(.secondary)
-                            HStack(spacing: 4) {
-                                Circle()
-                                    .fill(model.llmRefinementEnabled ? Color.green : Color.secondary)
-                                    .frame(width: 6, height: 6)
-                                Text("\(model.llmRefinementEnabled ? "On" : "Off") ▾")
-                                    .font(.caption)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                        )
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(.quaternary.opacity(0.5))
-            )
-
-            // MARK: Zone 3 — Icon Footer
-            HStack {
-                Button {
-                    openSettingsWindow()
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                        )
-                }
-                .buttonStyle(.plain)
-
-                Spacer()
-
-                Button {
-                    NSApp.terminate(nil)
-                } label: {
-                    Image(systemName: "power")
-                        .font(.system(size: 14))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
+            headerRow
+            mainCard
+            iconFooter
         }
         .padding(14)
         .frame(width: 280)
+    }
+
+    // MARK: - Zone 1 — Header Row
+
+    private var headerRow: some View {
+        HStack {
+            Text("NoType")
+                .font(.headline)
+
+            Spacer()
+
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+                Text(statusLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    // MARK: - Zone 2 — Main Card
+
+    private var mainCard: some View {
+        VStack(spacing: 12) {
+            if !model.permissionSnapshot.ready {
+                Button("Open Setup") {
+                    activateAndOpenWindow(id: "onboarding")
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else if !model.hasASRCredentials {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                        .font(.caption)
+                    Text("Missing Doubao credentials")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.orange)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Button("Open Settings") {
+                    openSettingsWindow()
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 10) {
+                    Image(systemName: "mic.circle")
+                        .font(.system(size: 36))
+                        .foregroundStyle(statusColor)
+                        .frame(width: 40, height: 40)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(.quaternary)
+                        )
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(model.statusLine)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(model.hotkeyDisplayName)
+                            .font(.subheadline.monospaced())
+                    }
+
+                    Spacer()
+                }
+            }
+
+            if let warning = model.hotkeyWarningMessage {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            if let errorMessage = model.errorMessage, model.phase == .failed {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            settingsTiles
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(.quaternary.opacity(0.5))
+        )
+    }
+
+    private var settingsTiles: some View {
+        HStack(spacing: 8) {
+            Menu {
+                ForEach(DictationLanguage.allCases) { language in
+                    Button {
+                        model.selectLanguage(language)
+                    } label: {
+                        Label(language.displayName, systemImage: model.settings.language == language ? "checkmark" : "")
+                    }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("LANGUAGE")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    Text("\(model.settings.language.displayName) ▾")
+                        .font(.caption)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(.quaternary)
+                )
+            }
+            .buttonStyle(.plain)
+
+            Menu {
+                Button {
+                    model.setLLMRefinementEnabled(!model.llmRefinementEnabled)
+                } label: {
+                    Label(
+                        model.llmRefinementEnabled ? "Enabled" : "Disabled",
+                        systemImage: model.llmRefinementEnabled ? "checkmark.circle.fill" : "circle"
+                    )
+                }
+
+                Button("Settings…") {
+                    openSettingsWindow()
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("LLM")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(model.llmRefinementEnabled ? Color.green : Color.secondary)
+                            .frame(width: 6, height: 6)
+                        Text("\(model.llmRefinementEnabled ? "On" : "Off") ▾")
+                            .font(.caption)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(.quaternary)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: - Zone 3 — Icon Footer
+
+    private var iconFooter: some View {
+        HStack {
+            Button {
+                openSettingsWindow()
+            } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.quaternary)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Settings")
+
+            Spacer()
+
+            Button {
+                NSApp.terminate(nil)
+            } label: {
+                Image(systemName: "power")
+                    .font(.system(size: 14))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.quaternary)
+                    )
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Quit")
+        }
     }
 
     // MARK: - Computed Properties
