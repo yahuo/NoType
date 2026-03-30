@@ -5,13 +5,15 @@ enum DictationPhase: String, Equatable {
     case onboarding
     case idle
     case recording
-    case processing
+    case transcribing
+    case refining
     case failed
     case inserted
+    case copiedToClipboard
 
     var hudVisible: Bool {
         switch self {
-        case .recording, .processing, .failed, .inserted:
+        case .recording, .transcribing, .refining, .failed, .inserted, .copiedToClipboard:
             true
         case .onboarding, .idle:
             false
@@ -66,4 +68,10 @@ enum NoTypeHotkeyEvent: Equatable {
     case startDictation
     case stopDictation
     case cancelDictation
+}
+
+enum TextInsertionOutcome: Equatable {
+    case pasted(DictationTargetContext)
+    case copiedToClipboard(DictationTargetContext)
+    case skipped(DictationTargetContext)
 }

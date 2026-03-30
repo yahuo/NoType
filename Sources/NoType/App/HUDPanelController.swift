@@ -35,30 +35,32 @@ final class HUDPanelController {
         }
     }
 
-    func update(for model: NoTypeAppModel) {
+    func update(for model: NoTypeAppModel, animated: Bool) {
         guard let panel else { return }
         panel.contentView = NSHostingView(rootView: HUDPanelView(model: model))
-
         if model.phase.hudVisible {
             let size = model.phase == .failed ? extendedSize : baseSize
             panel.setContentSize(size)
-            position(panel: panel, size: size)
+            panel.setFrame(frame(for: size), display: true)
             panel.orderFrontRegardless()
         } else {
             panel.orderOut(nil)
         }
     }
 
-    private func position(panel: NSPanel, size: NSSize) {
+    private func frame(for size: NSSize) -> NSRect {
         let screen = currentScreen() ?? NSScreen.main ?? NSScreen.screens.first
-        guard let screen else { return }
+        guard let screen else {
+            return NSRect(origin: .zero, size: size)
+        }
 
         let visibleFrame = screen.visibleFrame
-        let origin = NSPoint(
-            x: visibleFrame.midX - (size.width / 2),
-            y: visibleFrame.minY + 36
+        return NSRect(
+            x: visibleFrame.midX - size.width / 2,
+            y: visibleFrame.minY + 36,
+            width: size.width,
+            height: size.height
         )
-        panel.setFrame(NSRect(origin: origin, size: size), display: true)
     }
 
     private func currentScreen() -> NSScreen? {

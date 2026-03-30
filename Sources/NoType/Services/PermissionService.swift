@@ -29,11 +29,11 @@ final class PermissionService {
         return AXIsProcessTrustedWithOptions(options)
     }
 
-    func openSystemSettingsAccessibility() {
+    func openAccessibilitySettings() {
         open(urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
     }
 
-    func openSystemSettingsMicrophone() {
+    func openMicrophoneSettings() {
         open(urlString: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
     }
 

@@ -1,6 +1,5 @@
 import AppKit
 import Foundation
-import SwiftData
 
 @MainActor
 final class NoTypeAppModel: ObservableObject {
@@ -13,15 +12,16 @@ final class NoTypeAppModel: ObservableObject {
             storedAccessTokenPresence = !accessToken.trimmed.isEmpty
         }
     }
-    @Published var permissionSnapshot = PermissionSnapshot(microphoneAuthorized: false, accessibilityAuthorized: false)
-    @Published var phase: DictationPhase = .onboarding
-    @Published var partialTranscript = ""
-    @Published var finalTranscript = ""
+    @Published var permissionSnapshot: PermissionSnapshot
+    @Published var phase: DictationPhase
+    @Published var transcriptPreview = ""
+    @Published var waveformLevel = 0.0
     @Published var errorMessage: String?
-    @Published var diagnosticsMessage: String?
-    @Published var diagnosticsLog = ""
-    @Published var availableMicrophones: [AudioInputDevice] = []
-    @Published var isRunningDiagnostics = false
+    @Published var hotkeyWarningMessage: String?
+    @Published var llmSettingsDraft: LLMSettingsDraft
+    @Published var llmSettingsStatusMessage: String?
+    @Published var llmSettingsErrorMessage: String?
+    @Published var isTestingLLMSettings = false
 
     private let settingsStore: SettingsStore
     private let keychainClient: KeychainClient
@@ -29,31 +29,29 @@ final class NoTypeAppModel: ObservableObject {
     private let hotkeyService: HotkeyService
     private let audioCaptureService: AudioCaptureService
     private let textInsertionService: TextInsertionService
-    private let loginItemService: LoginItemService
-    private let historyStore: HistoryStore
+    private let llmRefinementService: LLMRefinementService
     private let hudController: HUDPanelController
     private let providerFactory: () -> ASRProvider
+    private let doubaoAccessTokenAccount = "doubao.access-token"
+    private let llmAPIKeyAccount = "llm.api-key"
 
     private var asrProvider: ASRProvider?
-    private var currentRecordingURL: URL?
-    private var dictationStartedAt: Date?
-    private var recordedHistoryForCurrentSession = false
-    private var currentTargetContext = DictationTargetContext.currentFrontmost()
-    private var acceptsLiveAudioFrames = false
     private var hasLoadedAccessToken = false
     private var hasEditedAccessToken = false
     private var isInternallyUpdatingAccessToken = false
     private var storedAccessTokenPresence: Bool?
+    private var hasStoredLLMAPIKey: Bool?
+    private var feedbackTask: Task<Void, Never>?
+    private var sessionID = UUID()
 
     init(
-        modelContainer: ModelContainer,
         settingsStore: SettingsStore = SettingsStore(),
         keychainClient: KeychainClient = KeychainClient(),
         permissionService: PermissionService = PermissionService(),
         hotkeyService: HotkeyService = HotkeyService(),
         audioCaptureService: AudioCaptureService = AudioCaptureService(),
         textInsertionService: TextInsertionService = TextInsertionService(),
-        loginItemService: LoginItemService = LoginItemService(),
+        llmRefinementService: LLMRefinementService = LLMRefinementService(),
         hudController: HUDPanelController = HUDPanelController(),
         providerFactory: @escaping () -> ASRProvider = { DoubaoStreamingASRProvider() }
     ) {
@@ -63,13 +61,20 @@ final class NoTypeAppModel: ObservableObject {
         self.hotkeyService = hotkeyService
         self.audioCaptureService = audioCaptureService
         self.textInsertionService = textInsertionService
-        self.loginItemService = loginItemService
-        self.historyStore = HistoryStore(modelContext: modelContainer.mainContext)
+        self.llmRefinementService = llmRefinementService
         self.hudController = hudController
         self.providerFactory = providerFactory
 
-        self.settings = settingsStore.load()
-        self.storedAccessTokenPresence = settingsStore.storedAccessTokenPresence()
+        let settings = settingsStore.load()
+        self.settings = settings
+        storedAccessTokenPresence = settingsStore.storedAccessTokenPresence()
+        hasStoredLLMAPIKey = settingsStore.storedLLMAPIKeyPresence()
+        permissionSnapshot = PermissionSnapshot(
+            microphoneAuthorized: false,
+            accessibilityAuthorized: false
+        )
+        phase = .onboarding
+        llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: "")
 
         hotkeyService.eventHandler = { [weak self] event in
             Task { @MainActor in
@@ -84,15 +89,23 @@ final class NoTypeAppModel: ObservableObject {
         switch phase {
         case .recording:
             "waveform.circle.fill"
-        case .processing:
+        case .transcribing, .refining:
             "ellipsis.circle.fill"
+        case .inserted, .copiedToClipboard:
+            "checkmark.circle.fill"
         case .failed:
             "exclamationmark.triangle.fill"
-        case .inserted:
-            "checkmark.circle.fill"
         case .idle, .onboarding:
             "mic.circle"
         }
+    }
+
+    var llmRefinementEnabled: Bool {
+        settings.llmRefinementEnabled
+    }
+
+    var llmConfigured: Bool {
+        settings.llmConfiguredWithoutAPIKey && (hasStoredLLMAPIKey ?? false)
     }
 
     var hasASRCredentials: Bool {
@@ -103,232 +116,280 @@ final class NoTypeAppModel: ObservableObject {
         return storedAccessTokenPresence ?? true
     }
 
-    var microphoneSelectionID: String {
-        get { settings.microphoneID ?? "" }
-        set { settings.microphoneID = newValue.isEmpty ? nil : newValue }
+    var hotkeyDisplayName: String {
+        settings.hotkey.displayName
     }
 
-    var currentMicrophoneName: String {
-        guard let microphoneID = settings.microphoneID else {
-            return "System Default"
+    var hudDisplayText: String {
+        let preview = transcriptPreview.trimmed
+
+        switch phase {
+        case .recording:
+            return preview.isEmpty
+                ? localizedText(
+                    zh: "请开始说话，再按 \(hotkeyDisplayName) 结束",
+                    en: "Start speaking. Press \(hotkeyDisplayName) again to stop."
+                )
+                : preview
+        case .transcribing:
+            return localizedText(zh: "Transcribing…", en: "Transcribing…")
+        case .refining:
+            return localizedText(zh: "Refining…", en: "Refining…")
+        case .inserted:
+            return localizedText(zh: "已粘贴到当前输入框", en: "Pasted into the focused field")
+        case .copiedToClipboard:
+            return localizedText(zh: "已复制到剪贴板，可手动粘贴", en: "Copied to clipboard. Paste anywhere.")
+        case .failed:
+            return errorMessage ?? localizedText(zh: "语音输入失败", en: "Dictation failed")
+        case .idle:
+            return localizedText(
+                zh: "按 \(hotkeyDisplayName) 开始录音，再按一次结束",
+                en: "Press \(hotkeyDisplayName) to start. Press again to stop."
+            )
+        case .onboarding:
+            return localizedText(zh: "先完成权限授权", en: "Grant permissions first")
         }
-        return availableMicrophones.first(where: { $0.id == microphoneID })?.name ?? "Unknown Mic"
+    }
+
+    var statusLine: String {
+        if !permissionSnapshot.ready {
+            return Self.permissionRequirementMessage(for: permissionSnapshot, language: settings.language)
+        }
+
+        if !hasASRCredentials {
+            return localizedText(
+                zh: "先在 Settings 中配置豆包 App ID、Resource ID 和 Access Token。",
+                en: "Configure the Doubao App ID, Resource ID, and Access Token in Settings first."
+            )
+        }
+
+        switch phase {
+        case .idle:
+            return localizedText(
+                zh: "准备就绪，按 \(hotkeyDisplayName) 开始录音。",
+                en: "Ready. Press \(hotkeyDisplayName) to start dictation."
+            )
+        case .recording:
+            return localizedText(
+                zh: "正在录音，再按 \(hotkeyDisplayName) 结束，Option + Esc 取消。",
+                en: "Recording. Press \(hotkeyDisplayName) again to stop, or Option + Esc to cancel."
+            )
+        case .transcribing:
+            return localizedText(
+                zh: "正在转写语音，再按 \(hotkeyDisplayName) 可取消。",
+                en: "Transcribing. Press \(hotkeyDisplayName) again to cancel."
+            )
+        case .refining:
+            return localizedText(
+                zh: "正在进行 LLM 保守纠错，再按 \(hotkeyDisplayName) 可取消。",
+                en: "Running conservative LLM refinement. Press \(hotkeyDisplayName) again to cancel."
+            )
+        case .inserted:
+            return localizedText(zh: "已完成文本注入。", en: "Text pasted.")
+        case .copiedToClipboard:
+            return localizedText(zh: "未检测到输入焦点，已复制到剪贴板。", en: "No editable focus. Copied to clipboard.")
+        case .failed:
+            return errorMessage ?? localizedText(zh: "语音输入失败。", en: "Dictation failed.")
+        case .onboarding:
+            return Self.permissionRequirementMessage(for: permissionSnapshot, language: settings.language)
+        }
     }
 
     func bootstrap() {
-        availableMicrophones = AudioCaptureService.availableInputDevices()
         permissionSnapshot = permissionService.snapshot()
-        applyActivationPolicy(using: settings)
-        transition(to: permissionSnapshot.ready ? .idle : .onboarding)
+        phase = permissionSnapshot.ready ? .idle : .onboarding
+        hotkeyService.update(phase: phase)
+
         do {
             let result = try hotkeyService.register(using: settings)
-            diagnosticsMessage = result.warningMessage
+            hotkeyWarningMessage = result.warningMessage
         } catch {
-            diagnosticsMessage = error.localizedDescription
-        }
-        try? historyStore.prune(retentionDays: settings.historyRetentionDays)
-        hudController.update(for: self)
-    }
-
-    func saveSettings() {
-        let previousSettings = settingsStore.load()
-        let previousAccessTokenPresence = settingsStore.storedAccessTokenPresence()
-        let requestedSettings = settings
-        var persistedSettings = requestedSettings
-        var saveIssues: [String] = []
-        var primaryFailure: Error?
-
-        if requestedSettings.launchAtLogin != previousSettings.launchAtLogin {
-            do {
-                try loginItemService.setLaunchAtLogin(enabled: requestedSettings.launchAtLogin)
-            } catch {
-                persistedSettings = Self.reconcilingRecoverableSettingFailures(
-                    requested: persistedSettings,
-                    previous: previousSettings,
-                    restoreLaunchAtLogin: true
-                )
-                saveIssues.append(error.localizedDescription)
-                primaryFailure = primaryFailure ?? error
-            }
-        }
-
-        if requestedSettings.hotkey != previousSettings.hotkey {
-            do {
-                let result = try hotkeyService.register(using: requestedSettings)
-                if let warningMessage = result.warningMessage {
-                    saveIssues.append(warningMessage)
-                }
-            } catch {
-                persistedSettings = Self.reconcilingRecoverableSettingFailures(
-                    requested: persistedSettings,
-                    previous: previousSettings,
-                    restoreHotkey: true
-                )
-                saveIssues.append(error.localizedDescription)
-                primaryFailure = primaryFailure ?? error
-                _ = try? hotkeyService.register(using: previousSettings)
-            }
-        }
-
-        do {
-            try settingsStore.save(persistedSettings)
-            settings = persistedSettings
-            applyActivationPolicy(using: persistedSettings)
-            if hasLoadedAccessToken && hasEditedAccessToken {
-                try keychainClient.save(accessToken, for: "doubao.access-token")
-                let hasToken = !accessToken.trimmed.isEmpty
-                settingsStore.setHasStoredAccessToken(hasToken)
-                storedAccessTokenPresence = hasToken
-                hasEditedAccessToken = false
-            }
-            try historyStore.prune(retentionDays: persistedSettings.historyRetentionDays)
-            if saveIssues.isEmpty {
-                diagnosticsMessage = "Settings saved."
-                errorMessage = nil
-            } else {
-                diagnosticsMessage = "Settings saved, but some changes were not applied."
-                errorMessage = saveIssues.joined(separator: "\n")
-            }
-        } catch {
-            settings = persistedSettings
-            if let previousAccessTokenPresence {
-                settingsStore.setHasStoredAccessToken(previousAccessTokenPresence)
-            } else {
-                settingsStore.clearStoredAccessTokenPresence()
-            }
-            storedAccessTokenPresence = previousAccessTokenPresence
-            diagnosticsMessage = nil
-            errorMessage = (primaryFailure ?? error).localizedDescription
-        }
-    }
-
-    func prepareSettings() {
-        do {
-            _ = try loadAccessTokenIfNeeded()
-            errorMessage = nil
-        } catch {
+            hotkeyWarningMessage = nil
             errorMessage = error.localizedDescription
+        }
+
+        scheduleHUDLayoutUpdate(animated: false)
+    }
+
+    func refreshPermissions() {
+        permissionSnapshot = permissionService.snapshot()
+        if phase != .recording, phase != .transcribing, phase != .refining {
+            transition(to: permissionSnapshot.ready ? .idle : .onboarding)
         }
     }
 
     func requestPermissions() async {
         _ = await permissionService.requestMicrophoneAccess()
         _ = permissionService.promptAccessibilityAccess()
-        permissionSnapshot = permissionService.snapshot()
-        transition(to: permissionSnapshot.ready ? .idle : .onboarding)
+        refreshPermissions()
     }
 
     func openAccessibilitySettings() {
-        permissionService.openSystemSettingsAccessibility()
+        permissionService.openAccessibilitySettings()
     }
 
     func openMicrophoneSettings() {
-        permissionService.openSystemSettingsMicrophone()
+        permissionService.openMicrophoneSettings()
     }
 
-    func diagnoseConnection() async {
-        do {
-            errorMessage = nil
+    func selectLanguage(_ language: DictationLanguage) {
+        guard settings.language != language else { return }
+        settings.language = language
+        persistSettings()
+        scheduleHUDLayoutUpdate(animated: true)
+    }
 
-            guard let config = try currentASRSessionConfig() else {
-                diagnosticsMessage = "Fill App ID, Resource ID, and Access Token first."
-                return
-            }
+    func setLLMRefinementEnabled(_ enabled: Bool) {
+        guard settings.llmRefinementEnabled != enabled else { return }
+        settings.llmRefinementEnabled = enabled
+        persistSettings()
 
-            isRunningDiagnostics = true
-            diagnosticsMessage = "Testing Doubao protocol roundtrip..."
-            diagnosticsLog = ""
-            defer { isRunningDiagnostics = false }
-
-            let provider = providerFactory()
-            appendDiagnosticsLog("Starting Doubao diagnostics.")
-            appendDiagnosticsLog("Endpoint: \(DoubaoStreamingASRProvider.serviceURL.absoluteString)")
-            appendDiagnosticsLog("App ID: \(config.appID)")
-            appendDiagnosticsLog("Resource ID: \(config.resourceID)")
-            appendDiagnosticsLog("Access Token: \(maskedAccessToken(config.accessToken))")
-
-            let handshakeRequest = DoubaoStreamingASRProvider.makeWebSocketRequest(
-                for: config,
-                connectID: UUID().uuidString.lowercased(),
-                userAgent: "NoType/diag-preflight"
+        if enabled && !llmConfigured {
+            errorMessage = localizedText(
+                zh: "LLM Refinement 已启用，但 API 信息尚未配置完整，当前会继续直接使用原始转写。",
+                en: "LLM refinement is enabled but not fully configured, so raw transcripts will still be used."
             )
-            do {
-                let handshake = try await DoubaoHandshakeProbe.probe(webSocketRequest: handshakeRequest)
-                appendDiagnosticsLog("Handshake probe: \(handshake.statusLine)")
-                if let logID = handshake.logID {
-                    appendDiagnosticsLog("X-Tt-Logid: \(logID)")
-                }
-                if !handshake.body.isEmpty {
-                    appendDiagnosticsLog("Handshake body: \(handshake.body)")
-                }
-                if handshake.statusCode != 101 {
-                    appendDiagnosticsLog(
-                        "Handshake probe returned HTTP \(handshake.statusCode); continuing with the real WebSocket roundtrip because this preflight can differ from the actual upgrade path."
-                    )
-                }
-            } catch {
-                appendDiagnosticsLog(
-                    "Handshake probe could not inspect the response: \(error.localizedDescription). Continuing with the real WebSocket roundtrip."
-                )
-            }
-
-            let event = try await runDiagnosticRoundtrip(with: provider, config: config)
-            provider.cancel()
-
-            switch event {
-            case .partialTranscript(let transcript), .finalTranscript(let transcript):
-                errorMessage = nil
-                if transcript.isEmpty {
-                    diagnosticsMessage = "Protocol roundtrip succeeded."
-                    appendDiagnosticsLog("ASR event: final empty transcript; transport looks healthy.")
-                } else {
-                    diagnosticsMessage = "Protocol roundtrip succeeded: \(transcript)"
-                    appendDiagnosticsLog("ASR event: transcript=\(transcript)")
-                }
-            case .error(let message):
-                errorMessage = nil
-                diagnosticsMessage = "Server replied: \(message)"
-                appendDiagnosticsLog("ASR event: error=\(message)")
-            case nil:
-                errorMessage = nil
-                diagnosticsMessage = "No ASR response within timeout."
-                appendDiagnosticsLog("ASR event: timeout waiting for transcript.")
-            }
-        } catch {
-            errorMessage = nil
-            diagnosticsMessage = "Connection failed: \(error.localizedDescription)"
-            appendDiagnosticsLog("Diagnostics failed: \(error.localizedDescription)")
         }
     }
 
-    func clearDiagnosticsLog() {
-        diagnosticsLog = ""
-        diagnosticsMessage = nil
-        errorMessage = nil
+    func prepareSettings() {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+
+        do {
+            let doubaoToken = try keychainClient.read(account: doubaoAccessTokenAccount)
+            assignAccessToken(doubaoToken, markAsEdited: false)
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+
+        do {
+            let apiKey = try keychainClient.read(account: llmAPIKeyAccount)
+            llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: apiKey)
+        } catch {
+            llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: "")
+            llmSettingsErrorMessage = error.localizedDescription
+        }
     }
 
-    func startDictationFromUI() {
-        Task { await startDictation() }
+    func saveSettings() {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+
+        let previousSettings = settingsStore.load()
+        let previousAccessTokenPresence = settingsStore.storedAccessTokenPresence()
+        let previousLLMAPIKeyPresence = settingsStore.storedLLMAPIKeyPresence()
+
+        settings.appID = settings.appID.trimmed
+        settings.resourceID = settings.resourceID.trimmed
+        settings.llmBaseURL = llmSettingsDraft.baseURL.trimmed
+        settings.llmModel = llmSettingsDraft.model.trimmed
+
+        var persistedSettings = settings
+        var warnings: [String] = []
+
+        do {
+            let result = try hotkeyService.register(using: settings)
+            hotkeyWarningMessage = result.warningMessage
+            if let warning = result.warningMessage {
+                warnings.append(warning)
+            }
+        } catch {
+            if settings.hotkey != previousSettings.hotkey {
+                persistedSettings.hotkey = previousSettings.hotkey
+                _ = try? hotkeyService.register(using: previousSettings)
+            }
+            hotkeyWarningMessage = nil
+            warnings.append(error.localizedDescription)
+        }
+
+        do {
+            try settingsStore.save(persistedSettings)
+            try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
+            try keychainClient.save(llmSettingsDraft.apiKey, for: llmAPIKeyAccount)
+
+            let hasToken = !accessToken.trimmed.isEmpty
+            let hasLLMAPIKey = !llmSettingsDraft.apiKey.trimmed.isEmpty
+            settingsStore.setHasStoredAccessToken(hasToken)
+            settingsStore.setHasStoredLLMAPIKey(hasLLMAPIKey)
+
+            storedAccessTokenPresence = hasToken
+            hasStoredLLMAPIKey = hasLLMAPIKey
+            hasEditedAccessToken = false
+            settings = persistedSettings
+            llmSettingsDraft = LLMSettingsDraft(settings: persistedSettings, apiKey: llmSettingsDraft.apiKey)
+
+            if warnings.isEmpty {
+                llmSettingsStatusMessage = localizedText(zh: "设置已保存。", en: "Settings saved.")
+                errorMessage = nil
+            } else {
+                llmSettingsStatusMessage = localizedText(
+                    zh: "设置已保存，但有部分热键变更未生效。",
+                    en: "Settings saved, but part of the hotkey change did not apply."
+                )
+                llmSettingsErrorMessage = warnings.joined(separator: "\n")
+            }
+
+            if phase == .idle || phase == .onboarding {
+                hotkeyService.update(phase: phase)
+            }
+        } catch {
+            settings = previousSettings
+            if let previousAccessTokenPresence {
+                settingsStore.setHasStoredAccessToken(previousAccessTokenPresence)
+            } else {
+                settingsStore.clearStoredAccessTokenPresence()
+            }
+            if let previousLLMAPIKeyPresence {
+                settingsStore.setHasStoredLLMAPIKey(previousLLMAPIKeyPresence)
+            } else {
+                settingsStore.clearStoredLLMAPIKeyPresence()
+            }
+            storedAccessTokenPresence = previousAccessTokenPresence
+            hasStoredLLMAPIKey = previousLLMAPIKeyPresence
+            hotkeyWarningMessage = nil
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+    }
+
+    func testLLMSettings() async {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+        isTestingLLMSettings = true
+        defer { isTestingLLMSettings = false }
+
+        do {
+            try await llmRefinementService.testConnection(using: llmSettingsDraft)
+            llmSettingsStatusMessage = localizedText(zh: "连接测试成功。", en: "Connection test passed.")
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+    }
+
+    func clearLLMAPIKeyDraft() {
+        llmSettingsDraft.apiKey = ""
     }
 
     func stopDictationFromUI() {
-        Task { await stopDictation() }
+        Task {
+            await stopDictation()
+        }
     }
 
     func cancelFromUI() {
         cancelCurrentSession()
     }
 
-    func retryLastRecordingFromUI() {
-        Task { await retryLastRecording() }
-    }
-
-    private func handleHotkey(_ event: NoTypeHotkeyEvent) {
+    func handleHotkey(_ event: NoTypeHotkeyEvent) {
         switch event {
         case .startDictation:
-            Task { await startDictation() }
+            Task {
+                await startDictation()
+            }
         case .stopDictation:
-            Task { await stopDictation() }
+            Task {
+                await stopDictation()
+            }
         case .cancelDictation:
             cancelCurrentSession()
         }
@@ -343,36 +404,47 @@ final class NoTypeAppModel: ObservableObject {
 
         do {
             guard let config = try currentASRSessionConfig() else {
-                transition(to: .failed, message: "ASR credentials are incomplete.")
+                failSession(
+                    localizedText(
+                        zh: "豆包配置不完整。请先填写 App ID、Resource ID 和 Access Token。",
+                        en: "Doubao configuration is incomplete. Fill the App ID, Resource ID, and Access Token first."
+                    )
+                )
                 return
             }
 
             resetSessionStateForStart()
+            let activeSessionID = sessionID
             let provider = providerFactory()
             provider.eventHandler = { [weak self] event in
                 Task { @MainActor in
-                    self?.handleASREvent(event)
+                    self?.handleASREvent(event, sessionID: activeSessionID)
                 }
             }
 
             try await provider.startSession(config: config)
             asrProvider = provider
-            acceptsLiveAudioFrames = true
 
-            currentRecordingURL = try audioCaptureService.startCapture(microphoneID: settings.microphoneID) { [weak self] frame in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard self.acceptsLiveAudioFrames else { return }
-                    do {
-                        try await self.asrProvider?.sendAudioFrame(frame, isFinal: false)
-                    } catch {
-                        self.failSession(error.localizedDescription)
+            _ = try audioCaptureService.startCapture(
+                onChunk: { [weak self] frame in
+                    guard let self else { return }
+                    Task { @MainActor in
+                        guard self.sessionID == activeSessionID else { return }
+                        do {
+                            try await self.asrProvider?.sendAudioFrame(frame, isFinal: false)
+                        } catch {
+                            self.failSession(error.localizedDescription)
+                        }
+                    }
+                },
+                onLevel: { [weak self] level in
+                    Task { @MainActor in
+                        guard let self, self.sessionID == activeSessionID else { return }
+                        self.updateWaveformLevel(level)
                     }
                 }
-            }
+            )
 
-            dictationStartedAt = .now
-            currentTargetContext = DictationTargetContext.currentFrontmost()
             transition(to: .recording)
         } catch {
             failSession(error.localizedDescription)
@@ -381,8 +453,8 @@ final class NoTypeAppModel: ObservableObject {
 
     private func stopDictation() async {
         guard phase == .recording else { return }
-        transition(to: .processing)
-        acceptsLiveAudioFrames = false
+        transition(to: .transcribing)
+        waveformLevel = 0
 
         do {
             let stopResult = try audioCaptureService.stopCaptureForFinalization()
@@ -395,177 +467,184 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
-    private func retryLastRecording() async {
-        guard let currentRecordingURL else {
-            diagnosticsMessage = "No recording available to retry."
-            return
-        }
-
-        do {
-            guard let config = try currentASRSessionConfig() else {
-                transition(to: .failed, message: "ASR credentials are incomplete.")
-                return
-            }
-
-            let provider = providerFactory()
-            provider.eventHandler = { [weak self] event in
-                Task { @MainActor in
-                    self?.handleASREvent(event)
-                }
-            }
-            try await provider.startSession(config: config)
-            asrProvider = provider
-            transition(to: .processing)
-            errorMessage = nil
-
-            let audioData = try audioCaptureService.loadRecording(at: currentRecordingURL)
-            for frame in PCMUtilities.chunk(audioData) {
-                try await provider.sendAudioFrame(frame, isFinal: false)
-            }
-            try await provider.finish()
-        } catch {
-            failSession(error.localizedDescription)
-        }
-    }
-
     private func cancelCurrentSession() {
-        acceptsLiveAudioFrames = false
+        feedbackTask?.cancel()
+        sessionID = UUID()
+        waveformLevel = 0
+        transcriptPreview = ""
+        errorMessage = nil
+
         do {
             try audioCaptureService.stopCapture(flushRemainder: false)
         } catch {
-            diagnosticsMessage = error.localizedDescription
+            hotkeyWarningMessage = error.localizedDescription
         }
 
         asrProvider?.cancel()
         asrProvider = nil
-        persistHistoryIfNeeded(status: .cancelled, text: finalTranscript.isEmpty ? partialTranscript : finalTranscript)
-        cleanupRecording(deleteFile: true)
-        partialTranscript = ""
-        finalTranscript = ""
-        errorMessage = nil
         transition(to: permissionSnapshot.ready ? .idle : .onboarding)
     }
 
-    private func handleASREvent(_ event: ASRProviderEvent) {
+    private func handleASREvent(_ event: ASRProviderEvent, sessionID activeSessionID: UUID) {
+        guard activeSessionID == sessionID else { return }
+
         switch event {
         case .partialTranscript(let transcript):
-            partialTranscript = transcript
+            transcriptPreview = transcript
             if phase != .recording {
-                transition(to: .processing)
+                transition(to: .transcribing)
+            } else {
+                scheduleHUDLayoutUpdate()
             }
         case .finalTranscript(let transcript):
-            Task { await completeSession(with: transcript) }
+            Task {
+                await completeSession(with: transcript, sessionID: activeSessionID)
+            }
         case .error(let message):
             failSession(message)
         }
     }
 
-    private func completeSession(with transcript: String) async {
-        acceptsLiveAudioFrames = false
-        let formatted = TranscriptFormatter.normalize(transcript)
-        finalTranscript = formatted
-        partialTranscript = formatted
+    private func completeSession(with transcript: String, sessionID activeSessionID: UUID) async {
+        guard activeSessionID == sessionID else { return }
+        waveformLevel = 0
+        asrProvider?.cancel()
+        asrProvider = nil
+
+        let normalizedTranscript = TranscriptFormatter.normalize(transcript)
+        transcriptPreview = normalizedTranscript
+
+        guard !normalizedTranscript.trimmed.isEmpty else {
+            failSession(
+                localizedText(
+                    zh: "没有检测到有效语音。",
+                    en: "No speech was detected."
+                )
+            )
+            return
+        }
+
+        var finalText = normalizedTranscript
+
+        if settings.llmRefinementEnabled, let refinementDraft = loadActiveLLMDraftIfConfigured() {
+            transition(to: .refining)
+
+            do {
+                let refined = try await llmRefinementService.refine(normalizedTranscript, with: refinementDraft)
+                guard activeSessionID == sessionID else { return }
+                finalText = refined
+                transcriptPreview = refined
+            } catch {
+                guard activeSessionID == sessionID else { return }
+                errorMessage = localizedText(
+                    zh: "LLM 纠错失败，已继续使用原始转写结果。",
+                    en: "LLM refinement failed. Using the raw transcript instead."
+                )
+            }
+        }
+
+        guard activeSessionID == sessionID else { return }
 
         do {
-            if formatted.trimmed.isEmpty {
-                currentTargetContext = DictationTargetContext.currentFrontmost()
-                persistHistoryIfNeeded(status: .success, text: "")
-                cleanupRecording(deleteFile: true)
-                asrProvider?.cancel()
-                asrProvider = nil
-                partialTranscript = ""
-                finalTranscript = ""
-                transition(to: permissionSnapshot.ready ? .idle : .onboarding)
-                return
-            }
+            let outcome = try await textInsertionService.insert(finalText)
+            guard activeSessionID == sessionID else { return }
 
-            let insertionContext = settings.autoInsert
-                ? try textInsertionService.insert(formatted)
-                : DictationTargetContext.currentFrontmost()
+            transcriptPreview = finalText
+            errorMessage = nil
 
-            currentTargetContext = insertionContext
-            persistHistoryIfNeeded(status: .success, text: formatted)
-            cleanupRecording(deleteFile: true)
-            asrProvider?.cancel()
-            asrProvider = nil
-            transition(to: .inserted)
-
-            Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(900))
-                if self.phase == .inserted {
-                    self.transition(to: self.permissionSnapshot.ready ? .idle : .onboarding)
-                    self.partialTranscript = ""
-                }
+            switch outcome {
+            case .pasted:
+                transition(to: .inserted)
+                scheduleFeedbackReset(after: 1.2)
+            case .copiedToClipboard:
+                transition(to: .copiedToClipboard)
+                scheduleFeedbackReset(after: 1.8)
+            case .skipped:
+                failSession(
+                    localizedText(
+                        zh: "最终转写为空，未执行文本注入。",
+                        en: "The final transcript was empty, so nothing was pasted."
+                    )
+                )
             }
         } catch {
             failSession(error.localizedDescription)
         }
     }
 
-    private func failSession(_ message: String) {
-        acceptsLiveAudioFrames = false
+    private func loadActiveLLMDraftIfConfigured() -> LLMSettingsDraft? {
+        guard settings.llmConfiguredWithoutAPIKey else { return nil }
+
         do {
-            if phase == .recording {
-                try audioCaptureService.stopCapture(flushRemainder: false)
-            }
+            let apiKey = try keychainClient.read(account: llmAPIKeyAccount)
+            let draft = LLMSettingsDraft(settings: settings, apiKey: apiKey)
+            return draft.isConfigured ? draft : nil
         } catch {
-            diagnosticsMessage = error.localizedDescription
+            return nil
+        }
+    }
+
+    private func failSession(_ message: String) {
+        feedbackTask?.cancel()
+        sessionID = UUID()
+        waveformLevel = 0
+
+        do {
+            try audioCaptureService.stopCapture(flushRemainder: false)
+        } catch {
+            hotkeyWarningMessage = error.localizedDescription
         }
 
-        errorMessage = message
-        diagnosticsMessage = nil
         asrProvider?.cancel()
         asrProvider = nil
-        persistHistoryIfNeeded(status: .failed, text: finalTranscript.isEmpty ? partialTranscript : finalTranscript)
-        transition(to: .failed, message: message)
-    }
-
-    private func persistHistoryIfNeeded(status: DictationSessionStatus, text: String) {
-        guard !recordedHistoryForCurrentSession else { return }
-        guard let dictationStartedAt else { return }
-
-        let microphoneName = currentMicrophoneName
-        try? historyStore.addRecord(
-            startedAt: dictationStartedAt,
-            endedAt: .now,
-            context: currentTargetContext,
-            microphoneName: microphoneName,
-            finalText: text,
-            status: status,
-            latencyMs: Int(Date().timeIntervalSince(dictationStartedAt) * 1_000)
-        )
-        recordedHistoryForCurrentSession = true
-    }
-
-    private func cleanupRecording(deleteFile: Bool) {
-        if deleteFile {
-            audioCaptureService.clearRecording(at: currentRecordingURL)
-        }
-        currentRecordingURL = nil
-        dictationStartedAt = nil
-        recordedHistoryForCurrentSession = false
+        errorMessage = message
+        transition(to: .failed)
+        scheduleFeedbackReset(after: 2.0)
     }
 
     private func resetSessionStateForStart() {
-        acceptsLiveAudioFrames = false
-        partialTranscript = ""
-        finalTranscript = ""
+        feedbackTask?.cancel()
+        sessionID = UUID()
+        waveformLevel = 0
+        transcriptPreview = ""
         errorMessage = nil
-        diagnosticsMessage = nil
-        recordedHistoryForCurrentSession = false
-        audioCaptureService.clearRecording(at: currentRecordingURL)
-        currentRecordingURL = nil
+        hotkeyWarningMessage = nil
+        audioCaptureService.clearRecording(at: audioCaptureService.recordingURL)
         asrProvider?.cancel()
         asrProvider = nil
     }
 
-    private func transition(to newPhase: DictationPhase, message: String? = nil) {
-        phase = newPhase
-        if let message {
-            errorMessage = message
+    private func updateWaveformLevel(_ incomingLevel: Double) {
+        let smoothing = incomingLevel > waveformLevel ? 0.40 : 0.15
+        waveformLevel += (incomingLevel - waveformLevel) * smoothing
+        scheduleHUDLayoutUpdate()
+    }
+
+    private func persistSettings() {
+        do {
+            try settingsStore.save(settings)
+        } catch {
+            errorMessage = error.localizedDescription
         }
-        hotkeyService.update(phase: newPhase)
-        hudController.update(for: self)
+    }
+
+    private func assignAccessToken(_ value: String, markAsEdited: Bool) {
+        isInternallyUpdatingAccessToken = true
+        accessToken = value
+        isInternallyUpdatingAccessToken = false
+        hasLoadedAccessToken = true
+        hasEditedAccessToken = markAsEdited
+        storedAccessTokenPresence = !value.trimmed.isEmpty
+    }
+
+    private func loadAccessTokenIfNeeded() throws -> String {
+        guard !hasLoadedAccessToken else {
+            return accessToken
+        }
+
+        let token = try keychainClient.read(account: doubaoAccessTokenAccount)
+        assignAccessToken(token, markAsEdited: false)
+        return token
     }
 
     private func currentASRSessionConfig() throws -> ASRSessionConfig? {
@@ -589,96 +668,32 @@ final class NoTypeAppModel: ObservableObject {
         )
     }
 
-    nonisolated static func reconcilingRecoverableSettingFailures(
-        requested: AppSettings,
-        previous: AppSettings,
-        restoreLaunchAtLogin: Bool = false,
-        restoreHotkey: Bool = false
-    ) -> AppSettings {
-        var reconciled = requested
-        if restoreLaunchAtLogin {
-            reconciled.launchAtLogin = previous.launchAtLogin
-        }
-        if restoreHotkey {
-            reconciled.hotkey = previous.hotkey
-        }
-        return reconciled
+    private func transition(to newPhase: DictationPhase) {
+        phase = newPhase
+        hotkeyService.update(phase: newPhase)
+        scheduleHUDLayoutUpdate()
     }
 
-    private func loadAccessTokenIfNeeded() throws -> String {
-        guard !hasLoadedAccessToken else {
-            return accessToken
-        }
-
-        let token = try keychainClient.read(account: "doubao.access-token")
-        assignAccessToken(token, markAsEdited: false)
-        return token
-    }
-
-    private func assignAccessToken(_ value: String, markAsEdited: Bool) {
-        isInternallyUpdatingAccessToken = true
-        accessToken = value
-        isInternallyUpdatingAccessToken = false
-        hasLoadedAccessToken = true
-        hasEditedAccessToken = markAsEdited
-        storedAccessTokenPresence = !value.trimmed.isEmpty
-    }
-
-    private func applyActivationPolicy(using settings: AppSettings) {
-        let targetPolicy: NSApplication.ActivationPolicy = settings.showDockIcon ? .regular : .accessory
-        guard NSApp.activationPolicy() != targetPolicy else { return }
-
-        NSApp.setActivationPolicy(targetPolicy)
-        if targetPolicy == .regular {
-            NSApp.activate(ignoringOtherApps: true)
+    private func scheduleFeedbackReset(after delay: TimeInterval) {
+        feedbackTask?.cancel()
+        feedbackTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self else { return }
+            self.waveformLevel = 0
+            self.transcriptPreview = ""
+            self.errorMessage = nil
+            self.transition(to: self.permissionSnapshot.ready ? .idle : .onboarding)
         }
     }
 
-    private func runDiagnosticRoundtrip(with provider: ASRProvider, config: ASRSessionConfig) async throws -> ASRProviderEvent? {
-        let silence = Data(repeating: 0, count: PCMUtilities.chunkByteCount)
-        var receivedEvent: ASRProviderEvent?
-        provider.eventHandler = { event in
-            if receivedEvent == nil {
-                receivedEvent = event
-            }
-        }
-
-        appendDiagnosticsLog("Opening WebSocket session.")
-        try await provider.startSession(config: config)
-        appendDiagnosticsLog("WebSocket session opened; sending final silent frame (\(silence.count) bytes).")
-        try await provider.sendAudioFrame(silence, isFinal: true)
-
-        for _ in 0..<50 {
-            if let receivedEvent {
-                return receivedEvent
-            }
-            try await Task.sleep(for: .milliseconds(100))
-        }
-
-        return nil
-    }
-
-    private func appendDiagnosticsLog(_ line: String) {
-        let timestamp = ISO8601DateFormatter().string(from: .now)
-        if diagnosticsLog.isEmpty {
-            diagnosticsLog = "[\(timestamp)] \(line)"
-        } else {
-            diagnosticsLog += "\n[\(timestamp)] \(line)"
-        }
-    }
-
-    private func maskedAccessToken(_ token: String) -> String {
-        guard token.count > 8 else { return String(repeating: "*", count: max(token.count, 4)) }
-        let prefix = token.prefix(4)
-        let suffix = token.suffix(4)
-        return "\(prefix)...\(suffix)"
+    private func scheduleHUDLayoutUpdate(animated: Bool = true) {
+        hudController.update(for: self, animated: animated)
     }
 
     private func presentPermissionRequirementFeedback(for snapshot: PermissionSnapshot) {
         let message = Self.permissionRequirementMessage(for: snapshot, language: settings.language)
-        errorMessage = nil
-        diagnosticsMessage = nil
-        transition(to: .failed, message: message)
+        errorMessage = message
+        transition(to: .failed)
 
         Task { @MainActor in
             try? await Task.sleep(for: .seconds(1.6))
@@ -688,22 +703,37 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
+    private func localizedText(zh: String, en: String) -> String {
+        settings.language.usesChineseCopy ? zh : en
+    }
+
+    nonisolated static func hotkeyAction(for phase: DictationPhase) -> NoTypeHotkeyEvent {
+        switch phase {
+        case .recording:
+            .stopDictation
+        case .transcribing, .refining:
+            .cancelDictation
+        case .onboarding, .idle, .failed, .inserted, .copiedToClipboard:
+            .startDictation
+        }
+    }
+
     nonisolated static func permissionRequirementMessage(
         for snapshot: PermissionSnapshot,
         language: DictationLanguage
     ) -> String {
-        switch (snapshot.microphoneAuthorized, snapshot.accessibilityAuthorized, language) {
-        case (false, false, .zhCN):
+        switch (snapshot.microphoneAuthorized, snapshot.accessibilityAuthorized, language.usesChineseCopy) {
+        case (false, false, true):
             "需要先授予麦克风和辅助功能权限。打开 Setup 完成授权后再试。"
-        case (false, true, .zhCN):
+        case (false, true, true):
             "需要先授予麦克风权限。打开 Setup 完成授权后再试。"
-        case (true, false, .zhCN):
+        case (true, false, true):
             "需要先授予辅助功能权限。打开 Setup 完成授权后再试。"
-        case (false, false, .enUS):
+        case (false, false, false):
             "Microphone and Accessibility permissions are required. Open Setup and grant them before trying again."
-        case (false, true, .enUS):
+        case (false, true, false):
             "Microphone permission is required. Open Setup and grant it before trying again."
-        case (true, false, .enUS):
+        case (true, false, false):
             "Accessibility permission is required. Open Setup and grant it before trying again."
         case (true, true, _):
             ""

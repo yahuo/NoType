@@ -1,3 +1,4 @@
+import Carbon
 import Foundation
 import Testing
 @testable import NoType
@@ -22,31 +23,48 @@ func transcriptFormatterMapsSpokenCommandsAndCollapsesWhitespace() {
 }
 
 @Test
-func doubaoAudioRequestMarksFinalFrameInHeader() {
-    let audio = Data([0x01, 0x02, 0x03])
-
-    let regular = DoubaoStreamingASRProvider.makeAudioRequest(audioData: audio, isFinal: false)
-    let final = DoubaoStreamingASRProvider.makeAudioRequest(audioData: audio, isFinal: true)
-
-    #expect(regular[1] == 0x20)
-    #expect(final[1] == 0x22)
+func appSettingsDefaultHotkeyUsesOptionSpace() {
+    #expect(AppSettings.defaults.hotkey == .optionSpace)
 }
 
 @Test
-func settingsStoreRoundTripsAppSettings() throws {
+func appSettingsDefaultLanguageUsesSimplifiedChinese() {
+    #expect(AppSettings.defaults.language == .zhCN)
+}
+
+@Test
+func appSettingsDecodeMigratesLegacyClusterField() throws {
+    let payload = """
+    {
+      "appID": "app-id",
+      "cluster": "legacy-cluster",
+      "hotkey": "optionSpace",
+      "language": "zh-CN",
+      "llmRefinementEnabled": true,
+      "llmBaseURL": "https://example.com/v1",
+      "llmModel": "gpt-test"
+    }
+    """.data(using: .utf8)!
+
+    let decoded = try JSONDecoder().decode(AppSettings.self, from: payload)
+
+    #expect(decoded.resourceID == "legacy-cluster")
+    #expect(decoded.llmRefinementEnabled)
+}
+
+@Test
+func settingsStoreRoundTripsRestoredSettings() throws {
     let defaults = UserDefaults(suiteName: UUID().uuidString)!
     let store = SettingsStore(userDefaults: defaults)
 
     let settings = AppSettings(
         appID: "app-id",
         resourceID: "volc.seedasr.sauc.duration",
-        microphoneID: "mic-id",
-        autoInsert: false,
-        showDockIcon: true,
-        historyRetentionDays: 14,
-        launchAtLogin: true,
         hotkey: .commandShiftSpace,
-        language: .enUS
+        language: .jaJP,
+        llmRefinementEnabled: true,
+        llmBaseURL: "https://example.com/v1",
+        llmModel: "gpt-test"
     )
 
     try store.save(settings)
@@ -68,57 +86,33 @@ func settingsStoreTracksWhetherAccessTokenExists() {
 }
 
 @Test
-func settingsStoreMigratesLegacyClusterField() throws {
+func settingsStoreTracksWhetherLLMAPIKeyExists() {
     let defaults = UserDefaults(suiteName: UUID().uuidString)!
-    let legacyPayload = """
-    {
-      "appID": "app-id",
-      "cluster": "legacy-cluster",
-      "microphoneID": "mic-id",
-      "autoInsert": true,
-      "showDockIcon": false,
-      "historyRetentionDays": 30,
-      "launchAtLogin": false,
-      "hotkey": "optionSpace",
-      "language": "zh-CN"
-    }
-    """.data(using: .utf8)!
+    let store = SettingsStore(userDefaults: defaults)
 
-    defaults.set(legacyPayload, forKey: "notype.settings")
-
-    let loaded = SettingsStore(userDefaults: defaults).load()
-
-    #expect(loaded.resourceID == "legacy-cluster")
+    #expect(store.storedLLMAPIKeyPresence() == nil)
+    store.setHasStoredLLMAPIKey(true)
+    #expect(store.storedLLMAPIKeyPresence() == true)
+    store.clearStoredLLMAPIKeyPresence()
+    #expect(store.storedLLMAPIKeyPresence() == nil)
 }
 
 @Test
-func appSettingsDefaultResourceIDUsesDoubao20Duration() {
-    #expect(AppSettings.defaults.resourceID == "volc.seedasr.sauc.duration")
+func llmDraftRequiresBaseURLAPIKeyAndModel() {
+    #expect(!LLMSettingsDraft(baseURL: "", apiKey: "token", model: "gpt").isConfigured)
+    #expect(!LLMSettingsDraft(baseURL: "https://example.com/v1", apiKey: "", model: "gpt").isConfigured)
+    #expect(LLMSettingsDraft(baseURL: "https://example.com/v1", apiKey: "token", model: "gpt").isConfigured)
 }
 
 @Test
-func appSettingsDefaultDockIconModeIsEnabled() {
-    #expect(AppSettings.defaults.showDockIcon)
-}
+func doubaoAudioRequestMarksFinalFrameInHeader() {
+    let audio = Data([0x01, 0x02, 0x03])
 
-@Test
-func appSettingsDecodeFallsBackToDefaultResourceIDWhenBlank() throws {
-    let payload = """
-    {
-      "appID": "app-id",
-      "resourceID": "",
-      "microphoneID": null,
-      "autoInsert": true,
-      "showDockIcon": false,
-      "historyRetentionDays": 30,
-      "launchAtLogin": false,
-      "hotkey": "optionSpace",
-      "language": "zh-CN"
-    }
-    """.data(using: .utf8)!
+    let regular = DoubaoStreamingASRProvider.makeAudioRequest(audioData: audio, isFinal: false)
+    let final = DoubaoStreamingASRProvider.makeAudioRequest(audioData: audio, isFinal: true)
 
-    let decoded = try JSONDecoder().decode(AppSettings.self, from: payload)
-    #expect(decoded.resourceID == "volc.seedasr.sauc.duration")
+    #expect(regular[1] == 0x20)
+    #expect(final[1] == 0x22)
 }
 
 @Test
@@ -143,33 +137,26 @@ func doubaoWebSocketRequestUsesV2ResourceHeaders() {
     #expect(request.value(forHTTPHeaderField: "X-Api-Access-Key") == "token-value")
     #expect(request.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.seedasr.sauc.duration")
     #expect(request.value(forHTTPHeaderField: "X-Api-Connect-Id") == "connect-id")
-    #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
 }
 
 @Test
-func handshakeProbeBuildsHTTPUpgradeRequestFromWebSocketRequest() throws {
+func fullClientRequestIncludesConfiguredLanguage() throws {
     let config = ASRSessionConfig(
         appID: "123456789",
         accessToken: "token-value",
         resourceID: "volc.seedasr.sauc.duration",
         userID: "host",
-        language: .zhCN,
+        language: .koKR,
         workflow: "audio_in,resample",
         utteranceMode: true
     )
 
-    let webSocketRequest = DoubaoStreamingASRProvider.makeWebSocketRequest(
-        for: config,
-        connectID: "connect-id",
-        userAgent: "NoType/test"
-    )
-    let handshakeRequest = try DoubaoHandshakeProbe.makeHTTPRequest(from: webSocketRequest)
+    let payload = try DoubaoStreamingASRProvider.makeFullClientRequest(for: config, requestID: "request-id")
+    let jsonData = payload.dropFirst(8)
+    let root = try #require(JSONSerialization.jsonObject(with: jsonData) as? [String: Any])
+    let audio = try #require(root["audio"] as? [String: Any])
 
-    #expect(handshakeRequest.url?.absoluteString == "https://openspeech.bytedance.com/api/v3/sauc/bigmodel_async")
-    #expect(handshakeRequest.value(forHTTPHeaderField: "Upgrade") == "websocket")
-    #expect(handshakeRequest.value(forHTTPHeaderField: "Connection") == "Upgrade")
-    #expect(handshakeRequest.value(forHTTPHeaderField: "X-Api-App-Key") == "123456789")
-    #expect(handshakeRequest.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.seedasr.sauc.duration")
+    #expect(audio["language"] as? String == "ko-KR")
 }
 
 @Test
@@ -186,75 +173,26 @@ func pasteboardRestoreOnlyRunsWhenClipboardDidNotChangeAfterFallback() {
 }
 
 @Test
-func fullClientRequestIncludesConfiguredLanguage() throws {
-    let config = ASRSessionConfig(
-        appID: "123456789",
-        accessToken: "token-value",
-        resourceID: "volc.seedasr.sauc.duration",
-        userID: "host",
-        language: .enUS,
-        workflow: "audio_in,resample",
-        utteranceMode: true
+func inputSourceServiceRecognizesCJKLanguagesAndInputSourceMarkers() {
+    #expect(InputSourceService.isCJKLanguage("zh-Hans"))
+    #expect(InputSourceService.isCJKLanguage("ja-JP"))
+    #expect(InputSourceService.isCJKLanguage("ko-KR"))
+    #expect(!InputSourceService.isCJKLanguage("en-US"))
+
+    #expect(
+        InputSourceService.isCJKInputSource(
+            languages: [],
+            inputSourceID: "com.example.input",
+            inputModeID: "com.apple.inputmethod.SCIM.ITABC.pinyin"
+        )
     )
-
-    let payload = try DoubaoStreamingASRProvider.makeFullClientRequest(for: config, requestID: "request-id")
-    let jsonData = payload.dropFirst(8)
-    let root = try #require(JSONSerialization.jsonObject(with: jsonData) as? [String: Any])
-    let audio = try #require(root["audio"] as? [String: Any])
-
-    #expect(audio["language"] as? String == "en-US")
-}
-
-@Test
-func recoverableLaunchAtLoginFailureDoesNotClobberCredentials() {
-    let previous = AppSettings.defaults
-    let requested = AppSettings(
-        appID: "7696528710",
-        resourceID: "volc.seedasr.sauc.duration",
-        microphoneID: nil,
-        autoInsert: true,
-        showDockIcon: true,
-        historyRetentionDays: 30,
-        launchAtLogin: true,
-        hotkey: .optionSpace,
-        language: .zhCN
+    #expect(
+        !InputSourceService.isCJKInputSource(
+            languages: ["en"],
+            inputSourceID: "com.apple.keylayout.US",
+            inputModeID: nil
+        )
     )
-
-    let reconciled = NoTypeAppModel.reconcilingRecoverableSettingFailures(
-        requested: requested,
-        previous: previous,
-        restoreLaunchAtLogin: true
-    )
-
-    #expect(reconciled.appID == requested.appID)
-    #expect(reconciled.resourceID == requested.resourceID)
-    #expect(reconciled.launchAtLogin == previous.launchAtLogin)
-}
-
-@Test
-func recoverableHotkeyFailureDoesNotClobberCredentials() {
-    let previous = AppSettings.defaults
-    let requested = AppSettings(
-        appID: "7696528710",
-        resourceID: "volc.seedasr.sauc.duration",
-        microphoneID: nil,
-        autoInsert: true,
-        showDockIcon: true,
-        historyRetentionDays: 30,
-        launchAtLogin: false,
-        hotkey: .controlSpace,
-        language: .zhCN
-    )
-
-    let reconciled = NoTypeAppModel.reconcilingRecoverableSettingFailures(
-        requested: requested,
-        previous: previous,
-        restoreHotkey: true
-    )
-
-    #expect(reconciled.appID == requested.appID)
-    #expect(reconciled.resourceID == requested.resourceID)
-    #expect(reconciled.hotkey == previous.hotkey)
 }
 
 @Test
@@ -277,6 +215,19 @@ func primaryHotkeyFailureStillThrows() {
             hotkey: .optionSpace
         )
     }
+}
+
+@Test(arguments: [
+    (DictationPhase.idle, NoTypeHotkeyEvent.startDictation),
+    (DictationPhase.failed, NoTypeHotkeyEvent.startDictation),
+    (DictationPhase.inserted, NoTypeHotkeyEvent.startDictation),
+    (DictationPhase.copiedToClipboard, NoTypeHotkeyEvent.startDictation),
+    (DictationPhase.recording, NoTypeHotkeyEvent.stopDictation),
+    (DictationPhase.transcribing, NoTypeHotkeyEvent.cancelDictation),
+    (DictationPhase.refining, NoTypeHotkeyEvent.cancelDictation),
+])
+func primaryHotkeyMapsToExpectedAction(phase: DictationPhase, expected: NoTypeHotkeyEvent) {
+    #expect(NoTypeAppModel.hotkeyAction(for: phase) == expected)
 }
 
 @Test

@@ -26,9 +26,10 @@ struct HUDPanelView: View {
 
     @ViewBuilder
     private var statusPill: some View {
-        Text(statusLine)
+        Text(topStatusLine)
             .font(.system(size: 14, weight: .semibold))
             .foregroundStyle(.white)
+            .lineLimit(1)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
@@ -54,12 +55,10 @@ struct HUDPanelView: View {
                 .frame(maxWidth: .infinity)
 
             hudButton(
-                symbol: model.phase == .processing ? "hourglass" : "checkmark",
+                symbol: model.phase == .recording ? "checkmark" : "hourglass",
                 accent: .white
             ) {
-                if model.phase == .recording {
-                    model.stopDictationFromUI()
-                }
+                model.stopDictationFromUI()
             }
             .disabled(model.phase != .recording)
         }
@@ -81,19 +80,18 @@ struct HUDPanelView: View {
     private var centerIndicator: some View {
         switch model.phase {
         case .recording:
-            WaveformBarsView(isAnimating: isAnimatingBars)
+            WaveformBarsView(level: model.waveformLevel, isAnimating: isAnimatingBars)
                 .frame(height: 20)
-        case .processing:
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.small)
-                    .tint(.white)
-                Text(isChinese ? "处理中" : "Processing")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.88))
-            }
+        case .transcribing:
+            progressIndicator(label: isChinese ? "处理中" : "Processing")
+        case .refining:
+            progressIndicator(label: isChinese ? "处理中" : "Processing")
         case .inserted:
             Label(isChinese ? "已插入" : "Inserted", systemImage: "checkmark.circle.fill")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(Color.white.opacity(0.92))
+        case .copiedToClipboard:
+            Label(isChinese ? "已复制" : "Copied", systemImage: "doc.on.doc.fill")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.92))
         case .failed:
@@ -107,7 +105,18 @@ struct HUDPanelView: View {
                 Text("NoType")
                     .font(.system(size: 11, weight: .medium))
             }
-                .foregroundStyle(Color.white.opacity(0.92))
+            .foregroundStyle(Color.white.opacity(0.92))
+        }
+    }
+
+    private func progressIndicator(label: String) -> some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .controlSize(.small)
+                .tint(.white)
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white.opacity(0.88))
         }
     }
 
@@ -152,30 +161,31 @@ struct HUDPanelView: View {
 
     private var showsStatusPill: Bool {
         switch model.phase {
-        case .recording, .processing:
+        case .recording, .transcribing:
             true
-        case .failed, .inserted, .idle, .onboarding:
+        case .refining, .failed, .inserted, .copiedToClipboard, .idle, .onboarding:
             false
         }
     }
 
     private var isChinese: Bool {
-        model.settings.language == .zhCN
+        model.settings.language.usesChineseCopy
     }
 
-    private var statusLine: String {
+    private var topStatusLine: String {
         switch model.phase {
         case .recording:
-            if model.currentMicrophoneName == "System Default" {
-                return isChinese ? "使用中 Auto-detect 麦克风" : "Using Auto-detect microphone"
-            }
-            return isChinese ? "使用中 \(model.currentMicrophoneName)" : "Using \(model.currentMicrophoneName)"
-        case .processing:
+            return isChinese ? "正在录音" : "Recording"
+        case .transcribing:
             return isChinese ? "正在转写语音" : "Transcribing audio"
+        case .refining:
+            return isChinese ? "正在进行保守纠错" : "Running conservative refinement"
         case .failed:
-            return isChinese ? "听写失败" : "Dictation Failed"
+            return isChinese ? "听写失败" : "Dictation failed"
         case .inserted:
-            return isChinese ? "已插入文本" : "Inserted"
+            return isChinese ? "已粘贴到当前输入框" : "Pasted into the focused field"
+        case .copiedToClipboard:
+            return isChinese ? "已复制到剪贴板" : "Copied to clipboard"
         case .idle, .onboarding:
             return "NoType"
         }
@@ -183,27 +193,29 @@ struct HUDPanelView: View {
 }
 
 private struct WaveformBarsView: View {
+    let level: Double
     let isAnimating: Bool
 
     private let baseHeights: [CGFloat] = [6, 9, 12, 16, 14, 18, 13, 16, 10, 7]
 
     var body: some View {
-        HStack(alignment: .center, spacing: 3) {
-            ForEach(Array(baseHeights.enumerated()), id: \.offset) { index, height in
-                Capsule(style: .continuous)
-                    .fill(index == 4 || index == 5 ? Color.red.opacity(0.95) : Color.white.opacity(0.92))
-                    .frame(width: 3, height: animatedHeight(for: index, base: height))
-                    .animation(
-                        .easeInOut(duration: 0.55)
-                        .repeatForever(autoreverses: true)
-                        .delay(Double(index) * 0.05),
-                        value: isAnimating
-                    )
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isAnimating)) { context in
+            let timestamp = context.date.timeIntervalSinceReferenceDate
+
+            HStack(alignment: .center, spacing: 3) {
+                ForEach(Array(baseHeights.enumerated()), id: \.offset) { index, height in
+                    Capsule(style: .continuous)
+                        .fill(index == 4 || index == 5 ? Color.red.opacity(0.95) : Color.white.opacity(0.92))
+                        .frame(width: 3, height: animatedHeight(for: index, base: height, timestamp: timestamp))
+                }
             }
         }
     }
 
-    private func animatedHeight(for index: Int, base: CGFloat) -> CGFloat {
-        isAnimating ? base : max(6, base * 0.45)
+    private func animatedHeight(for index: Int, base: CGFloat, timestamp: TimeInterval) -> CGFloat {
+        let jitter = 1 + CGFloat(sin(timestamp * 7.5 + Double(index) * 0.65)) * 0.08
+        let scaledLevel = max(0.18, CGFloat(level))
+        let target = max(6, base * (0.45 + scaledLevel * 1.35) * jitter)
+        return isAnimating ? target : max(6, base * 0.45)
     }
 }

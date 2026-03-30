@@ -8,7 +8,7 @@ struct OnboardingView: View {
             Text("Set up NoType")
                 .font(.largeTitle.bold())
 
-            Text("Enable the two macOS permissions NoType needs for dictation and text insertion.")
+            Text("NoType needs Microphone and Accessibility permissions before global hotkey dictation can work.")
                 .foregroundStyle(.secondary)
 
             permissionRow(
@@ -34,7 +34,7 @@ struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
 
                 Button("Refresh Status") {
-                    model.bootstrap()
+                    model.refreshPermissions()
                 }
             }
 

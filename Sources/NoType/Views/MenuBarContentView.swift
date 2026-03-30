@@ -7,80 +7,98 @@ struct MenuBarContentView: View {
     let openSettings: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("NoType")
                         .font(.headline)
-                    Text(statusText)
+                    Text(model.statusLine)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+
                 Spacer()
+
                 Image(systemName: model.menuBarSymbolName)
                     .font(.system(size: 24))
-                    .foregroundStyle(colorForPhase)
+                    .foregroundStyle(iconColor)
             }
 
             if !model.permissionSnapshot.ready {
-                GroupBox("Permissions") {
-                    Text("Microphone and Accessibility access are required before dictation can start.")
-                        .font(.callout)
-                    Button("Open Setup") {
-                        activateAndOpenWindow(id: "onboarding")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-
-            if !model.hasASRCredentials {
-                GroupBox("ASR Setup") {
-                    Text("Add App ID, Resource ID, and Access Token in Settings to connect Doubao ASR.")
-                        .font(.callout)
-                    Button {
-                        openSettingsWindow()
-                    } label: {
-                        Text("Open Settings")
-                    }
-                }
-            }
-
-            HStack {
-                Button(primaryButtonTitle) {
-                    if model.phase == .recording {
-                        model.stopDictationFromUI()
-                    } else {
-                        model.startDictationFromUI()
-                    }
+                Button("Open Setup") {
+                    activateAndOpenWindow(id: "onboarding")
                 }
                 .buttonStyle(.borderedProminent)
-                .disabled(primaryButtonDisabled)
+            }
 
-                if model.phase == .failed {
-                    Button("Retry") {
-                        model.retryLastRecordingFromUI()
+            if model.permissionSnapshot.ready && !model.hasASRCredentials {
+                Text("Missing Doubao credentials")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+
+                Button("Open Settings") {
+                    openSettingsWindow()
+                }
+                .buttonStyle(.borderedProminent)
+            }
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Main Hotkey")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(model.hotkeyDisplayName)
+                    .font(.subheadline.monospaced())
+            }
+
+            if let warning = model.hotkeyWarningMessage {
+                Text(warning)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if let errorMessage = model.errorMessage, model.phase == .failed {
+                Text(errorMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Menu("Language") {
+                ForEach(DictationLanguage.allCases) { language in
+                    Button {
+                        model.selectLanguage(language)
+                    } label: {
+                        Label(language.displayName, systemImage: model.settings.language == language ? "checkmark" : "")
                     }
                 }
+            }
 
-                if model.phase == .recording || model.phase == .processing || model.phase == .failed {
-                    Button("Cancel") {
-                        model.cancelFromUI()
-                    }
+            Menu("LLM Refinement") {
+                Button {
+                    model.setLLMRefinementEnabled(!model.llmRefinementEnabled)
+                } label: {
+                    Label(
+                        model.llmRefinementEnabled ? "Enabled" : "Disabled",
+                        systemImage: model.llmRefinementEnabled ? "checkmark.circle.fill" : "circle"
+                    )
+                }
+
+                Button("Settings…") {
+                    openSettingsWindow()
                 }
             }
 
             Divider()
 
             HStack {
-                Button("History") {
-                    activateAndOpenWindow(id: "history")
-                }
-                Button {
+                Button("Settings…") {
                     openSettingsWindow()
-                } label: {
-                    Text("Settings")
                 }
+
                 Spacer()
+
                 Button("Quit") {
                     NSApp.terminate(nil)
                 }
@@ -90,46 +108,16 @@ struct MenuBarContentView: View {
         .frame(width: 360)
     }
 
-    private var statusText: String {
-        switch model.phase {
-        case .onboarding:
-            "Waiting for permissions"
-        case .idle:
-            "Ready on \(model.settings.hotkey.displayName)"
-        case .recording:
-            "Recording from \(model.currentMicrophoneName)"
-        case .processing:
-            "Processing audio"
-        case .failed:
-            model.errorMessage ?? "Last dictation failed"
-        case .inserted:
-            "Text inserted"
-        }
-    }
-
-    private var primaryButtonTitle: String {
-        model.phase == .recording ? "Stop Dictation" : "Start Dictation"
-    }
-
-    private var primaryButtonDisabled: Bool {
-        switch model.phase {
-        case .processing:
-            true
-        default:
-            !model.permissionSnapshot.ready || !model.hasASRCredentials
-        }
-    }
-
-    private var colorForPhase: Color {
+    private var iconColor: Color {
         switch model.phase {
         case .recording:
             .red
-        case .processing:
+        case .transcribing, .refining:
             .orange
+        case .inserted, .copiedToClipboard:
+            .green
         case .failed:
             .yellow
-        case .inserted:
-            .green
         case .idle, .onboarding:
             .secondary
         }

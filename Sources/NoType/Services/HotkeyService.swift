@@ -1,4 +1,3 @@
-import AppKit
 import Carbon
 import Foundation
 
@@ -30,8 +29,6 @@ final class HotkeyService {
     private var primaryHotKeyRef: EventHotKeyRef?
     private var cancelHotKeyRef: EventHotKeyRef?
     private var phase: DictationPhase = .idle
-
-    init() {}
 
     deinit {
         unregisterHotkeys()
@@ -65,6 +62,7 @@ final class HotkeyService {
             0,
             &cancelHotKeyRef
         )
+
         let result = try Self.registrationResult(
             primaryStatus: primaryStatus,
             cancelStatus: cancelStatus,
@@ -93,14 +91,15 @@ final class HotkeyService {
             GetApplicationEventTarget(),
             { _, eventRef, userData in
                 guard let userData else { return noErr }
-                let hotkeyService = Unmanaged<HotkeyService>.fromOpaque(userData).takeUnretainedValue()
-                return hotkeyService.handle(eventRef: eventRef)
+                let service = Unmanaged<HotkeyService>.fromOpaque(userData).takeUnretainedValue()
+                return service.handle(eventRef: eventRef)
             },
             1,
             &eventSpec,
             userData,
             &eventHandlerRef
         )
+
         guard status == noErr else {
             eventHandlerRef = nil
             throw HotkeyServiceError.eventHandlerInstallFailed(status)
@@ -137,14 +136,7 @@ final class HotkeyService {
 
         switch hotKeyID.id {
         case 1:
-            switch phase {
-            case .recording:
-                eventHandler?(.stopDictation)
-            case .processing:
-                eventHandler?(.cancelDictation)
-            default:
-                eventHandler?(.startDictation)
-            }
+            eventHandler?(NoTypeAppModel.hotkeyAction(for: phase))
         case 2:
             eventHandler?(.cancelDictation)
         default:

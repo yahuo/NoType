@@ -10,7 +10,6 @@ final class DoubaoStreamingASRProvider: NSObject, ASRProvider {
 
     private var urlSession: URLSession?
     private var webSocketTask: URLSessionWebSocketTask?
-    private var config: ASRSessionConfig?
     private var hasStarted = false
     private var hasSentFinalAudio = false
     private var isAwaitingFinalResponse = false
@@ -26,7 +25,6 @@ final class DoubaoStreamingASRProvider: NSObject, ASRProvider {
 
         cancel()
 
-        self.config = config
         sessionRequestID = UUID().uuidString.lowercased()
         latestTranscript = ""
         hasSentFinalAudio = false
@@ -67,8 +65,7 @@ final class DoubaoStreamingASRProvider: NSObject, ASRProvider {
     }
 
     func finish() async throws {
-        guard hasStarted else { return }
-        guard !hasSentFinalAudio else { return }
+        guard hasStarted, !hasSentFinalAudio else { return }
         try await sendAudioFrame(Data(), isFinal: true)
     }
 
@@ -185,15 +182,12 @@ extension DoubaoStreamingASRProvider {
 
         struct Candidate: Decodable {
             struct Utterance: Decodable {
-                let text: String?
                 let definite: Bool?
             }
 
-            let text: String?
             let utterances: [Utterance]?
         }
 
-        let reqid: String?
         let code: Int?
         let message: String?
         let result: ResultPayload?
@@ -266,8 +260,7 @@ extension DoubaoStreamingASRProvider {
         switch metadata.messageType {
         case 0x9:
             let unpacked = try unpackMessage(data)
-            let payload = unpacked.payload
-            let decoded = try JSONDecoder().decode(ServerPayload.self, from: payload)
+            let decoded = try JSONDecoder().decode(ServerPayload.self, from: unpacked.payload)
             return ParsedServerMessage(
                 transcript: decoded.bestTranscript,
                 isDefinite: (unpacked.metadata.sequenceNumber ?? 0) < 0 || decoded.isDefinite,
@@ -348,7 +341,7 @@ extension DoubaoStreamingASRProvider {
         }
 
         guard metadata.compression == 0 else {
-            throw ASRProviderError.transport("Server returned compressed payload, which this MVP does not decode yet.")
+            throw ASRProviderError.transport("Server returned compressed payload, which this app does not decode yet.")
         }
 
         return (metadata, data.subdata(in: payloadStart..<payloadEnd))

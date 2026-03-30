@@ -1,116 +1,65 @@
 import ApplicationServices
 import AppKit
+import Carbon
 import Foundation
+
+enum TextInsertionServiceError: LocalizedError {
+    case pasteCommandSynthesisFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .pasteCommandSynthesisFailed:
+            return "Unable to synthesize the paste command."
+        }
+    }
+}
 
 @MainActor
 final class TextInsertionService {
-    func insert(_ text: String) throws -> DictationTargetContext {
+    private let inputSourceService: InputSourceService
+    private let pasteboard: NSPasteboard
+
+    init(
+        inputSourceService: InputSourceService = InputSourceService(),
+        pasteboard: NSPasteboard = .general
+    ) {
+        self.inputSourceService = inputSourceService
+        self.pasteboard = pasteboard
+    }
+
+    func insert(_ text: String) async throws -> TextInsertionOutcome {
         let context = DictationTargetContext.currentFrontmost()
         guard Self.shouldInsert(text) else {
-            return context
+            return .skipped(context)
         }
 
-        if try directInsert(text) {
-            return context
-        }
-
-        try pasteFallback(text)
-        return context
-    }
-
-    private func directInsert(_ text: String) throws -> Bool {
-        let systemElement = AXUIElementCreateSystemWide()
-        var focusedValue: CFTypeRef?
-        let focusedResult = AXUIElementCopyAttributeValue(
-            systemElement,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedValue
-        )
-
-        guard focusedResult == .success, let focusedElement = focusedValue else {
-            return false
-        }
-
-        let element = focusedElement as! AXUIElement
-
-        var valueSettable = DarwinBoolean(false)
-        let canSetValue = AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &valueSettable)
-        if canSetValue == .success, valueSettable.boolValue {
-            guard
-                let currentValue = copyStringAttribute(kAXValueAttribute as CFString, from: element),
-                let selectedRange = copyRangeAttribute(kAXSelectedTextRangeAttribute as CFString, from: element)
-            else {
-                return false
-            }
-
-            let nsValue = currentValue as NSString
-            let replacementRange = NSRange(location: selectedRange.location, length: selectedRange.length)
-            let updatedValue = nsValue.replacingCharacters(in: replacementRange, with: text)
-
-            let setValueResult = AXUIElementSetAttributeValue(
-                element,
-                kAXValueAttribute as CFString,
-                updatedValue as CFTypeRef
-            )
-            guard setValueResult == .success else {
-                return false
-            }
-
-            var cursor = CFRange(location: replacementRange.location + (text as NSString).length, length: 0)
-            if let value = AXValueCreate(.cfRange, &cursor) {
-                AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, value)
-            }
-            return true
-        }
-
-        var selectedTextSettable = DarwinBoolean(false)
-        let canSetSelectedText = AXUIElementIsAttributeSettable(
-            element,
-            kAXSelectedTextAttribute as CFString,
-            &selectedTextSettable
-        )
-        if canSetSelectedText == .success, selectedTextSettable.boolValue {
-            let result = AXUIElementSetAttributeValue(
-                element,
-                kAXSelectedTextAttribute as CFString,
-                text as CFTypeRef
-            )
-            return result == .success
-        }
-
-        return false
-    }
-
-    private func pasteFallback(_ text: String) throws {
-        let pasteboard = NSPasteboard.general
         let snapshot = PasteboardSnapshot.capture(from: pasteboard)
-
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
         let insertedChangeCount = pasteboard.changeCount
 
-        guard
-            let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: true),
-            let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 9, keyDown: false)
-        else {
-            throw ASRProviderError.transport("Unable to synthesize paste command.")
+        guard Self.hasEditableTextFocus() else {
+            return .copiedToClipboard(context)
         }
 
-        keyDown.flags = .maskCommand
-        keyUp.flags = .maskCommand
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        let inputSourceSession = inputSourceService.prepareForPasteIfNeeded()
+        defer { inputSourceService.restore(inputSourceSession) }
 
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-            guard Self.shouldRestorePasteboard(
-                currentChangeCount: pasteboard.changeCount,
-                insertedChangeCount: insertedChangeCount
-            ) else {
-                return
-            }
+        if inputSourceSession != nil {
+            try? await Task.sleep(for: .milliseconds(80))
+        }
+
+        try postPasteCommand()
+        try await Task.sleep(for: .milliseconds(250))
+
+        if Self.shouldRestorePasteboard(
+            currentChangeCount: pasteboard.changeCount,
+            insertedChangeCount: insertedChangeCount
+        ) {
             snapshot.restore(to: pasteboard)
         }
+
+        return .pasted(context)
     }
 
     nonisolated static func shouldInsert(_ text: String) -> Bool {
@@ -121,25 +70,79 @@ final class TextInsertionService {
         currentChangeCount == insertedChangeCount
     }
 
-    private func copyStringAttribute(_ attribute: CFString, from element: AXUIElement) -> String? {
-        var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
-        guard result == .success else { return nil }
-        return value as? String
+    nonisolated static func hasEditableTextFocus() -> Bool {
+        let systemElement = AXUIElementCreateSystemWide()
+        var focusedValue: CFTypeRef?
+        let focusedResult = AXUIElementCopyAttributeValue(
+            systemElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedValue
+        )
+
+        guard focusedResult == .success, let focusedValue else {
+            return false
+        }
+
+        let focusedElement = focusedValue as! AXUIElement
+
+        if let role = copyStringAttribute(kAXRoleAttribute as CFString, from: focusedElement),
+           editableRoles.contains(role) {
+            return true
+        }
+
+        var settable = DarwinBoolean(false)
+        if AXUIElementIsAttributeSettable(
+            focusedElement,
+            kAXSelectedTextAttribute as CFString,
+            &settable
+        ) == .success, settable.boolValue {
+            return true
+        }
+
+        if AXUIElementIsAttributeSettable(
+            focusedElement,
+            kAXValueAttribute as CFString,
+            &settable
+        ) == .success, settable.boolValue {
+            return true
+        }
+
+        var selectedRange: CFTypeRef?
+        let rangeResult = AXUIElementCopyAttributeValue(
+            focusedElement,
+            kAXSelectedTextRangeAttribute as CFString,
+            &selectedRange
+        )
+        return rangeResult == .success
     }
 
-    private func copyRangeAttribute(_ attribute: CFString, from element: AXUIElement) -> CFRange? {
+    private func postPasteCommand() throws {
+        guard
+            let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
+            let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
+        else {
+            throw TextInsertionServiceError.pasteCommandSynthesisFailed
+        }
+
+        keyDown.flags = .maskCommand
+        keyUp.flags = .maskCommand
+        keyDown.post(tap: .cghidEventTap)
+        keyUp.post(tap: .cghidEventTap)
+    }
+
+    private nonisolated static let editableRoles: Set<String> = [
+        kAXTextAreaRole as String,
+        kAXTextFieldRole as String,
+        kAXComboBoxRole as String,
+        kAXSearchFieldSubrole as String,
+    ]
+
+    private nonisolated static func copyStringAttribute(_ attribute: CFString, from element: AXUIElement) -> String? {
         var value: CFTypeRef?
-        let result = AXUIElementCopyAttributeValue(element, attribute, &value)
-        guard result == .success, let value else {
+        guard AXUIElementCopyAttributeValue(element, attribute, &value) == .success else {
             return nil
         }
-        let axValue = value as! AXValue
-        var range = CFRange()
-        guard AXValueGetValue(axValue, .cfRange, &range) else {
-            return nil
-        }
-        return range
+        return value as? String
     }
 }
 
@@ -161,13 +164,14 @@ private struct PasteboardSnapshot {
     func restore(to pasteboard: NSPasteboard) {
         pasteboard.clearContents()
         guard !items.isEmpty else { return }
-        let recreated = items.map { itemMap -> NSPasteboardItem in
+
+        let restoredItems = items.map { itemValues -> NSPasteboardItem in
             let item = NSPasteboardItem()
-            for (type, data) in itemMap {
+            for (type, data) in itemValues {
                 item.setData(data, forType: type)
             }
             return item
         }
-        pasteboard.writeObjects(recreated)
+        pasteboard.writeObjects(restoredItems)
     }
 }

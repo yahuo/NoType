@@ -1,6 +1,4 @@
-import AVFoundation
-import AudioToolbox
-import CoreAudio
+@preconcurrency import AVFoundation
 import Foundation
 
 final class AudioCaptureService {
@@ -15,16 +13,29 @@ final class AudioCaptureService {
     private var fileHandle: FileHandle?
     private(set) var recordingURL: URL?
     private var chunkHandler: ((Data) -> Void)?
+    private var levelHandler: ((Double) -> Void)?
 
-    func startCapture(microphoneID: String?, onChunk: @escaping (Data) -> Void) throws -> URL {
+    private final class ConversionState: @unchecked Sendable {
+        var didProvideInput = false
+    }
+
+    private final class PCMBufferBox: @unchecked Sendable {
+        let buffer: AVAudioPCMBuffer
+
+        init(buffer: AVAudioPCMBuffer) {
+            self.buffer = buffer
+        }
+    }
+
+    func startCapture(
+        onChunk: @escaping (Data) -> Void,
+        onLevel: @escaping (Double) -> Void
+    ) throws -> URL {
         try stopCapture(flushRemainder: false)
 
         pendingPCM.removeAll()
         chunkHandler = onChunk
-
-        if let microphoneID {
-            try applyInputDevice(uniqueID: microphoneID)
-        }
+        levelHandler = onLevel
 
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("notype-\(UUID().uuidString).pcm")
@@ -64,6 +75,11 @@ final class AudioCaptureService {
         try stopCapture(flushRemainder: true, emitRemainder: false)
     }
 
+    func clearRecording(at url: URL?) {
+        guard let url else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     private func stopCapture(flushRemainder: Bool, emitRemainder: Bool) throws -> StopCaptureResult {
         let activeURL = recordingURL
         var flushedRemainder: Data?
@@ -90,26 +106,14 @@ final class AudioCaptureService {
         fileHandle = nil
         converter = nil
         chunkHandler = nil
+        levelHandler = nil
         recordingURL = nil
         return StopCaptureResult(recordingURL: activeURL, flushedRemainder: flushedRemainder)
     }
 
-    func clearRecording(at url: URL?) {
-        guard let url else { return }
-        try? FileManager.default.removeItem(at: url)
-    }
-
-    func loadRecording(at url: URL) throws -> Data {
-        try Data(contentsOf: url)
-    }
-
-    static func availableInputDevices() -> [AudioInputDevice] {
-        AVCaptureDevice.devices(for: .audio)
-            .map { AudioInputDevice(id: $0.uniqueID, name: $0.localizedName) }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
     private func consume(buffer: AVAudioPCMBuffer, outputFormat: AVAudioFormat) {
+        levelHandler?(Self.rmsLevel(for: buffer))
+
         guard let converter else { return }
 
         let outputCapacity = AVAudioFrameCount(
@@ -120,15 +124,16 @@ final class AudioCaptureService {
             return
         }
 
-        var didProvideInput = false
+        let state = ConversionState()
+        let bufferBox = PCMBufferBox(buffer: buffer)
         let status = converter.convert(to: outputBuffer, error: nil) { _, outStatus in
-            if didProvideInput {
+            if state.didProvideInput {
                 outStatus.pointee = .noDataNow
                 return nil
             }
-            didProvideInput = true
+            state.didProvideInput = true
             outStatus.pointee = .haveData
-            return buffer
+            return bufferBox.buffer
         }
 
         guard status != .error else { return }
@@ -151,57 +156,37 @@ final class AudioCaptureService {
         chunkHandler?(frame)
     }
 
-    private func applyInputDevice(uniqueID: String) throws {
-        guard let audioUnit = engine.inputNode.audioUnit else { return }
-        guard let deviceID = Self.audioDeviceID(forUniqueID: uniqueID) else { return }
+    private static func rmsLevel(for buffer: AVAudioPCMBuffer) -> Double {
+        let frameLength = Int(buffer.frameLength)
+        let channelCount = Int(buffer.format.channelCount)
+        guard frameLength > 0, channelCount > 0 else { return 0 }
 
-        var currentDevice = deviceID
-        let status = AudioUnitSetProperty(
-            audioUnit,
-            kAudioOutputUnitProperty_CurrentDevice,
-            kAudioUnitScope_Global,
-            0,
-            &currentDevice,
-            UInt32(MemoryLayout<AudioDeviceID>.size)
-        )
-
-        guard status == noErr else {
-            throw ASRProviderError.transport("Unable to select microphone (\(status)).")
-        }
-    }
-
-    private static func audioDeviceID(forUniqueID uniqueID: String) -> AudioDeviceID? {
-        var propertyAddress = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDevices,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-
-        var byteCount: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &byteCount) == noErr else {
-            return nil
-        }
-
-        let deviceCount = Int(byteCount) / MemoryLayout<AudioDeviceID>.stride
-        var devices = Array(repeating: AudioDeviceID(), count: deviceCount)
-        guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &propertyAddress, 0, nil, &byteCount, &devices) == noErr else {
-            return nil
-        }
-
-        for device in devices {
-            var uidAddress = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyDeviceUID,
-                mScope: kAudioObjectPropertyScopeGlobal,
-                mElement: kAudioObjectPropertyElementMain
-            )
-            var uidReference: CFString = "" as CFString
-            var uidSize = UInt32(MemoryLayout<CFString>.size)
-            let status = AudioObjectGetPropertyData(device, &uidAddress, 0, nil, &uidSize, &uidReference)
-            if status == noErr, uidReference as String == uniqueID {
-                return device
+        if let channelData = buffer.floatChannelData {
+            var sum: Float = 0
+            for channel in 0..<channelCount {
+                let samples = channelData[channel]
+                for index in 0..<frameLength {
+                    let sample = samples[index]
+                    sum += sample * sample
+                }
             }
+            let meanSquare = sum / Float(frameLength * channelCount)
+            return min(1, max(0, Double(sqrt(meanSquare)) * 3.2))
         }
 
-        return nil
+        if let channelData = buffer.int16ChannelData {
+            var sum = 0.0
+            for channel in 0..<channelCount {
+                let samples = channelData[channel]
+                for index in 0..<frameLength {
+                    let sample = Double(samples[index]) / Double(Int16.max)
+                    sum += sample * sample
+                }
+            }
+            let meanSquare = sum / Double(frameLength * channelCount)
+            return min(1, max(0, sqrt(meanSquare) * 3.2))
+        }
+
+        return 0
     }
 }
