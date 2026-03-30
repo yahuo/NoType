@@ -26,40 +26,15 @@ struct MenuBarContentView: View {
             }
 
             // MARK: Zone 2 — Main Card
-            VStack(spacing: 10) {
-                // Hotkey hero
-                HStack(spacing: 10) {
-                    Image(systemName: "mic.circle")
-                        .font(.system(size: 28))
-                        .foregroundStyle(statusColor)
-                        .frame(width: 40, height: 40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                        )
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.statusLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(model.hotkeyDisplayName)
-                            .font(.subheadline.monospaced())
-                    }
-
-                    Spacer()
-                }
-
-                // Conditional states
+            VStack(spacing: 12) {
+                // Hotkey hero / permission states
                 if !model.permissionSnapshot.ready {
                     Button("Open Setup") {
                         activateAndOpenWindow(id: "onboarding")
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if model.permissionSnapshot.ready && !model.hasASRCredentials {
+                } else if !model.hasASRCredentials {
                     HStack(spacing: 4) {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
@@ -75,6 +50,28 @@ struct MenuBarContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    HStack(spacing: 10) {
+                        Image(systemName: "mic.circle")
+                            .font(.system(size: 36))
+                            .foregroundStyle(statusColor)
+                            .frame(width: 40, height: 40)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(.quaternary)
+                            )
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(model.statusLine)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Text(model.hotkeyDisplayName)
+                                .font(.subheadline.monospaced())
+                        }
+
+                        Spacer()
+                    }
                 }
 
                 if let warning = model.hotkeyWarningMessage {
@@ -104,14 +101,20 @@ struct MenuBarContentView: View {
                             }
                         }
                     } label: {
-                        Text("LANGUAGE")
-                            .font(.caption2.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(.quaternary)
-                            )
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("LANGUAGE")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            Text("\(model.settings.language.displayName) ▾")
+                                .font(.caption)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(.quaternary)
+                        )
                     }
                     .buttonStyle(.plain)
 
@@ -129,14 +132,25 @@ struct MenuBarContentView: View {
                             openSettingsWindow()
                         }
                     } label: {
-                        Text("LLM")
-                            .font(.caption2.weight(.semibold))
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(.quaternary)
-                            )
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("LLM")
+                                .font(.system(size: 9, weight: .medium))
+                                .foregroundStyle(.secondary)
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(model.llmRefinementEnabled ? Color.green : Color.secondary)
+                                    .frame(width: 6, height: 6)
+                                Text("\(model.llmRefinementEnabled ? "On" : "Off") ▾")
+                                    .font(.caption)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(.quaternary)
+                        )
                     }
                     .buttonStyle(.plain)
                 }
@@ -154,6 +168,7 @@ struct MenuBarContentView: View {
                 } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
                         .frame(width: 28, height: 28)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
@@ -169,6 +184,7 @@ struct MenuBarContentView: View {
                 } label: {
                     Image(systemName: "power")
                         .font(.system(size: 14))
+                        .foregroundStyle(.secondary)
                         .frame(width: 28, height: 28)
                         .background(
                             RoundedRectangle(cornerRadius: 8)
