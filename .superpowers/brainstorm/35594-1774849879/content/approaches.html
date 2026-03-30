@@ -1,0 +1,134 @@
+<h2>NoType Popover Redesign — 3 Approaches</h2>
+<p class="subtitle">Click to select the direction you prefer. All approaches keep the same functionality.</p>
+
+<div class="cards">
+  <!-- Approach A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 20px; background: #1a1a1a;">
+      <!-- Mockup A: Compact Status Bar -->
+      <div style="font-family: -apple-system, system-ui, sans-serif; color: #e0e0e0; width: 260px; margin: 0 auto;">
+        <!-- Header row: icon + title + status badge -->
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 14px;">
+          <div style="width: 28px; height: 28px; border-radius: 50%; background: #2a2a2a; display: flex; align-items: center; justify-content: center; font-size: 14px;">🎙</div>
+          <div>
+            <div style="font-size: 13px; font-weight: 600;">NoType</div>
+            <div style="font-size: 10px; color: #888;">⌥ Space</div>
+          </div>
+          <div style="margin-left: auto; font-size: 10px; background: #1e3a1e; color: #4ade80; padding: 2px 8px; border-radius: 10px;">Ready</div>
+        </div>
+        <!-- Inline controls row -->
+        <div style="display: flex; gap: 6px; margin-bottom: 12px;">
+          <div style="flex: 1; background: #2a2a2a; border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: #888;">Lang</span>
+            <span>简体中文 ▾</span>
+          </div>
+          <div style="flex: 1; background: #2a2a2a; border-radius: 6px; padding: 6px 10px; font-size: 11px; display: flex; justify-content: space-between; align-items: center;">
+            <span style="color: #888;">LLM</span>
+            <span style="color: #4ade80;">On ▾</span>
+          </div>
+        </div>
+        <!-- Footer -->
+        <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666; border-top: 1px solid #333; padding-top: 8px;">
+          <span style="cursor: pointer;">Settings</span>
+          <span style="cursor: pointer;">Quit</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Compact Dashboard</h3>
+      <p><strong>Core idea:</strong> Compress everything into 3 tight rows. Header fuses title + hotkey + status into one line. Language and LLM become side-by-side inline pills instead of dropdown menus.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Smallest footprint (~50% shorter)</li><li>Status glanceable at a glance</li><li>Hotkey subtle but visible</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Tight — may feel cramped on first use</li><li>Less room for error/warning messages</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Approach B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 20px; background: #1a1a1a;">
+      <!-- Mockup B: Card Sections -->
+      <div style="font-family: -apple-system, system-ui, sans-serif; color: #e0e0e0; width: 280px; margin: 0 auto;">
+        <!-- Title bar -->
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+          <div style="font-size: 14px; font-weight: 600;">NoType</div>
+          <div style="font-size: 10px; color: #4ade80;">● Ready</div>
+        </div>
+        <!-- Main card area -->
+        <div style="background: #222; border-radius: 10px; padding: 14px; margin-bottom: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 12px;">
+            <div style="width: 36px; height: 36px; border-radius: 10px; background: #333; display: flex; align-items: center; justify-content: center; font-size: 18px;">🎙</div>
+            <div>
+              <div style="font-size: 12px; color: #aaa;">Press to start</div>
+              <div style="font-size: 15px; font-weight: 500; font-family: monospace;">⌥ Space</div>
+            </div>
+          </div>
+          <!-- Two rows of settings -->
+          <div style="display: flex; gap: 8px;">
+            <div style="flex: 1; background: #333; border-radius: 8px; padding: 8px 10px;">
+              <div style="font-size: 9px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px;">Language</div>
+              <div style="font-size: 12px;">简体中文 ▾</div>
+            </div>
+            <div style="flex: 1; background: #333; border-radius: 8px; padding: 8px 10px;">
+              <div style="font-size: 9px; color: #777; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px;">LLM Refinement</div>
+              <div style="font-size: 12px; color: #4ade80;">● Enabled ▾</div>
+            </div>
+          </div>
+        </div>
+        <!-- Footer -->
+        <div style="display: flex; justify-content: space-between; font-size: 11px; color: #666;">
+          <span>⚙ Settings</span>
+          <span>Quit</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Card-Based Groups</h3>
+      <p><strong>Core idea:</strong> Group related info into a visual card. Hotkey is the hero element (it's what you need to know). Language + LLM are side-by-side tiles inside the card. Clear hierarchy through background depth.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Clear visual hierarchy via card grouping</li><li>Hotkey prominent but not overwhelming</li><li>Feels native and polished</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Slightly taller than A</li><li>Card nesting adds visual weight</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Approach C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 20px; background: #1a1a1a;">
+      <!-- Mockup C: Native macOS Menu Style -->
+      <div style="font-family: -apple-system, system-ui, sans-serif; color: #e0e0e0; width: 240px; margin: 0 auto;">
+        <!-- Minimal header -->
+        <div style="text-align: center; margin-bottom: 10px;">
+          <div style="font-size: 22px; margin-bottom: 4px;">🎙</div>
+          <div style="font-size: 13px; font-weight: 600;">NoType</div>
+          <div style="font-size: 10px; color: #4ade80;">Ready · ⌥ Space</div>
+        </div>
+        <div style="border-top: 1px solid #333; margin: 0 -4px;"></div>
+        <!-- Menu items -->
+        <div style="padding: 4px 0;">
+          <div style="padding: 5px 8px; font-size: 12px; display: flex; justify-content: space-between; border-radius: 4px;">
+            <span>Language</span>
+            <span style="color: #888;">简体中文 ›</span>
+          </div>
+          <div style="padding: 5px 8px; font-size: 12px; display: flex; justify-content: space-between; border-radius: 4px;">
+            <span>LLM Refinement</span>
+            <span style="color: #4ade80;">On ›</span>
+          </div>
+        </div>
+        <div style="border-top: 1px solid #333; margin: 0 -4px;"></div>
+        <div style="padding: 4px 0;">
+          <div style="padding: 5px 8px; font-size: 12px; border-radius: 4px;">Settings…</div>
+          <div style="padding: 5px 8px; font-size: 12px; border-radius: 4px;">Quit NoType</div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Native Menu Style</h3>
+      <p><strong>Core idea:</strong> Ditch the "mini app" feel entirely. Centered icon + status, then standard macOS menu rows. Feels like a system utility, not a settings panel. Narrower width.</p>
+      <div class="pros-cons">
+        <div class="pros"><h4>Pros</h4><ul><li>Most familiar to macOS users</li><li>Narrowest — least intrusive</li><li>Zero learning curve</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Less visually distinctive</li><li>Centered icon may feel generic</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
