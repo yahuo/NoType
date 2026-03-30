@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./packaging/AppIcon.iconset/icon_128x128.png" alt="NoType app icon" width="160">
+  <img src="./packaging/assets/icon-concepts/notype-icon-concept.png" alt="NoType app icon" width="160">
 </p>
 
 <h1 align="center">NoType</h1>

@@ -3,6 +3,9 @@
 .superpowers/
 /docs/superpowers/
 /.build
+/dist/
+/packaging/AppIcon.iconset/
+/packaging/NoTypeIcon.icns
 /Packages
 xcuserdata/
 DerivedData/

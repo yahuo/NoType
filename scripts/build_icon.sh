@@ -4,8 +4,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 SOURCE_ICON="$ROOT_DIR/packaging/assets/icon-concepts/notype-icon-concept.png"
-ICONSET_DIR="$ROOT_DIR/packaging/AppIcon.iconset"
-OUTPUT_ICNS="$ROOT_DIR/packaging/NoTypeIcon.icns"
+ICONSET_DIR="${ICONSET_DIR:-$ROOT_DIR/packaging/AppIcon.iconset}"
+OUTPUT_ICNS="${OUTPUT_ICNS:-$ROOT_DIR/packaging/NoTypeIcon.icns}"
 
 if [[ ! -f "$SOURCE_ICON" ]]; then
   echo "Missing source icon: $SOURCE_ICON" >&2
@@ -17,6 +17,7 @@ if ! command -v magick >/dev/null 2>&1; then
   exit 1
 fi
 
+mkdir -p "$(dirname "$OUTPUT_ICNS")"
 rm -rf "$ICONSET_DIR"
 mkdir -p "$ICONSET_DIR"
 
