@@ -57,7 +57,7 @@ actor AIRewriteService {
                         ChatMessage(role: "system", content: Self.rewritePrompt),
                         ChatMessage(role: "user", content: transcript),
                     ],
-                    maxTokens: 1024,
+                    maxTokens: 2048,
                     onPartial: onPartial
                 )
             }
@@ -162,7 +162,7 @@ actor AIRewriteService {
             }
         }
 
-        guard accumulator.sawDone else {
+        guard accumulator.isComplete else {
             throw AIRewriteError.incompleteStream
         }
 
@@ -235,6 +235,11 @@ actor AIRewriteService {
 struct AIRewriteStreamAccumulator {
     private(set) var accumulatedText = ""
     private(set) var sawDone = false
+    private(set) var sawTerminalChoice = false
+
+    var isComplete: Bool {
+        sawDone || sawTerminalChoice
+    }
 
     mutating func consume(line: String) throws -> String? {
         let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -258,6 +263,9 @@ struct AIRewriteStreamAccumulator {
 
         let data = Data(payload.utf8)
         let decoded = try JSONDecoder().decode(ChatCompletionStreamResponse.self, from: data)
+        if decoded.choices.contains(where: { $0.finishReason != nil }) {
+            sawTerminalChoice = true
+        }
         let deltaText = decoded.choices.compactMap(\.delta?.content?.text).joined()
         guard !deltaText.isEmpty else {
             return nil
@@ -306,6 +314,12 @@ private struct ChatCompletionStreamResponse: Decodable {
 
     struct Choice: Decodable {
         let delta: Delta?
+        let finishReason: String?
+
+        enum CodingKeys: String, CodingKey {
+            case delta
+            case finishReason = "finish_reason"
+        }
     }
 
     struct Delta: Decodable {

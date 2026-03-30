@@ -4,8 +4,8 @@ import SwiftUI
 @MainActor
 final class HUDPanelController {
     private var panel: NSPanel?
-    private let baseSize = NSSize(width: 356, height: 132)
-    private let extendedSize = NSSize(width: 356, height: 176)
+    private let baseSize = NSSize(width: 356, height: 84)
+    private let extendedSize = NSSize(width: 356, height: 136)
 
     func attach(to model: NoTypeAppModel) {
         if panel == nil {

@@ -234,6 +234,44 @@ func aiRewriteStreamAccumulatorIgnoresRoleOnlyAndEmptyDeltaEvents() throws {
 }
 
 @Test
+func aiRewriteStreamAccumulatorTreatsFinishReasonAsTerminalWithoutDone() throws {
+    var accumulator = AIRewriteStreamAccumulator()
+
+    let first = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{"content":"1. 修复设置页按钮颜色"}}]}"#
+    )
+    let terminal = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#
+    )
+
+    #expect(first == "1. 修复设置页按钮颜色")
+    #expect(terminal == nil)
+    #expect(accumulator.accumulatedText == "1. 修复设置页按钮颜色")
+    #expect(!accumulator.sawDone)
+    #expect(accumulator.sawTerminalChoice)
+    #expect(accumulator.isComplete)
+}
+
+@Test
+func aiRewriteStreamAccumulatorKeepsPartialOnlyStreamIncomplete() throws {
+    var accumulator = AIRewriteStreamAccumulator()
+
+    let first = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{"content":"先修复设置页按钮颜色"}}]}"#
+    )
+    let second = try accumulator.consume(
+        line: #"data: {"choices":[{"delta":{"content":"，再补回归测试"}}]}"#
+    )
+
+    #expect(first == "先修复设置页按钮颜色")
+    #expect(second == "先修复设置页按钮颜色，再补回归测试")
+    #expect(accumulator.accumulatedText == "先修复设置页按钮颜色，再补回归测试")
+    #expect(!accumulator.sawDone)
+    #expect(!accumulator.sawTerminalChoice)
+    #expect(!accumulator.isComplete)
+}
+
+@Test
 func aiRewriteChatCompletionsURLAppendsEndpointOnlyOnce() {
     #expect(
         AIRewriteService.chatCompletionsURL(from: "https://example.com/v1")?.absoluteString

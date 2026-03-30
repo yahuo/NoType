@@ -6,10 +6,6 @@ struct HUDPanelView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            if showsStatusPill {
-                statusPill
-            }
-
             controlBar
 
             if model.phase == .failed, let errorMessage = model.errorMessage {
@@ -22,33 +18,6 @@ struct HUDPanelView: View {
         .onAppear {
             isAnimatingBars = true
         }
-    }
-
-    @ViewBuilder
-    private var statusPill: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(topStatusLine)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.white.opacity(0.72))
-
-            Text(model.hudDisplayText)
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.white)
-                .lineLimit(2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 22, style: .continuous)
-                .fill(Color.black.opacity(0.84))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.10))
-                )
-        )
-        .shadow(color: .black.opacity(0.22), radius: 22, y: 10)
     }
 
     @ViewBuilder
@@ -166,36 +135,8 @@ struct HUDPanelView: View {
         .shadow(color: .black.opacity(0.18), radius: 16, y: 8)
     }
 
-    private var showsStatusPill: Bool {
-        switch model.phase {
-        case .recording, .transcribing, .refining:
-            true
-        case .failed, .inserted, .copiedToClipboard, .idle, .onboarding:
-            false
-        }
-    }
-
     private var isChinese: Bool {
         model.settings.language.usesChineseCopy
-    }
-
-    private var topStatusLine: String {
-        switch model.phase {
-        case .recording:
-            return isChinese ? "正在录音" : "Recording"
-        case .transcribing:
-            return isChinese ? "正在转写语音" : "Transcribing audio"
-        case .refining:
-            return isChinese ? "正在改写" : "Rewriting"
-        case .failed:
-            return isChinese ? "听写失败" : "Dictation failed"
-        case .inserted:
-            return isChinese ? "已粘贴到当前输入框" : "Pasted into the focused field"
-        case .copiedToClipboard:
-            return isChinese ? "已复制到剪贴板" : "Copied to clipboard"
-        case .idle, .onboarding:
-            return "NoType"
-        }
     }
 }
 
