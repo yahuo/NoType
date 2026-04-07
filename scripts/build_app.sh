@@ -53,6 +53,10 @@ select_codesign_identity() {
   identity_output="$(security find-identity -v -p codesigning 2>/dev/null || true)"
 
   if [[ -n "${NOTYPE_CODESIGN_IDENTITY:-}" ]]; then
+    if [[ "$NOTYPE_CODESIGN_IDENTITY" == "-" ]]; then
+      printf '%s\n' "-"
+      return
+    fi
     resolve_identity_reference "$NOTYPE_CODESIGN_IDENTITY" "$identity_output"
     return
   fi
@@ -87,7 +91,7 @@ select_codesign_identity() {
     return
   fi
 
-  echo "-"
+  printf '%s\n' "-"
 }
 
 trap cleanup EXIT

@@ -22,6 +22,8 @@ jobs:
         run: swift test
 
       - name: Package Experimental Build
+        env:
+          NOTYPE_CODESIGN_IDENTITY: "-"
         run: make package
 
       - name: Publish GitHub Release
