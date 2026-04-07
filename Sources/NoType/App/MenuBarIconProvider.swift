@@ -1,6 +1,7 @@
 import AppKit
 
 /// Generates template `NSImage`s for the menu bar status item.
+@MainActor
 enum MenuBarIconProvider {
 
     /// Idle — calm waveform.
