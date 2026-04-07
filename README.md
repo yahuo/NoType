@@ -67,12 +67,13 @@ NoType 目前处于早期可用阶段：
 - macOS Accessibility / Carbon Hotkey / AVFoundation / Text Input Sources
 - Doubao Streaming ASR WebSocket 协议
 - OpenAI-compatible Chat Completions + SSE streaming
+- Gemini native GenerateContent / streamGenerateContent
 
 ## 系统要求
 
 - macOS 14+
 - 已开通的 Doubao 流式语音识别资源
-- 如果启用 `AI Rewrite`，还需要一个支持 OpenAI-compatible 接口的 LLM 服务
+- 如果启用 `AI Rewrite`，还需要一个已配置好的 OpenAI-compatible 或 Gemini API 服务
 - 允许应用访问：
   - Microphone
   - Accessibility
@@ -157,7 +158,8 @@ open NoType.xcodeproj
 在 `Settings -> AI Rewrite` 中可以配置：
 
 - `Enable AI Rewrite`
-- `API Base URL`
+- `Provider`
+- `API Base URL`（仅 OpenAI-compatible）
 - `API Key`
 - `Model`
 
@@ -166,6 +168,11 @@ open NoType.xcodeproj
 - `AI Rewrite Off`：直接插入 Doubao ASR 的最终结果
 - `AI Rewrite On` 且配置完整：先调用 LLM 改写，再插入最终文本
 - `AI Rewrite On` 但配置不完整：不阻塞主链，继续使用原始转写
+
+目前支持两条 provider 路径：
+
+- `OpenAI-Compatible`：适用于 OpenAI 以及兼容 `chat/completions` 的服务
+- `Gemini`：原生走 Gemini `generateContent` / `streamGenerateContent`
 
 `AI Rewrite` 的目标不是重度润色，而是把口语稿整理成更适合发送和更适合 AI 执行的文本：
 

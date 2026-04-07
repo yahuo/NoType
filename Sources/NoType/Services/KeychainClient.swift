@@ -16,7 +16,11 @@ enum KeychainClientError: LocalizedError {
 }
 
 final class KeychainClient {
-    private let service = "com.notype.app"
+    private let service: String
+
+    init(service: String = "com.notype.app") {
+        self.service = service
+    }
 
     func save(_ value: String, for account: String) throws {
         let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)

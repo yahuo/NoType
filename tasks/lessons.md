@@ -21,3 +21,7 @@
 - 2026-03-30: 改 README 媒体引用时，不要只验证“能不能显示”，还要验证目标渲染器里的对齐效果；Markdown 图片和 HTML `<img>` 在相对路径与居中行为上可能不一致。
 - 2026-03-30: 正常 build/install 不要把可再生成的 iconset、icns 或 dist 产物写回并跟踪在仓库里；源图保留在 repo，生成物走临时目录或忽略规则。
 - 2026-03-31: 语音 rewrite prompt 不能只要求“更自然”或“对 AI 友好”；必须明确把 transcript 当作待编辑文本而不是给模型的任务，并显式禁止回答问题、执行请求或补充原文没有的新内容。
+- 2026-04-07: 给 AI provider 做接入时，不要默认所有厂商都能稳定走同一套 OpenAI 兼容解析；如果用户场景明确涉及 Gemini 这类原生协议差异，优先把 provider 选择显式暴露到设置层，并按 provider 实现和诊断各自的请求/响应链路。
+- 2026-04-07: 做 provider 切换时，不要试图“尽量保留”跨 provider 的模型标识；`gpt-*` 和 `gemini-*` 这类 model ID 通常不能跨后端复用，切换 provider 时应主动重置到新 provider 的默认模型，避免把无效配置静默带过去。
+- 2026-04-07: 接 Gemini 原生 REST 时，不要假设用户只会输入裸模型名；文档里常见 `models/{model}` 形式，拼接 URL 前必须先把 `models/` 和前导 `/` 规范化掉，否则很容易生成 `/models/models/...` 这种隐蔽 404。
+- 2026-04-07: 多 provider 接入不能只拆模型和 URL，不拆凭证；如果 OpenAI-compatible 和 Gemini 共用一个 key 存储槽，provider 切换会立即串用或覆盖对方凭证。至少要按 provider 分开存储，并在切换时切换到对应凭证。

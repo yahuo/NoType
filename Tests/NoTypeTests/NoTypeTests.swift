@@ -50,6 +50,7 @@ func appSettingsDecodeMigratesLegacyClusterField() throws {
 
     #expect(decoded.resourceID == "legacy-cluster")
     #expect(decoded.llmRefinementEnabled)
+    #expect(decoded.llmProvider == .openAICompatible)
 }
 
 @Test
@@ -63,6 +64,7 @@ func settingsStoreRoundTripsRestoredSettings() throws {
         hotkey: .commandShiftSpace,
         language: .jaJP,
         llmRefinementEnabled: true,
+        llmProvider: .openAICompatible,
         llmBaseURL: "https://example.com/v1",
         llmModel: "gpt-test"
     )
@@ -99,9 +101,71 @@ func settingsStoreTracksWhetherLLMAPIKeyExists() {
 
 @Test
 func llmDraftRequiresBaseURLAPIKeyAndModel() {
-    #expect(!LLMSettingsDraft(baseURL: "", apiKey: "token", model: "gpt").isConfigured)
-    #expect(!LLMSettingsDraft(baseURL: "https://example.com/v1", apiKey: "", model: "gpt").isConfigured)
-    #expect(LLMSettingsDraft(baseURL: "https://example.com/v1", apiKey: "token", model: "gpt").isConfigured)
+    #expect(!LLMSettingsDraft(provider: .openAICompatible, baseURL: "", apiKey: "token", model: "gpt").isConfigured)
+    #expect(!LLMSettingsDraft(provider: .openAICompatible, baseURL: "https://example.com/v1", apiKey: "", model: "gpt").isConfigured)
+    #expect(LLMSettingsDraft(provider: .openAICompatible, baseURL: "https://example.com/v1", apiKey: "token", model: "gpt").isConfigured)
+}
+
+@Test
+func geminiDraftRequiresOnlyAPIKeyAndModel() {
+    #expect(!LLMSettingsDraft(provider: .gemini, baseURL: "", apiKey: "", model: "gemini-2.5-flash").isConfigured)
+    #expect(LLMSettingsDraft(provider: .gemini, baseURL: "", apiKey: "token", model: "gemini-2.5-flash").isConfigured)
+    #expect(
+        LLMSettingsDraft(
+            provider: .gemini,
+            baseURL: "https://example.com/ignored",
+            apiKey: "token",
+            model: "gemini-2.5-flash"
+        ).effectiveBaseURL == LLMProvider.gemini.defaultBaseURL
+    )
+}
+
+@MainActor
+@Test
+func switchingLLMProviderResetsModelToNewProviderDefault() {
+    let model = NoTypeAppModel()
+    model.llmSettingsDraft.provider = .openAICompatible
+    model.llmSettingsDraft.baseURL = "https://api.openai.com/v1"
+    model.llmSettingsDraft.model = "gpt-4.1"
+
+    model.selectLLMProvider(.gemini)
+
+    #expect(model.llmSettingsDraft.provider == .gemini)
+    #expect(model.llmSettingsDraft.model == LLMProvider.gemini.defaultModel)
+}
+
+@MainActor
+@Test
+func switchingLLMProviderLoadsProviderScopedAPIKey() throws {
+    let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    let settingsStore = SettingsStore(userDefaults: defaults)
+    let keychain = KeychainClient(service: UUID().uuidString)
+
+    let settings = AppSettings(
+        appID: "app-id",
+        resourceID: "volc.seedasr.sauc.duration",
+        hotkey: .optionSpace,
+        language: .zhCN,
+        llmRefinementEnabled: true,
+        llmProvider: .openAICompatible,
+        llmBaseURL: "https://api.openai.com/v1",
+        llmModel: "gpt-4.1-mini"
+    )
+    try settingsStore.save(settings)
+    try keychain.save("openai-key", for: "llm.api-key.openai-compatible")
+    try keychain.save("gemini-key", for: "llm.api-key.gemini")
+
+    let model = NoTypeAppModel(settingsStore: settingsStore, keychainClient: keychain)
+    model.prepareSettings()
+    #expect(model.llmSettingsDraft.apiKey == "openai-key")
+
+    model.selectLLMProvider(.gemini)
+    #expect(model.llmSettingsDraft.provider == .gemini)
+    #expect(model.llmSettingsDraft.apiKey == "gemini-key")
+
+    model.selectLLMProvider(.openAICompatible)
+    #expect(model.llmSettingsDraft.provider == .openAICompatible)
+    #expect(model.llmSettingsDraft.apiKey == "openai-key")
 }
 
 @Test
@@ -280,6 +344,81 @@ func aiRewriteChatCompletionsURLAppendsEndpointOnlyOnce() {
     #expect(
         AIRewriteService.chatCompletionsURL(from: "https://example.com/v1/chat/completions")?.absoluteString
             == "https://example.com/v1/chat/completions"
+    )
+}
+
+@Test
+func geminiGenerateContentURLBuildsNativeEndpoints() {
+    #expect(
+        AIRewriteService.geminiGenerateContentURL(
+            from: "https://generativelanguage.googleapis.com/v1beta",
+            model: "gemini-2.5-flash",
+            apiKey: "token",
+            stream: false
+        )?.absoluteString
+            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=token"
+    )
+    #expect(
+        AIRewriteService.geminiGenerateContentURL(
+            from: "https://generativelanguage.googleapis.com/v1beta",
+            model: "models/gemini-2.5-flash",
+            apiKey: "token",
+            stream: false
+        )?.absoluteString
+            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=token"
+    )
+    #expect(
+        AIRewriteService.geminiGenerateContentURL(
+            from: "https://generativelanguage.googleapis.com/v1beta",
+            model: "/models/gemini-2.5-flash",
+            apiKey: "token",
+            stream: true
+        )?.absoluteString
+            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=token"
+    )
+}
+
+@Test
+func geminiModelNormalizationStripsModelsPrefix() {
+    #expect(AIRewriteService.normalizeGeminiModelID("gemini-2.5-flash") == "gemini-2.5-flash")
+    #expect(AIRewriteService.normalizeGeminiModelID("models/gemini-2.5-flash") == "gemini-2.5-flash")
+    #expect(AIRewriteService.normalizeGeminiModelID("/models/gemini-2.5-flash") == "gemini-2.5-flash")
+    #expect(AIRewriteService.normalizeGeminiModelID(" /models/gemini-2.5-flash/ ") == "gemini-2.5-flash")
+}
+
+@Test
+func geminiRewriteStreamAccumulatorBuildsPartialTextFromNativeChunks() throws {
+    var accumulator = GeminiRewriteStreamAccumulator()
+
+    let first = try accumulator.consume(
+        line: #"data: {"candidates":[{"content":{"parts":[{"text":"你好"}]}}]}"#
+    )
+    let second = try accumulator.consume(
+        line: #"data: {"candidates":[{"content":{"parts":[{"text":"，世界"}]},"finishReason":"STOP"}]}"#
+    )
+
+    #expect(first == "你好")
+    #expect(second == "你好，世界")
+    #expect(accumulator.accumulatedText == "你好，世界")
+    #expect(accumulator.sawTerminalCandidate)
+    #expect(accumulator.isComplete)
+}
+
+@Test
+func geminiRewriteURLUsesNormalizedModelInPath() {
+    #expect(
+        AIRewriteService.geminiGenerateContentURL(
+            from: "https://generativelanguage.googleapis.com/v1beta",
+            model: "gemini-2.5-flash",
+            apiKey: "token",
+            stream: false
+        )?.absoluteString
+            == AIRewriteService.geminiGenerateContentURL(
+                from: "https://generativelanguage.googleapis.com/v1beta",
+                model: "models/gemini-2.5-flash",
+                apiKey: "token",
+                stream: false
+            )?.absoluteString
     )
 }
 

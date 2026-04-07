@@ -33,14 +33,13 @@ final class NoTypeAppModel: ObservableObject {
     private let hudController: HUDPanelController
     private let providerFactory: () -> ASRProvider
     private let doubaoAccessTokenAccount = "doubao.access-token"
-    private let llmAPIKeyAccount = "llm.api-key"
+    private let legacyLLMAPIKeyAccount = "llm.api-key"
 
     private var asrProvider: ASRProvider?
     private var hasLoadedAccessToken = false
     private var hasEditedAccessToken = false
     private var isInternallyUpdatingAccessToken = false
     private var storedAccessTokenPresence: Bool?
-    private var hasStoredLLMAPIKey: Bool?
     private var feedbackTask: Task<Void, Never>?
     private var completionTask: Task<Void, Never>?
     private var pendingRewritePreviewTask: Task<Void, Never>?
@@ -72,7 +71,6 @@ final class NoTypeAppModel: ObservableObject {
         let settings = settingsStore.load()
         self.settings = settings
         storedAccessTokenPresence = settingsStore.storedAccessTokenPresence()
-        hasStoredLLMAPIKey = settingsStore.storedLLMAPIKeyPresence()
         permissionSnapshot = PermissionSnapshot(
             microphoneAuthorized: false,
             accessibilityAuthorized: false
@@ -109,7 +107,7 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     var llmConfigured: Bool {
-        settings.llmConfiguredWithoutAPIKey && (hasStoredLLMAPIKey ?? false)
+        settings.llmConfiguredWithoutAPIKey && providerHasStoredLLMAPIKey(settings.llmProvider)
     }
 
     var hasASRCredentials: Bool {
@@ -256,6 +254,31 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
+    func selectLLMProvider(_ provider: LLMProvider) {
+        guard llmSettingsDraft.provider != provider else { return }
+
+        let previousProvider = llmSettingsDraft.provider
+        let previousBaseURL = llmSettingsDraft.baseURL.trimmed
+
+        llmSettingsDraft.provider = provider
+
+        if previousBaseURL.isEmpty || previousBaseURL == previousProvider.defaultBaseURL {
+            llmSettingsDraft.baseURL = provider.defaultBaseURL
+        }
+
+        // Model IDs are provider-specific. Reset on provider switch so we never
+        // carry an invalid `gpt-*`/`gemini-*` identifier across backends.
+        llmSettingsDraft.model = provider.defaultModel
+
+        do {
+            llmSettingsDraft.apiKey = try readLLMAPIKey(for: provider)
+            llmSettingsErrorMessage = nil
+        } catch {
+            llmSettingsDraft.apiKey = ""
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+    }
+
     func prepareSettings() {
         llmSettingsStatusMessage = nil
         llmSettingsErrorMessage = nil
@@ -268,7 +291,7 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         do {
-            let apiKey = try keychainClient.read(account: llmAPIKeyAccount)
+            let apiKey = try readLLMAPIKey(for: settings.llmProvider)
             llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: apiKey)
         } catch {
             llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: "")
@@ -282,10 +305,11 @@ final class NoTypeAppModel: ObservableObject {
 
         let previousSettings = settingsStore.load()
         let previousAccessTokenPresence = settingsStore.storedAccessTokenPresence()
-        let previousLLMAPIKeyPresence = settingsStore.storedLLMAPIKeyPresence()
+        let previousLLMAPIKey = (try? readLLMAPIKey(for: previousSettings.llmProvider)) ?? ""
 
         settings.appID = settings.appID.trimmed
         settings.resourceID = settings.resourceID.trimmed
+        settings.llmProvider = llmSettingsDraft.provider
         settings.llmBaseURL = llmSettingsDraft.baseURL.trimmed
         settings.llmModel = llmSettingsDraft.model.trimmed
 
@@ -310,15 +334,12 @@ final class NoTypeAppModel: ObservableObject {
         do {
             try settingsStore.save(persistedSettings)
             try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
-            try keychainClient.save(llmSettingsDraft.apiKey, for: llmAPIKeyAccount)
+            try saveLLMAPIKey(llmSettingsDraft.apiKey, for: llmSettingsDraft.provider)
 
             let hasToken = !accessToken.trimmed.isEmpty
-            let hasLLMAPIKey = !llmSettingsDraft.apiKey.trimmed.isEmpty
             settingsStore.setHasStoredAccessToken(hasToken)
-            settingsStore.setHasStoredLLMAPIKey(hasLLMAPIKey)
 
             storedAccessTokenPresence = hasToken
-            hasStoredLLMAPIKey = hasLLMAPIKey
             hasEditedAccessToken = false
             settings = persistedSettings
             llmSettingsDraft = LLMSettingsDraft(settings: persistedSettings, apiKey: llmSettingsDraft.apiKey)
@@ -344,13 +365,8 @@ final class NoTypeAppModel: ObservableObject {
             } else {
                 settingsStore.clearStoredAccessTokenPresence()
             }
-            if let previousLLMAPIKeyPresence {
-                settingsStore.setHasStoredLLMAPIKey(previousLLMAPIKeyPresence)
-            } else {
-                settingsStore.clearStoredLLMAPIKeyPresence()
-            }
             storedAccessTokenPresence = previousAccessTokenPresence
-            hasStoredLLMAPIKey = previousLLMAPIKeyPresence
+            try? saveLLMAPIKey(previousLLMAPIKey, for: previousSettings.llmProvider)
             hotkeyWarningMessage = nil
             llmSettingsErrorMessage = error.localizedDescription
         }
@@ -600,7 +616,7 @@ final class NoTypeAppModel: ObservableObject {
         guard settings.llmConfiguredWithoutAPIKey else { return nil }
 
         do {
-            let apiKey = try keychainClient.read(account: llmAPIKeyAccount)
+            let apiKey = try readLLMAPIKey(for: settings.llmProvider)
             let draft = LLMSettingsDraft(settings: settings, apiKey: apiKey)
             return draft.isConfigured ? draft : nil
         } catch {
@@ -703,6 +719,46 @@ final class NoTypeAppModel: ObservableObject {
         hasLoadedAccessToken = true
         hasEditedAccessToken = markAsEdited
         storedAccessTokenPresence = !value.trimmed.isEmpty
+    }
+
+    private func llmAPIKeyAccount(for provider: LLMProvider) -> String {
+        switch provider {
+        case .openAICompatible:
+            "llm.api-key.openai-compatible"
+        case .gemini:
+            "llm.api-key.gemini"
+        }
+    }
+
+    private func readLLMAPIKey(for provider: LLMProvider) throws -> String {
+        let providerKey = try keychainClient.read(account: llmAPIKeyAccount(for: provider))
+        guard providerKey.trimmed.isEmpty else {
+            return providerKey
+        }
+
+        guard provider == .openAICompatible else {
+            return ""
+        }
+
+        return try keychainClient.read(account: legacyLLMAPIKeyAccount)
+    }
+
+    private func saveLLMAPIKey(_ value: String, for provider: LLMProvider) throws {
+        try keychainClient.save(value, for: llmAPIKeyAccount(for: provider))
+
+        // The pre-provider build stored only the OpenAI-compatible key here.
+        // Once that provider is saved through the new flow, migrate away from
+        // the shared slot so clearing the key actually stays cleared.
+        if provider == .openAICompatible {
+            keychainClient.delete(account: legacyLLMAPIKeyAccount)
+        }
+    }
+
+    private func providerHasStoredLLMAPIKey(_ provider: LLMProvider) -> Bool {
+        guard let apiKey = try? readLLMAPIKey(for: provider) else {
+            return false
+        }
+        return !apiKey.trimmed.isEmpty
     }
 
     private func loadAccessTokenIfNeeded() throws -> String {

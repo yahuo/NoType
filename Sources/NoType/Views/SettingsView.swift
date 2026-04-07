@@ -43,14 +43,33 @@ struct SettingsView: View {
                     )
                 )
 
-                TextField(
-                    "API Base URL",
-                    text: Binding(
-                        get: { model.llmSettingsDraft.baseURL },
-                        set: { model.llmSettingsDraft.baseURL = $0 }
+                Picker(
+                    "Provider",
+                    selection: Binding(
+                        get: { model.llmSettingsDraft.provider },
+                        set: { model.selectLLMProvider($0) }
                     )
-                )
-                .textFieldStyle(.roundedBorder)
+                ) {
+                    ForEach(LLMProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+
+                if model.llmSettingsDraft.provider.requiresBaseURL {
+                    TextField(
+                        "API Base URL",
+                        text: Binding(
+                            get: { model.llmSettingsDraft.baseURL },
+                            set: { model.llmSettingsDraft.baseURL = $0 }
+                        )
+                    )
+                    .textFieldStyle(.roundedBorder)
+                } else {
+                    LabeledContent("API Endpoint") {
+                        Text(model.llmSettingsDraft.provider.defaultBaseURL)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 
                 HStack(spacing: 8) {
                     TextField(
@@ -77,7 +96,11 @@ struct SettingsView: View {
                 )
                 .textFieldStyle(.roundedBorder)
 
-                Text("API Key is stored in Keychain. Clearing the field and saving removes it completely.")
+                Text(
+                    model.llmSettingsDraft.provider == .gemini
+                        ? "Gemini uses the native Gemini API endpoint. API Key is stored in Keychain."
+                        : "API Key is stored in Keychain. Clearing the field and saving removes it completely."
+                )
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
