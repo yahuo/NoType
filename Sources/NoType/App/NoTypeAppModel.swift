@@ -372,7 +372,31 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
-    func testLLMSettings() async {
+    func testASRConnection() async {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+        isTestingLLMSettings = true
+        defer { isTestingLLMSettings = false }
+
+        do {
+            guard let config = try currentASRSessionConfig() else {
+                llmSettingsErrorMessage = localizedText(
+                    zh: "请先填写 App ID、Resource ID 和 Access Token。",
+                    en: "Fill in App ID, Resource ID, and Access Token first."
+                )
+                return
+            }
+            try await DoubaoStreamingASRProvider.testConnection(config: config)
+            llmSettingsStatusMessage = localizedText(
+                zh: "语音识别连接测试成功。",
+                en: "Speech connection test passed."
+            )
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+    }
+
+    func testAIRewriteConnection() async {
         llmSettingsStatusMessage = nil
         llmSettingsErrorMessage = nil
         isTestingLLMSettings = true
@@ -380,7 +404,10 @@ final class NoTypeAppModel: ObservableObject {
 
         do {
             try await aiRewriteService.testConnection(using: llmSettingsDraft)
-            llmSettingsStatusMessage = localizedText(zh: "AI Rewrite 连接测试成功。", en: "AI Rewrite connection test passed.")
+            llmSettingsStatusMessage = localizedText(
+                zh: "AI Rewrite 连接测试成功。",
+                en: "AI Rewrite connection test passed."
+            )
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }

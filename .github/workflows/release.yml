@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ImageMagick
+        run: brew install imagemagick
+
+      - name: Swift Test
+        run: swift test
+
+      - name: Package Experimental Build
+        run: make package
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/release/* \
+            --generate-notes \
+            --title "NoType ${GITHUB_REF_NAME#v}"

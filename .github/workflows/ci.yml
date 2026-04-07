@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ImageMagick
+        run: brew install imagemagick
+
+      - name: Swift Test
+        run: swift test
+
+      - name: Package Experimental Build
+        run: make package
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: notype-macos-build
+          path: dist/release/*
+          if-no-files-found: error

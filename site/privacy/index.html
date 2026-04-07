@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoType 隐私说明</title>
+    <meta name="description" content="NoType 的权限用途、凭证存储方式和第三方服务说明。">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-shell">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 4a3.75 3.75 0 0 1 3.75 3.75v4.5a3.75 3.75 0 1 1-7.5 0v-4.5A3.75 3.75 0 0 1 12 4Z" fill="currentColor"/>
+              <path d="M5.75 11.5a.75.75 0 0 1 .75.75 5.5 5.5 0 1 0 11 0 .75.75 0 0 1 1.5 0 7 7 0 0 1-6.25 6.95V22a.75.75 0 0 1-1.5 0v-2.8A7 7 0 0 1 5 12.25a.75.75 0 0 1 .75-.75Z" fill="currentColor"/>
+            </svg>
+          </span>
+          <span>NoType</span>
+        </a>
+        <nav class="site-nav">
+          <a href="/download/">下载</a>
+          <a href="/docs/">文档</a>
+          <a href="/privacy/">隐私</a>
+          <a href="https://github.com/yahuo/NoType" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      <div class="site-shell">
+        <span class="eyebrow">Privacy</span>
+        <h1>隐私说明</h1>
+        <p class="lead">NoType 本身是一个本地运行的 macOS 菜单栏应用，但它会把音频或文本发送给你自行配置的第三方服务，因此需要你了解数据流向。</p>
+
+        <section class="grid two-column" style="margin-top: 24px;">
+          <article class="panel card">
+            <h3>本地权限</h3>
+            <ul class="list">
+              <li>`Microphone`：用于采集录音音频</li>
+              <li>`Accessibility`：用于把文本粘贴回当前输入框</li>
+            </ul>
+          </article>
+
+          <article class="panel card">
+            <h3>本地存储</h3>
+            <ul class="list">
+              <li>`Access Token` 和 API key 等敏感凭证保存在 macOS Keychain</li>
+              <li>其他设置保存在本地 `UserDefaults`</li>
+            </ul>
+          </article>
+        </section>
+
+        <section class="section">
+          <div class="panel doc-block">
+            <h2>第三方服务</h2>
+            <p>NoType 不自带语音识别服务和 AI 服务。你需要自行配置并承担这些服务的数据处理结果。</p>
+            <ul class="list">
+              <li>语音识别：当前主链路使用 Doubao Streaming ASR</li>
+              <li>AI Rewrite：可选，支持 OpenAI-compatible 或 Gemini provider</li>
+            </ul>
+            <p>是否发送数据、发送到哪里、使用哪种模型，都由你的本地设置决定。</p>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="callout">
+            <h2>建议</h2>
+            <p>如果你准备把 NoType 发给其他用户使用，建议在 GitHub Releases 和官网同时明确说明两件事：当前构建未经过 Apple notarization，且应用本地运行时会把语音和改写请求发送到用户自己配置的服务端。</p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-shell">
+        <span>NoType 隐私说明</span>
+        <div class="footer-links">
+          <a href="/">首页</a>
+          <a href="/download/">下载</a>
+          <a href="/docs/">文档</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

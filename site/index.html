@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoType | macOS 菜单栏语音输入</title>
+    <meta
+      name="description"
+      content="NoType 是一个面向 macOS 的菜单栏语音输入应用。按下快捷键，说话，文字回到你当前聚焦的输入框里。"
+    >
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-shell">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 4a3.75 3.75 0 0 1 3.75 3.75v4.5a3.75 3.75 0 1 1-7.5 0v-4.5A3.75 3.75 0 0 1 12 4Z" fill="currentColor"/>
+              <path d="M5.75 11.5a.75.75 0 0 1 .75.75 5.5 5.5 0 1 0 11 0 .75.75 0 0 1 1.5 0 7 7 0 0 1-6.25 6.95V22a.75.75 0 0 1-1.5 0v-2.8A7 7 0 0 1 5 12.25a.75.75 0 0 1 .75-.75Z" fill="currentColor"/>
+            </svg>
+          </span>
+          <span>NoType</span>
+        </a>
+        <nav class="site-nav">
+          <a href="/download/">下载</a>
+          <a href="/docs/">文档</a>
+          <a href="/privacy/">隐私</a>
+          <a href="https://github.com/yahuo/NoType" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      <section class="hero">
+        <div class="site-shell hero-grid">
+          <div class="panel hero-copy">
+            <span class="eyebrow">macOS 14+ 菜单栏语音输入</span>
+            <h1>按下快捷键，说话，文字回到你刚才正在输入的地方。</h1>
+            <p class="lead">
+              NoType 把语音输入缩成一个更接近桌面工作流的动作。它不抢桌面，不需要你切到另一个转写工具，也不需要手动复制粘贴。
+            </p>
+            <div class="actions">
+              <a class="button" href="https://github.com/yahuo/NoType/releases/latest" target="_blank" rel="noreferrer">下载实验版</a>
+              <a class="button-secondary" href="/docs/">查看安装与配置</a>
+            </div>
+            <div class="meta">
+              <span>默认快捷键：Option + Space</span>
+              <span>识别引擎：Doubao Streaming ASR</span>
+              <span>当前分发：Experimental build</span>
+            </div>
+          </div>
+
+          <div class="panel hero-visual">
+            <div class="visual-card">
+              <span class="floating">Menu bar only</span>
+              <div class="transcript">
+                <strong>Live transcript</strong>
+                <div class="pulse-line"></div>
+                <p>我晚点把本周发布计划整理成 issue，先把官网、下载页和实验性二进制分发链路补齐。</p>
+              </div>
+              <div class="transcript">
+                <strong>AI Rewrite</strong>
+                <p>本周先补官网、下载页和未 notarize 的安装说明，再把首次授权步骤写清楚。</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="site-shell">
+          <h2>为什么用 NoType</h2>
+          <div class="grid features">
+            <article class="card">
+              <h3>不离开当前输入场景</h3>
+              <p>在编辑器、聊天框、表单、笔记应用里按下全局快捷键，结束录音后内容直接回到当前焦点。</p>
+            </article>
+            <article class="card">
+              <h3>实时转写，不是事后整理</h3>
+              <p>HUD 会在录音和转写阶段展示实时文本，让你知道当前识别到了什么。</p>
+            </article>
+            <article class="card">
+              <h3>为桌面工作流设计</h3>
+              <p>通过剪贴板和粘贴注入文本，对非原生编辑器更稳，并在 CJK 输入法下自动处理 ASCII 切换和恢复。</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="site-shell">
+          <h2>当前已经能做什么</h2>
+          <div class="two-column">
+            <div class="card section-copy">
+              <h3>主链路</h3>
+              <ul class="list">
+                <li>菜单栏常驻，默认只以菜单栏应用形式运行</li>
+                <li>全局热键启动和结束录音，`Option + Esc` 可取消</li>
+                <li>Doubao Streaming ASR 支持中英日韩多语言</li>
+                <li>在检测到可编辑焦点时，自动把结果粘贴回原输入框</li>
+              </ul>
+            </div>
+            <div class="card section-copy">
+              <h3>增强能力</h3>
+              <ul class="list">
+                <li>可选 `AI Rewrite`，把口语稿整理成更适合发送或交给 AI 的文本</li>
+                <li>没有可编辑焦点时，不强行注入，而是把结果保留到剪贴板</li>
+                <li>支持在中文、日文、韩文输入法场景下做临时 ASCII 切换</li>
+                <li>所有配置与打包脚本都在仓库里，便于继续二开</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="site-shell">
+          <div class="callout">
+            <h2>当前适合谁</h2>
+              <p>如果你已经在 macOS 上做大量文字输入，希望语音输入像一个全局快捷键动作，而不是一个单独的“转写应用”，NoType 的方向就是为这个场景做的。当前下载版本是实验性构建，首次安装需要手动放行。</p>
+            <div class="actions">
+              <a class="button" href="/download/">查看下载与安装</a>
+              <a class="button-secondary" href="https://github.com/yahuo/NoType" target="_blank" rel="noreferrer">查看源码</a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-shell">
+        <span>NoType · Open source macOS dictation tool</span>
+        <div class="footer-links">
+          <a href="/download/">下载</a>
+          <a href="/docs/">文档</a>
+          <a href="/privacy/">隐私</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

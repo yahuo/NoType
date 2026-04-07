@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoType 文档 | 安装、权限与配置</title>
+    <meta name="description" content="NoType 的安装、权限授权、Doubao 配置和 AI Rewrite 配置说明。">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-shell">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 4a3.75 3.75 0 0 1 3.75 3.75v4.5a3.75 3.75 0 1 1-7.5 0v-4.5A3.75 3.75 0 0 1 12 4Z" fill="currentColor"/>
+              <path d="M5.75 11.5a.75.75 0 0 1 .75.75 5.5 5.5 0 1 0 11 0 .75.75 0 0 1 1.5 0 7 7 0 0 1-6.25 6.95V22a.75.75 0 0 1-1.5 0v-2.8A7 7 0 0 1 5 12.25a.75.75 0 0 1 .75-.75Z" fill="currentColor"/>
+            </svg>
+          </span>
+          <span>NoType</span>
+        </a>
+        <nav class="site-nav">
+          <a href="/download/">下载</a>
+          <a href="/docs/">文档</a>
+          <a href="/privacy/">隐私</a>
+          <a href="https://github.com/yahuo/NoType" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      <div class="site-shell">
+        <span class="eyebrow">Documentation</span>
+        <h1>安装与配置</h1>
+        <p class="lead">NoType 当前是一款面向 macOS 14+ 的菜单栏应用。当前公开下载的是未 notarize 的实验性构建，第一次使用时除了权限授权和配置外，还需要手动放行应用。</p>
+
+        <div class="docs-grid">
+          <aside class="panel side-nav">
+            <ul>
+              <li><a href="#install">安装</a></li>
+              <li><a href="#permissions">权限授权</a></li>
+              <li><a href="#doubao">Doubao 配置</a></li>
+              <li><a href="#rewrite">AI Rewrite</a></li>
+              <li><a href="#workflow">使用流程</a></li>
+              <li><a href="#troubleshooting">常见问题</a></li>
+            </ul>
+          </aside>
+
+          <div>
+            <section class="panel doc-block" id="install">
+              <h2>安装</h2>
+              <ol class="list">
+                <li>打开下载页，进入最新 GitHub Release。</li>
+                <li>下载 `.dmg` 并把 `NoType.app` 拖入 `/Applications`。</li>
+                <li>首次双击时，如果 macOS 提示无法验证开发者，先不要删除应用。</li>
+                <li>到 `系统设置 -> 隐私与安全性` 里选择“仍要打开”，或在 Finder 中对应用执行 `Open`。</li>
+                <li>完成放行后，应用会出现在菜单栏。</li>
+              </ol>
+            </section>
+
+            <section class="panel doc-block" id="permissions">
+              <h2>权限授权</h2>
+              <p>NoType 依赖两个系统权限：</p>
+              <ul class="list">
+                <li>`Microphone`：录制语音</li>
+                <li>`Accessibility`：把转写结果粘贴回当前输入框</li>
+              </ul>
+              <p>如果 `Accessibility` 没有授权，NoType 可以继续完成转写，但无法稳定把文本注入到当前应用里。</p>
+            </section>
+
+            <section class="panel doc-block" id="doubao">
+              <h2>Doubao 配置</h2>
+              <p>在 `Settings` 里填写下面的字段：</p>
+              <ul class="list">
+                <li>`App ID`</li>
+                <li>`Resource ID`</li>
+                <li>`Access Token`</li>
+              </ul>
+              <p>`Access Token` 会保存在 macOS Keychain，其他设置保存在本地 `UserDefaults`。</p>
+            </section>
+
+            <section class="panel doc-block" id="rewrite">
+              <h2>AI Rewrite</h2>
+              <p>NoType 支持把口语稿整理成更适合发送或交给 AI 的文本。这个能力是可选的，不影响主转写链路。</p>
+              <ul class="list">
+                <li>`AI Rewrite Off`：直接插入 ASR 最终结果</li>
+                <li>`AI Rewrite On` 且配置完整：先改写，再插入</li>
+                <li>`AI Rewrite On` 但配置不完整：回退到原始转写</li>
+              </ul>
+              <p>当前支持两条 provider 路径：`OpenAI-Compatible` 和 `Gemini`。</p>
+            </section>
+
+            <section class="panel doc-block" id="workflow">
+              <h2>使用流程</h2>
+              <ol class="list">
+                <li>在任意可输入区域聚焦。</li>
+                <li>按下默认快捷键 `Option + Space` 开始录音。</li>
+                <li>再次按下同一快捷键结束录音，或按 `Option + Esc` 取消。</li>
+                <li>Doubao 返回最终文本后，NoType 会尝试把内容粘贴回当前焦点。</li>
+                <li>如果未检测到可编辑焦点，结果会保留在剪贴板里，供手动粘贴。</li>
+              </ol>
+            </section>
+
+            <section class="panel doc-block" id="troubleshooting">
+              <h2>常见问题</h2>
+              <h3>按快捷键没反应</h3>
+              <p>先确认 NoType 正在菜单栏运行，并且 `Accessibility` 已授权。</p>
+
+              <h3>应用一打开就被 macOS 拦截</h3>
+              <p>这是当前实验性构建的预期行为，因为它还没有经过 Apple notarization。按安装步骤手动放行即可。</p>
+
+              <h3>能转写但没插入到当前应用</h3>
+              <p>通常是当前应用焦点不可编辑，或 `Accessibility` 权限还没有生效。</p>
+
+              <h3>打开了 AI Rewrite 但效果没变化</h3>
+              <p>检查 provider、API key、model 是否已经填完整。配置缺失时，NoType 会继续使用原始转写结果，不会阻塞主链。</p>
+
+              <div class="code">如果你更偏向开发者视角，可以直接查看仓库里的 README 和 scripts/ 下的打包脚本。</div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-shell">
+        <span>NoType 文档</span>
+        <div class="footer-links">
+          <a href="/">首页</a>
+          <a href="/download/">下载</a>
+          <a href="/privacy/">隐私</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -131,7 +131,7 @@ open NoType.xcodeproj
 4. 选择你的开发团队。
 5. Run 或 Archive。
 
-本地开发通常使用 `Apple Development` 签名即可；如果要分发给其他机器，需要补全 `Developer ID` 和 notarization 流程。
+本地开发通常使用 `Apple Development` 签名即可。如果你暂时不加入付费 Apple Developer Program，也可以生成实验性二进制给他人试用，但这类构建没有 `Developer ID` 和 notarization，首次安装时需要用户手动绕过 Gatekeeper。
 
 ## 配置 Doubao ASR
 
@@ -201,6 +201,20 @@ open NoType.xcodeproj
 swift test
 make build
 ```
+
+如果要生成发布产物：
+
+```bash
+make package
+```
+
+如果你后面加入了付费 Apple Developer Program，并且已经配置好 `Developer ID` 和 `notarytool` keychain profile，可以直接跑完整 notarization 流程：
+
+```bash
+NOTYPE_NOTARY_PROFILE=AC_NOTARY make notarize
+```
+
+当前默认的实验性分发说明见 [docs/release.md](./docs/release.md)。官网静态站位于 [site/README.md](./site/README.md)。
 
 ## 项目结构
 

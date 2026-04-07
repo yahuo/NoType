@@ -25,3 +25,4 @@
 - 2026-04-07: 做 provider 切换时，不要试图“尽量保留”跨 provider 的模型标识；`gpt-*` 和 `gemini-*` 这类 model ID 通常不能跨后端复用，切换 provider 时应主动重置到新 provider 的默认模型，避免把无效配置静默带过去。
 - 2026-04-07: 接 Gemini 原生 REST 时，不要假设用户只会输入裸模型名；文档里常见 `models/{model}` 形式，拼接 URL 前必须先把 `models/` 和前导 `/` 规范化掉，否则很容易生成 `/models/models/...` 这种隐蔽 404。
 - 2026-04-07: 多 provider 接入不能只拆模型和 URL，不拆凭证；如果 OpenAI-compatible 和 Gemini 共用一个 key 存储槽，provider 切换会立即串用或覆盖对方凭证。至少要按 provider 分开存储，并在切换时切换到对应凭证。
+- 2026-04-07: 讨论 macOS 分发方案时，不要默认用户愿意加入付费 Apple Developer Program；先确认预算和是否接受未 notarize 的实验性分发，再决定官网文案、下载路径和发布说明。

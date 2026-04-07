@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NoType 下载 | macOS 语音输入</title>
+    <meta name="description" content="下载 NoType 的实验性 macOS 版本，查看安装、权限授权和手动放行说明。">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-shell">
+        <a class="brand" href="/">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none">
+              <path d="M12 4a3.75 3.75 0 0 1 3.75 3.75v4.5a3.75 3.75 0 1 1-7.5 0v-4.5A3.75 3.75 0 0 1 12 4Z" fill="currentColor"/>
+              <path d="M5.75 11.5a.75.75 0 0 1 .75.75 5.5 5.5 0 1 0 11 0 .75.75 0 0 1 1.5 0 7 7 0 0 1-6.25 6.95V22a.75.75 0 0 1-1.5 0v-2.8A7 7 0 0 1 5 12.25a.75.75 0 0 1 .75-.75Z" fill="currentColor"/>
+            </svg>
+          </span>
+          <span>NoType</span>
+        </a>
+        <nav class="site-nav">
+          <a href="/download/">下载</a>
+          <a href="/docs/">文档</a>
+          <a href="/privacy/">隐私</a>
+          <a href="https://github.com/yahuo/NoType" target="_blank" rel="noreferrer">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="page">
+      <div class="site-shell">
+        <span class="eyebrow">Download</span>
+        <h1>下载 NoType</h1>
+        <p class="lead">官网页面只提供入口和说明，实际安装包与校验文件通过 GitHub Releases 发布。当前下载的是未 notarize 的实验性构建。</p>
+
+        <section class="grid download-grid">
+          <article class="panel card">
+            <span class="tag">Experimental</span>
+            <h3 style="margin-top: 14px;">最新实验性构建</h3>
+            <p>从 GitHub Releases 打开最新版本页面，下载 `.dmg` 或 `.zip`。这些构建尚未经过 Apple notarization，首次打开需要手动放行。</p>
+            <div class="actions">
+              <a class="button" href="https://github.com/yahuo/NoType/releases/latest" target="_blank" rel="noreferrer">打开最新 Release</a>
+            </div>
+          </article>
+
+          <article class="panel card">
+            <span class="tag">开发者</span>
+            <h3 style="margin-top: 14px;">源码与手动构建</h3>
+            <p>如果你想自己编译、修改或审查实现，可以直接查看仓库源码和本地构建方式。</p>
+            <div class="actions">
+              <a class="button-secondary" href="https://github.com/yahuo/NoType" target="_blank" rel="noreferrer">查看 GitHub 仓库</a>
+            </div>
+          </article>
+        </section>
+
+        <section class="section">
+          <div class="two-column">
+            <article class="card section-copy">
+              <h3>安装前确认</h3>
+              <ul class="list">
+                <li>系统要求：`macOS 14+`</li>
+                <li>首次启动需要允许 `Microphone` 和 `Accessibility`</li>
+                <li>正式使用前需要在设置中填写 Doubao 凭证</li>
+                <li>首次打开很可能会被 macOS 安全机制拦截，需要手动放行</li>
+                <li>如果启用 `AI Rewrite`，还要额外配置对应 AI 服务</li>
+              </ul>
+            </article>
+            <article class="card section-copy">
+              <h3>建议下载什么</h3>
+              <ul class="list">
+                <li>仍然优先下载 `.dmg`，安装动作最清晰</li>
+                <li>如果你想检查包内容或自己做二次处理，可同时下载 `.zip`</li>
+                <li>如果想校验完整性，查看 `SHA256SUMS.txt`</li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section">
+          <div class="callout">
+            <h2>第一次安装时会遇到什么</h2>
+            <p>因为当前构建没有 notarization，首次双击可能会被 Gatekeeper 拦下。你需要在 Finder 里对应用执行 `Open`，或到 `系统设置 -> 隐私与安全性` 里选择“仍要打开”。放行后再完成权限授权和 Doubao 配置。</p>
+            <div class="actions">
+              <a class="button" href="/docs/">查看文档</a>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-shell">
+        <span>NoType 下载页</span>
+        <div class="footer-links">
+          <a href="/">首页</a>
+          <a href="/docs/">文档</a>
+          <a href="/privacy/">隐私</a>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

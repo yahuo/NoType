@@ -204,6 +204,38 @@ extension DoubaoStreamingASRProvider {
         }
     }
 
+    nonisolated static func testConnection(config: ASRSessionConfig) async throws {
+        let session = URLSession(configuration: .default)
+        defer { session.invalidateAndCancel() }
+
+        let connectID = UUID().uuidString.lowercased()
+        let request = makeWebSocketRequest(for: config, connectID: connectID, userAgent: "NoType/0.1")
+        let task = session.webSocketTask(with: request)
+        task.resume()
+
+        let payload = try makeFullClientRequest(for: config, requestID: connectID)
+        try await task.send(.data(payload))
+
+        // Send an empty final audio frame to trigger a server response.
+        let finalFrame = makeAudioRequest(audioData: Data(), isFinal: true)
+        try await task.send(.data(finalFrame))
+
+        let message = try await task.receive()
+        let data: Data
+        switch message {
+        case .data(let d): data = d
+        case .string(let s): data = Data(s.utf8)
+        @unknown default: throw ASRProviderError.invalidResponse
+        }
+
+        let parsed = try parseServerMessage(data)
+        if let error = parsed.errorMessage {
+            throw ASRProviderError.transport(error)
+        }
+
+        task.cancel(with: .goingAway, reason: nil)
+    }
+
     nonisolated static func makeWebSocketRequest(
         for config: ASRSessionConfig,
         connectID: String,
@@ -224,7 +256,7 @@ extension DoubaoStreamingASRProvider {
             "user": [
                 "uid": config.userID,
                 "platform": "macOS",
-                "app_version": "0.1",
+                "app_version": "1.0.0",
             ],
             "audio": [
                 "format": "pcm",

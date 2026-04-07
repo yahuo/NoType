@@ -1,11 +1,49 @@
 import SwiftUI
 
+private enum SettingsTab: Hashable {
+    case speech
+    case aiRewrite
+}
+
 struct SettingsView: View {
     @ObservedObject var model: NoTypeAppModel
+    @State private var selectedTab: SettingsTab = .speech
 
     var body: some View {
+        VStack(spacing: 0) {
+            TabView(selection: $selectedTab) {
+                speechTab
+                    .tag(SettingsTab.speech)
+                    .tabItem {
+                        Label("Speech", systemImage: "mic.fill")
+                    }
+
+                aiRewriteTab
+                    .tag(SettingsTab.aiRewrite)
+                    .tabItem {
+                        Label("AI Rewrite", systemImage: "wand.and.stars")
+                    }
+            }
+            .padding(.top, 8)
+
+            Divider()
+
+            bottomBar
+        }
+        .task {
+            model.prepareSettings()
+        }
+        .onChange(of: selectedTab) {
+            model.llmSettingsStatusMessage = nil
+            model.llmSettingsErrorMessage = nil
+        }
+    }
+
+    // MARK: - Speech Recognition Tab
+
+    private var speechTab: some View {
         Form {
-            Section("Doubao Credentials") {
+            Section {
                 TextField("App ID", text: $model.settings.appID)
                     .textFieldStyle(.roundedBorder)
 
@@ -15,12 +53,14 @@ struct SettingsView: View {
                 SecureField("Access Token", text: $model.accessToken)
                     .textFieldStyle(.roundedBorder)
 
-                Text("Access Token is stored in Keychain. Clearing the field and saving removes it completely.")
+                Text("Access Token is stored securely in Keychain.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } header: {
+                Label("Doubao Credentials", systemImage: "key.fill")
             }
 
-            Section("Input") {
+            Section {
                 Picker("Hotkey", selection: $model.settings.hotkey) {
                     ForEach(HotkeyOption.allCases) { option in
                         Text(option.displayName).tag(option)
@@ -32,9 +72,19 @@ struct SettingsView: View {
                         Text(language.displayName).tag(language)
                     }
                 }
+            } header: {
+                Label("Input", systemImage: "keyboard")
             }
+        }
+        .formStyle(.grouped)
+        .scrollIndicators(.hidden)
+    }
 
-            Section("AI Rewrite") {
+    // MARK: - AI Rewrite Tab
+
+    private var aiRewriteTab: some View {
+        Form {
+            Section {
                 Toggle(
                     "Enable AI Rewrite",
                     isOn: Binding(
@@ -54,7 +104,11 @@ struct SettingsView: View {
                         Text(provider.displayName).tag(provider)
                     }
                 }
+            } header: {
+                Label("General", systemImage: "cpu")
+            }
 
+            Section {
                 if model.llmSettingsDraft.provider.requiresBaseURL {
                     TextField(
                         "API Base URL",
@@ -72,7 +126,7 @@ struct SettingsView: View {
                 }
 
                 HStack(spacing: 8) {
-                    TextField(
+                    SecureField(
                         "API Key",
                         text: Binding(
                             get: { model.llmSettingsDraft.apiKey },
@@ -99,48 +153,73 @@ struct SettingsView: View {
                 Text(
                     model.llmSettingsDraft.provider == .gemini
                         ? "Gemini uses the native Gemini API endpoint. API Key is stored in Keychain."
-                        : "API Key is stored in Keychain. Clearing the field and saving removes it completely."
+                        : "API Key is stored securely in Keychain."
                 )
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Section {
-                HStack {
-                    Button("Test AI Rewrite") {
-                        Task {
-                            await model.testLLMSettings()
-                        }
-                    }
-                    .disabled(model.isTestingLLMSettings)
-
-                    Spacer()
-
-                    Button("Save Settings") {
-                        model.saveSettings()
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-            }
-
-            if let status = model.llmSettingsStatusMessage {
-                Section {
-                    Text(status)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            if let error = model.llmSettingsErrorMessage {
-                Section {
-                    Text(error)
-                        .foregroundStyle(.red)
-                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            } header: {
+                Label("Connection", systemImage: "link")
             }
         }
         .formStyle(.grouped)
-        .padding(20)
-        .task {
-            model.prepareSettings()
+        .scrollIndicators(.hidden)
+    }
+
+    // MARK: - Bottom Bar
+
+    private var testButtonLabel: String {
+        switch selectedTab {
+        case .speech: "Test Speech"
+        case .aiRewrite: "Test AI Rewrite"
         }
+    }
+
+    private var bottomBar: some View {
+        HStack {
+            Button {
+                Task {
+                    switch selectedTab {
+                    case .speech:
+                        await model.testASRConnection()
+                    case .aiRewrite:
+                        await model.testAIRewriteConnection()
+                    }
+                }
+            } label: {
+                HStack(spacing: 6) {
+                    if model.isTestingLLMSettings {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(model.isTestingLLMSettings ? "Testing…" : testButtonLabel)
+                }
+            }
+            .disabled(model.isTestingLLMSettings)
+
+            if let status = model.llmSettingsStatusMessage {
+                Label(status, systemImage: "checkmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+                    .lineLimit(1)
+            }
+
+            if let error = model.llmSettingsErrorMessage {
+                Label(error, systemImage: "xmark.circle.fill")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
+            }
+
+            Spacer()
+
+            Button("Save") {
+                model.saveSettings()
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut("s", modifiers: .command)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
     }
 }

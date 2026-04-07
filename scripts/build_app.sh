@@ -20,24 +20,68 @@ cleanup() {
   rm -rf "$STAGING_DIR"
 }
 
-select_codesign_identity() {
-  if [[ -n "${NOTYPE_CODESIGN_IDENTITY:-}" ]]; then
-    echo "$NOTYPE_CODESIGN_IDENTITY"
+resolve_identity_reference() {
+  local desired="$1"
+  local identity_output="$2"
+
+  if [[ "$desired" =~ ^[0-9A-F]{40}$ ]]; then
+    echo "$desired"
     return
   fi
 
+  local matched_hash
+  matched_hash="$(
+    printf '%s\n' "$identity_output" |
+      awk -v desired="$desired" '
+        index($0, "\"" desired "\"") {
+          print $2
+          exit
+        }
+      '
+  )"
+
+  if [[ -n "$matched_hash" ]]; then
+    echo "$matched_hash"
+    return
+  fi
+
+  echo "$desired"
+}
+
+select_codesign_identity() {
   local identity_output
   identity_output="$(security find-identity -v -p codesigning 2>/dev/null || true)"
 
+  if [[ -n "${NOTYPE_CODESIGN_IDENTITY:-}" ]]; then
+    resolve_identity_reference "$NOTYPE_CODESIGN_IDENTITY" "$identity_output"
+    return
+  fi
+
   local developer_id
-  developer_id="$(printf '%s\n' "$identity_output" | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p' | head -n 1)"
+  developer_id="$(
+    printf '%s\n' "$identity_output" |
+      awk '
+        /"Developer ID Application:/ {
+          print $2
+          exit
+        }
+      '
+  )"
   if [[ -n "$developer_id" ]]; then
     echo "$developer_id"
     return
   fi
 
   local apple_development
-  apple_development="$(printf '%s\n' "$identity_output" | sed -n 's/.*"\(Apple Development:.*\)"/\1/p' | head -n 1)"
+  apple_development="$(
+    printf '%s\n' "$identity_output" |
+      awk '
+        /"Apple Development:/ {
+          print $2
+          exit
+        }
+      '
+  )"
   if [[ -n "$apple_development" ]]; then
     echo "$apple_development"
     return
