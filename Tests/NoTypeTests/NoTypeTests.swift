@@ -286,6 +286,10 @@ func aiRewriteChatCompletionsURLAppendsEndpointOnlyOnce() {
 @Test
 func aiRewritePromptTreatsTranscriptAsEditableTextNotAssistantTask() {
     #expect(AIRewriteService.rewritePrompt.contains("不是聊天助手"))
+    #expect(AIRewriteService.rewritePrompt.contains("对 AI 执行友好"))
+    #expect(AIRewriteService.rewritePrompt.contains("不要大幅改写"))
+    #expect(AIRewriteService.rewritePrompt.contains("第一、第二、第三"))
+    #expect(AIRewriteService.rewritePrompt.contains("最后产出什么"))
     #expect(AIRewriteService.rewritePrompt.contains("不要回答问题"))
     #expect(AIRewriteService.rewritePrompt.contains("不能替用户补方案"))
 
