@@ -272,6 +272,8 @@ func aiRewritePromptTreatsTranscriptAsEditableTextNotAssistantTask() {
     #expect(AIRewriteService.rewritePrompt.contains("最后产出什么"))
     #expect(AIRewriteService.rewritePrompt.contains("不要回答问题"))
     #expect(AIRewriteService.rewritePrompt.contains("不能替用户补方案"))
+    #expect(AIRewriteService.rewritePrompt.contains("不得把混合语言内容翻译成另一种语言"))
+    #expect(AIRewriteService.rewritePrompt.contains("如果清理后没有有效内容，返回空字符串"))
 
     let userMessage = AIRewriteService.rewriteUserMessage(
         for: "大疆的麦克风是否可以进行定制化开发？"
