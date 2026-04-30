@@ -61,10 +61,14 @@ struct SettingsView: View {
             }
 
             Section {
-                Picker("Hotkey", selection: $model.settings.hotkey) {
-                    ForEach(HotkeyOption.allCases) { option in
-                        Text(option.displayName).tag(option)
-                    }
+                LabeledContent("Dictation Hotkey") {
+                    Text(model.hotkeyDisplayName)
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("Translate Hotkey") {
+                    Text(model.translationHotkeyDisplayName)
+                        .foregroundStyle(.secondary)
                 }
 
                 Picker("Language", selection: $model.settings.language) {

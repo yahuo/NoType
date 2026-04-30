@@ -44,6 +44,7 @@ final class NoTypeAppModel: ObservableObject {
     private var pendingRewritePreviewText: String?
     private var lastRewritePreviewUpdate = 0.0
     private var sessionID = UUID()
+    private var currentOutputMode: DictationOutputMode = .dictation
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
@@ -119,7 +120,11 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     var hotkeyDisplayName: String {
-        settings.hotkey.displayName
+        "Option + Space"
+    }
+
+    var translationHotkeyDisplayName: String {
+        "Option + Shift + Space"
     }
 
     var hudDisplayText: String {
@@ -136,7 +141,7 @@ final class NoTypeAppModel: ObservableObject {
         case .transcribing:
             return preview.isEmpty ? localizedText(zh: "Transcribing…", en: "Transcribing…") : preview
         case .refining:
-            return preview.isEmpty ? localizedText(zh: "正在改写…", en: "Rewriting…") : preview
+            return preview.isEmpty ? localizedText(zh: "正在处理…", en: "Processing…") : preview
         case .inserted:
             return localizedText(zh: "已粘贴到当前输入框", en: "Pasted into the focused field")
         case .copiedToClipboard:
@@ -145,8 +150,8 @@ final class NoTypeAppModel: ObservableObject {
             return errorMessage ?? localizedText(zh: "语音输入失败", en: "Dictation failed")
         case .idle:
             return localizedText(
-                zh: "按 \(hotkeyDisplayName) 开始录音，再按一次结束",
-                en: "Press \(hotkeyDisplayName) to start. Press again to stop."
+                zh: "按 \(hotkeyDisplayName) 开始录音，按 \(translationHotkeyDisplayName) 翻译成英文",
+                en: "Press \(hotkeyDisplayName) to dictate. Press \(translationHotkeyDisplayName) to translate to English."
             )
         case .onboarding:
             return localizedText(zh: "先完成权限授权", en: "Grant permissions first")
@@ -168,8 +173,8 @@ final class NoTypeAppModel: ObservableObject {
         switch phase {
         case .idle:
             return localizedText(
-                zh: "准备就绪，按 \(hotkeyDisplayName) 开始录音。",
-                en: "Ready. Press \(hotkeyDisplayName) to start dictation."
+                zh: "准备就绪，按 \(hotkeyDisplayName) 语音输入，按 \(translationHotkeyDisplayName) 翻译成英文。",
+                en: "Ready. Press \(hotkeyDisplayName) for dictation, or \(translationHotkeyDisplayName) to translate to English."
             )
         case .recording:
             return localizedText(
@@ -183,8 +188,8 @@ final class NoTypeAppModel: ObservableObject {
             )
         case .refining:
             return localizedText(
-                zh: "正在进行 AI 改写，再按 \(hotkeyDisplayName) 可取消。",
-                en: "AI Rewrite is running. Press \(hotkeyDisplayName) again to cancel."
+                zh: "正在进行 AI 处理，再按 \(hotkeyDisplayName) 可取消。",
+                en: "AI processing is running. Press \(hotkeyDisplayName) again to cancel."
             )
         case .inserted:
             return localizedText(zh: "已完成文本注入。", en: "Text pasted.")
@@ -203,7 +208,7 @@ final class NoTypeAppModel: ObservableObject {
         hotkeyService.update(phase: phase)
 
         do {
-            let result = try hotkeyService.register(using: settings)
+            let result = try hotkeyService.register()
             hotkeyWarningMessage = result.warningMessage
         } catch {
             hotkeyWarningMessage = nil
@@ -280,7 +285,7 @@ final class NoTypeAppModel: ObservableObject {
         var warnings: [String] = []
 
         do {
-            let result = try hotkeyService.register(using: settings)
+            let result = try hotkeyService.register()
             hotkeyWarningMessage = result.warningMessage
             if let warning = result.warningMessage {
                 warnings.append(warning)
@@ -288,7 +293,7 @@ final class NoTypeAppModel: ObservableObject {
         } catch {
             if settings.hotkey != previousSettings.hotkey {
                 persistedSettings.hotkey = previousSettings.hotkey
-                _ = try? hotkeyService.register(using: previousSettings)
+                _ = try? hotkeyService.register()
             }
             hotkeyWarningMessage = nil
             warnings.append(error.localizedDescription)
@@ -385,9 +390,9 @@ final class NoTypeAppModel: ObservableObject {
 
     func handleHotkey(_ event: NoTypeHotkeyEvent) {
         switch event {
-        case .startDictation:
+        case .startDictation(let mode):
             Task {
-                await startDictation()
+                await startDictation(mode: mode)
             }
         case .stopDictation:
             Task {
@@ -398,7 +403,11 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
-    private func startDictation() async {
+    private func startDictation(mode: DictationOutputMode) async {
+        if mode == .translation, await translateSelectedTextIfPossible() {
+            return
+        }
+
         permissionSnapshot = permissionService.snapshot()
         guard permissionSnapshot.ready else {
             presentPermissionRequirementFeedback(for: permissionSnapshot)
@@ -417,6 +426,7 @@ final class NoTypeAppModel: ObservableObject {
             }
 
             resetSessionStateForStart()
+            currentOutputMode = mode
             let activeSessionID = sessionID
             let provider = providerFactory()
             provider.eventHandler = { [weak self] event in
@@ -476,6 +486,7 @@ final class NoTypeAppModel: ObservableObject {
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""
+        currentOutputMode = .dictation
         resetRewritePreviewThrottle()
         errorMessage = nil
 
@@ -488,6 +499,58 @@ final class NoTypeAppModel: ObservableObject {
         asrProvider?.cancel()
         asrProvider = nil
         transition(to: permissionSnapshot.ready ? .idle : .onboarding)
+    }
+
+    private func translateSelectedTextIfPossible() async -> Bool {
+        guard let selectedText = await textInsertionService.selectedText(), !selectedText.trimmed.isEmpty else {
+            return false
+        }
+
+        guard hasCodexOAuthCredentials else {
+            failSession(
+                localizedText(
+                    zh: "翻译需要 Codex 登录态。请先运行 codex login。",
+                    en: "Translation requires Codex login. Run codex login first."
+                )
+            )
+            return true
+        }
+
+        resetSessionStateForStart()
+        currentOutputMode = .translation
+        let activeSessionID = sessionID
+        transcriptPreview = selectedText
+        transition(to: .refining)
+        resetRewritePreviewThrottle()
+
+        do {
+            let translated = try await aiRewriteService.translateToEnglish(
+                selectedText,
+                onPartial: { [weak self] partial in
+                    Task { @MainActor in
+                        self?.handleRewritePartial(partial, sessionID: activeSessionID)
+                    }
+                }
+            )
+            guard activeSessionID == sessionID else { return true }
+            pendingRewritePreviewTask?.cancel()
+            pendingRewritePreviewText = nil
+            await insertFinalText(
+                translated,
+                sessionID: activeSessionID,
+                emptyMessage: localizedText(
+                    zh: "翻译结果为空，未执行文本注入。",
+                    en: "The translation was empty, so nothing was pasted."
+                )
+            )
+        } catch is CancellationError {
+            return true
+        } catch {
+            guard activeSessionID == sessionID else { return true }
+            failSession(error.localizedDescription)
+        }
+
+        return true
     }
 
     private func handleASREvent(_ event: ASRProviderEvent, sessionID activeSessionID: UUID) {
@@ -532,7 +595,42 @@ final class NoTypeAppModel: ObservableObject {
 
         var finalText = normalizedTranscript
 
-        if settings.llmRefinementEnabled, hasCodexOAuthCredentials {
+        if currentOutputMode == .translation {
+            guard hasCodexOAuthCredentials else {
+                failSession(
+                    localizedText(
+                        zh: "翻译需要 Codex 登录态。请先运行 codex login。",
+                        en: "Translation requires Codex login. Run codex login first."
+                    )
+                )
+                return
+            }
+
+            transition(to: .refining)
+            resetRewritePreviewThrottle()
+
+            do {
+                let translated = try await aiRewriteService.translateToEnglish(
+                    normalizedTranscript,
+                    onPartial: { [weak self] partial in
+                        Task { @MainActor in
+                            self?.handleRewritePartial(partial, sessionID: activeSessionID)
+                        }
+                    }
+                )
+                guard activeSessionID == sessionID else { return }
+                pendingRewritePreviewTask?.cancel()
+                pendingRewritePreviewText = nil
+                finalText = translated
+                transcriptPreview = translated
+            } catch is CancellationError {
+                return
+            } catch {
+                guard activeSessionID == sessionID else { return }
+                failSession(error.localizedDescription)
+                return
+            }
+        } else if settings.llmRefinementEnabled, hasCodexOAuthCredentials {
             transition(to: .refining)
             resetRewritePreviewThrottle()
 
@@ -565,6 +663,19 @@ final class NoTypeAppModel: ObservableObject {
 
         guard activeSessionID == sessionID else { return }
 
+        await insertFinalText(
+            finalText,
+            sessionID: activeSessionID,
+            emptyMessage: localizedText(
+                zh: "最终转写为空，未执行文本注入。",
+                en: "The final transcript was empty, so nothing was pasted."
+            )
+        )
+    }
+
+    private func insertFinalText(_ finalText: String, sessionID activeSessionID: UUID, emptyMessage: String) async {
+        guard activeSessionID == sessionID else { return }
+
         do {
             let outcome = try await textInsertionService.insert(finalText)
             guard activeSessionID == sessionID else { return }
@@ -582,12 +693,7 @@ final class NoTypeAppModel: ObservableObject {
                 transition(to: .copiedToClipboard)
                 scheduleFeedbackReset(after: 1.8)
             case .skipped:
-                failSession(
-                    localizedText(
-                        zh: "最终转写为空，未执行文本注入。",
-                        en: "The final transcript was empty, so nothing was pasted."
-                    )
-                )
+                failSession(emptyMessage)
             }
         } catch {
             failSession(error.localizedDescription)
@@ -762,14 +868,17 @@ final class NoTypeAppModel: ObservableObject {
         settings.language.usesChineseCopy ? zh : en
     }
 
-    nonisolated static func hotkeyAction(for phase: DictationPhase) -> NoTypeHotkeyEvent {
+    nonisolated static func hotkeyAction(
+        for phase: DictationPhase,
+        requestedMode: DictationOutputMode = .dictation
+    ) -> NoTypeHotkeyEvent {
         switch phase {
         case .recording:
             .stopDictation
         case .transcribing, .refining:
             .cancelDictation
         case .onboarding, .idle, .failed, .inserted, .copiedToClipboard:
-            .startDictation
+            .startDictation(requestedMode)
         }
     }
 
@@ -777,21 +886,21 @@ final class NoTypeAppModel: ObservableObject {
         for snapshot: PermissionSnapshot,
         language: DictationLanguage
     ) -> String {
-        switch (snapshot.microphoneAuthorized, snapshot.accessibilityAuthorized, language.usesChineseCopy) {
-        case (false, false, true):
-            "需要先授予麦克风和辅助功能权限。打开 Setup 完成授权后再试。"
-        case (false, true, true):
-            "需要先授予麦克风权限。打开 Setup 完成授权后再试。"
-        case (true, false, true):
-            "需要先授予辅助功能权限。打开 Setup 完成授权后再试。"
-        case (false, false, false):
-            "Microphone and Accessibility permissions are required. Open Setup and grant them before trying again."
-        case (false, true, false):
-            "Microphone permission is required. Open Setup and grant it before trying again."
-        case (true, false, false):
-            "Accessibility permission is required. Open Setup and grant it before trying again."
-        case (true, true, _):
-            ""
+        guard !snapshot.ready else { return "" }
+
+        if language.usesChineseCopy {
+            var missing: [String] = []
+            if !snapshot.microphoneAuthorized { missing.append("麦克风") }
+            if !snapshot.accessibilityAuthorized { missing.append("辅助功能") }
+            return "需要先授予\(missing.joined(separator: "、"))权限。打开 Setup 完成授权后再试。"
         }
+
+        var missing: [String] = []
+        if !snapshot.microphoneAuthorized { missing.append("Microphone") }
+        if !snapshot.accessibilityAuthorized { missing.append("Accessibility") }
+        if missing.count == 1 {
+            return "\(missing[0]) permission is required. Open Setup and grant it before trying again."
+        }
+        return "\(missing.joined(separator: ", ")) permissions are required. Open Setup and grant them before trying again."
     }
 }

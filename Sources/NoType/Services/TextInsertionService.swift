@@ -62,6 +62,26 @@ final class TextInsertionService {
         return .pasted(context)
     }
 
+    func selectedText() async -> String? {
+        if let axText = Self.currentSelectedTextViaAccessibility(), !axText.trimmed.isEmpty {
+            return axText
+        }
+
+        let snapshot = PasteboardSnapshot.capture(from: pasteboard)
+        defer { snapshot.restore(to: pasteboard) }
+
+        pasteboard.clearContents()
+        guard postKeyboardCommand(virtualKey: CGKeyCode(kVK_ANSI_C), flags: .maskCommand) else {
+            return nil
+        }
+
+        try? await Task.sleep(for: .milliseconds(160))
+        guard let copiedText = pasteboard.string(forType: .string), !copiedText.trimmed.isEmpty else {
+            return nil
+        }
+        return copiedText
+    }
+
     nonisolated static func shouldInsert(_ text: String) -> Bool {
         !text.trimmed.isEmpty
     }
@@ -116,18 +136,42 @@ final class TextInsertionService {
         return rangeResult == .success
     }
 
-    private func postPasteCommand() throws {
-        guard
-            let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: true),
-            let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: CGKeyCode(kVK_ANSI_V), keyDown: false)
-        else {
-            throw TextInsertionServiceError.pasteCommandSynthesisFailed
+    nonisolated static func currentSelectedTextViaAccessibility() -> String? {
+        let systemElement = AXUIElementCreateSystemWide()
+        var focusedValue: CFTypeRef?
+        let focusedResult = AXUIElementCopyAttributeValue(
+            systemElement,
+            kAXFocusedUIElementAttribute as CFString,
+            &focusedValue
+        )
+
+        guard focusedResult == .success, let focusedValue else {
+            return nil
         }
 
-        keyDown.flags = .maskCommand
-        keyUp.flags = .maskCommand
+        let focusedElement = focusedValue as! AXUIElement
+        return copyStringAttribute(kAXSelectedTextAttribute as CFString, from: focusedElement)
+    }
+
+    private func postPasteCommand() throws {
+        guard postKeyboardCommand(virtualKey: CGKeyCode(kVK_ANSI_V), flags: .maskCommand) else {
+            throw TextInsertionServiceError.pasteCommandSynthesisFailed
+        }
+    }
+
+    private func postKeyboardCommand(virtualKey: CGKeyCode, flags: CGEventFlags) -> Bool {
+        guard
+            let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: true),
+            let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: virtualKey, keyDown: false)
+        else {
+            return false
+        }
+
+        keyDown.flags = flags
+        keyUp.flags = flags
         keyDown.post(tap: .cghidEventTap)
         keyUp.post(tap: .cghidEventTap)
+        return true
     }
 
     private nonisolated static let editableRoles: Set<String> = [

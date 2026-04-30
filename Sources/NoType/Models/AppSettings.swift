@@ -1,4 +1,3 @@
-import Carbon
 import Foundation
 
 enum DictationLanguage: String, Codable, CaseIterable, Identifiable {
@@ -57,20 +56,6 @@ enum HotkeyOption: String, Codable, CaseIterable, Identifiable {
         }
     }
 
-    var keyCode: UInt32 {
-        49
-    }
-
-    var carbonModifiers: UInt32 {
-        switch self {
-        case .optionSpace:
-            UInt32(optionKey)
-        case .controlSpace:
-            UInt32(controlKey)
-        case .commandShiftSpace:
-            UInt32(cmdKey | shiftKey)
-        }
-    }
 }
 
 struct AppSettings: Codable, Equatable {

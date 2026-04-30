@@ -3,15 +3,15 @@ import Foundation
 
 enum HotkeyServiceError: LocalizedError {
     case eventHandlerInstallFailed(OSStatus)
-    case primaryRegistrationFailed(HotkeyOption, OSStatus)
+    case primaryRegistrationFailed(OSStatus)
     case cancelRegistrationFailed(OSStatus)
 
     var errorDescription: String? {
         switch self {
         case .eventHandlerInstallFailed(let status):
             "Unable to install the global hotkey event handler (\(status))."
-        case .primaryRegistrationFailed(let hotkey, let status):
-            "Unable to register global hotkey \(hotkey.displayName) (\(status)). It may already be in use by macOS or another app."
+        case .primaryRegistrationFailed(let status):
+            "Unable to register global hotkey Option + Space (\(status)). It may already be in use by macOS or another app."
         case .cancelRegistrationFailed(let status):
             "Unable to register the cancel hotkey Option + Esc (\(status))."
         }
@@ -27,6 +27,7 @@ final class HotkeyService {
 
     private var eventHandlerRef: EventHandlerRef?
     private var primaryHotKeyRef: EventHotKeyRef?
+    private var translationHotKeyRef: EventHotKeyRef?
     private var cancelHotKeyRef: EventHotKeyRef?
     private var phase: DictationPhase = .idle
 
@@ -34,14 +35,15 @@ final class HotkeyService {
         unregisterHotkeys()
     }
 
-    func register(using settings: AppSettings) throws -> HotkeyRegistrationResult {
+    func register() throws -> HotkeyRegistrationResult {
         try ensureEventHandlerInstalled()
         unregisterHotkeys()
 
         let primaryID = EventHotKeyID(signature: Self.signature, id: 1)
+        primaryHotKeyRef = nil
         let primaryStatus = RegisterEventHotKey(
-            settings.hotkey.keyCode,
-            settings.hotkey.carbonModifiers,
+            UInt32(kVK_Space),
+            UInt32(optionKey),
             primaryID,
             GetApplicationEventTarget(),
             0,
@@ -49,8 +51,19 @@ final class HotkeyService {
         )
         guard primaryStatus == noErr else {
             primaryHotKeyRef = nil
-            throw HotkeyServiceError.primaryRegistrationFailed(settings.hotkey, primaryStatus)
+            throw HotkeyServiceError.primaryRegistrationFailed(primaryStatus)
         }
+
+        let translationID = EventHotKeyID(signature: Self.signature, id: 3)
+        translationHotKeyRef = nil
+        let translationStatus = RegisterEventHotKey(
+            UInt32(kVK_Space),
+            UInt32(optionKey | shiftKey),
+            translationID,
+            GetApplicationEventTarget(),
+            0,
+            &translationHotKeyRef
+        )
 
         let cancelID = EventHotKeyID(signature: Self.signature, id: 2)
         cancelHotKeyRef = nil
@@ -63,11 +76,13 @@ final class HotkeyService {
             &cancelHotKeyRef
         )
 
-        let result = try Self.registrationResult(
-            primaryStatus: primaryStatus,
-            cancelStatus: cancelStatus,
-            hotkey: settings.hotkey
+        let result = Self.registrationResult(
+            translationStatus: translationStatus,
+            cancelStatus: cancelStatus
         )
+        if translationStatus != noErr {
+            translationHotKeyRef = nil
+        }
         if cancelStatus != noErr {
             cancelHotKeyRef = nil
         }
@@ -112,6 +127,11 @@ final class HotkeyService {
             self.primaryHotKeyRef = nil
         }
 
+        if let translationHotKeyRef {
+            UnregisterEventHotKey(translationHotKeyRef)
+            self.translationHotKeyRef = nil
+        }
+
         if let cancelHotKeyRef {
             UnregisterEventHotKey(cancelHotKeyRef)
             self.cancelHotKeyRef = nil
@@ -136,9 +156,11 @@ final class HotkeyService {
 
         switch hotKeyID.id {
         case 1:
-            eventHandler?(NoTypeAppModel.hotkeyAction(for: phase))
+            eventHandler?(NoTypeAppModel.hotkeyAction(for: phase, requestedMode: .dictation))
         case 2:
             eventHandler?(.cancelDictation)
+        case 3:
+            eventHandler?(NoTypeAppModel.hotkeyAction(for: phase, requestedMode: .translation))
         default:
             break
         }
@@ -149,21 +171,18 @@ final class HotkeyService {
     private static let signature = fourCharCode("NTYP")
 
     static func registrationResult(
-        primaryStatus: OSStatus,
-        cancelStatus: OSStatus,
-        hotkey: HotkeyOption
-    ) throws -> HotkeyRegistrationResult {
-        guard primaryStatus == noErr else {
-            throw HotkeyServiceError.primaryRegistrationFailed(hotkey, primaryStatus)
+        translationStatus: OSStatus,
+        cancelStatus: OSStatus
+    ) -> HotkeyRegistrationResult {
+        var warnings: [String] = []
+        if translationStatus != noErr {
+            warnings.append("Unable to register translation hotkey Option + Shift + Space (\(translationStatus)).")
         }
-
         if cancelStatus != noErr {
-            return HotkeyRegistrationResult(
-                warningMessage: HotkeyServiceError.cancelRegistrationFailed(cancelStatus).errorDescription
-            )
+            warnings.append(HotkeyServiceError.cancelRegistrationFailed(cancelStatus).errorDescription ?? "")
         }
 
-        return HotkeyRegistrationResult(warningMessage: nil)
+        return HotkeyRegistrationResult(warningMessage: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))
     }
 
     private static func fourCharCode(_ string: String) -> OSType {

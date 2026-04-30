@@ -26,3 +26,5 @@
 - 2026-04-07: 接 Gemini 原生 REST 时，不要假设用户只会输入裸模型名；文档里常见 `models/{model}` 形式，拼接 URL 前必须先把 `models/` 和前导 `/` 规范化掉，否则很容易生成 `/models/models/...` 这种隐蔽 404。
 - 2026-04-07: 多 provider 接入不能只拆模型和 URL，不拆凭证；如果 OpenAI-compatible 和 Gemini 共用一个 key 存储槽，provider 切换会立即串用或覆盖对方凭证。至少要按 provider 分开存储，并在切换时切换到对应凭证。
 - 2026-04-07: 讨论 macOS 分发方案时，不要默认用户愿意加入付费 Apple Developer Program；先确认预算和是否接受未 notarize 的实验性分发，再决定官网文案、下载路径和发布说明。
+- 2026-04-30: 改全局热键到 Fn 这类强运行态功能时，不要只改源码和跑单测就让用户验证；必须重新构建/安装当前 app，并提供可见的 event tap/Input Monitoring 状态或保留旧热键 fallback，避免用户实际还在跑旧安装版或无从判断 Fn 是否被捕获。
+- 2026-04-30: 裸 Fn/Globe 会和 macOS Emoji/输入法入口冲突；除非用户明确愿意改系统键盘设置，否则不要把裸 Fn 作为默认主热键。优先使用稳定组合键，并避免为 Fn 引入 Input Monitoring 作为默认权限要求。

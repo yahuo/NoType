@@ -21,6 +21,11 @@ enum DictationPhase: String, Equatable {
     }
 }
 
+enum DictationOutputMode: String, Equatable {
+    case dictation
+    case translation
+}
+
 struct PermissionSnapshot: Equatable {
     var microphoneAuthorized: Bool
     var accessibilityAuthorized: Bool
@@ -65,7 +70,7 @@ enum ASRProviderEvent: Equatable {
 }
 
 enum NoTypeHotkeyEvent: Equatable {
-    case startDictation
+    case startDictation(DictationOutputMode)
     case stopDictation
     case cancelDictation
 }
