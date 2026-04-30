@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  基于 SwiftUI、AppKit、Doubao Streaming ASR 和可选 AI Rewrite 构建。
+  基于 SwiftUI、AppKit、Doubao Streaming ASR、可选 AI Rewrite 和英文翻译构建。
 </p>
 
 ## NoType 是什么
@@ -75,7 +75,7 @@ NoType 目前处于早期可用阶段：
 
 - macOS 14+
 - 已开通的 Doubao 流式语音识别资源
-- 如果启用 `AI Rewrite`，需要本机已完成 `codex login`
+- 如果启用 `AI Rewrite` 或英文翻译，需要本机已完成 `codex login`
 - 允许应用访问：
   - Microphone
   - Accessibility
@@ -167,7 +167,7 @@ open NoType.xcodeproj
 - `AI Rewrite On` 且本机存在 Codex 登录态：先调用 Codex 改写，再插入最终文本
 - `AI Rewrite On` 但未登录 Codex：不阻塞主链，继续使用原始转写
 
-NoType 只读取本机 Codex access token，不刷新 refresh token；如果登录态过期，请在终端运行 `codex login status` 或重新 `codex login`。
+NoType 只读取本机 Codex access token，不刷新 refresh token；`AI Rewrite` 和英文翻译都会复用这份 Codex 登录态。如果登录态过期，请在终端运行 `codex login status` 或重新 `codex login`。
 
 `AI Rewrite` 的目标不是重度润色，而是把口语稿整理成更适合发送和更适合 AI 执行的文本：
 
