@@ -18,7 +18,6 @@ final class NoTypeAppModel: ObservableObject {
     @Published var waveformLevel = 0.0
     @Published var errorMessage: String?
     @Published var hotkeyWarningMessage: String?
-    @Published var llmSettingsDraft: LLMSettingsDraft
     @Published var llmSettingsStatusMessage: String?
     @Published var llmSettingsErrorMessage: String?
     @Published var isTestingLLMSettings = false
@@ -33,7 +32,6 @@ final class NoTypeAppModel: ObservableObject {
     private let hudController: HUDPanelController
     private let providerFactory: () -> ASRProvider
     private let doubaoAccessTokenAccount = "doubao.access-token"
-    private let legacyLLMAPIKeyAccount = "llm.api-key"
 
     private var asrProvider: ASRProvider?
     private var hasLoadedAccessToken = false
@@ -76,7 +74,6 @@ final class NoTypeAppModel: ObservableObject {
             accessibilityAuthorized: false
         )
         phase = .onboarding
-        llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: "")
 
         hotkeyService.eventHandler = { [weak self] event in
             Task { @MainActor in
@@ -106,8 +103,11 @@ final class NoTypeAppModel: ObservableObject {
         settings.llmRefinementEnabled
     }
 
-    var llmConfigured: Bool {
-        settings.llmConfiguredWithoutAPIKey && providerHasStoredLLMAPIKey(settings.llmProvider)
+    var hasCodexOAuthCredentials: Bool {
+        guard let credentials = try? CodexAuthStore().loadCredentials() else {
+            return false
+        }
+        return !credentials.isExpired
     }
 
     var hasASRCredentials: Bool {
@@ -246,36 +246,11 @@ final class NoTypeAppModel: ObservableObject {
         settings.llmRefinementEnabled = enabled
         persistSettings()
 
-        if enabled && !llmConfigured {
+        if enabled && !hasCodexOAuthCredentials {
             errorMessage = localizedText(
-                zh: "AI Rewrite 已启用，但 API 信息尚未配置完整，当前会继续直接使用原始转写。",
-                en: "AI Rewrite is enabled but not fully configured, so raw transcripts will still be used."
+                zh: "AI Rewrite 已启用，但未找到 Codex 登录态，当前会继续直接使用原始转写。",
+                en: "AI Rewrite is enabled but Codex is not logged in, so raw transcripts will still be used."
             )
-        }
-    }
-
-    func selectLLMProvider(_ provider: LLMProvider) {
-        guard llmSettingsDraft.provider != provider else { return }
-
-        let previousProvider = llmSettingsDraft.provider
-        let previousBaseURL = llmSettingsDraft.baseURL.trimmed
-
-        llmSettingsDraft.provider = provider
-
-        if previousBaseURL.isEmpty || previousBaseURL == previousProvider.defaultBaseURL {
-            llmSettingsDraft.baseURL = provider.defaultBaseURL
-        }
-
-        // Model IDs are provider-specific. Reset on provider switch so we never
-        // carry an invalid `gpt-*`/`gemini-*` identifier across backends.
-        llmSettingsDraft.model = provider.defaultModel
-
-        do {
-            llmSettingsDraft.apiKey = try readLLMAPIKey(for: provider)
-            llmSettingsErrorMessage = nil
-        } catch {
-            llmSettingsDraft.apiKey = ""
-            llmSettingsErrorMessage = error.localizedDescription
         }
     }
 
@@ -289,14 +264,6 @@ final class NoTypeAppModel: ObservableObject {
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }
-
-        do {
-            let apiKey = try readLLMAPIKey(for: settings.llmProvider)
-            llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: apiKey)
-        } catch {
-            llmSettingsDraft = LLMSettingsDraft(settings: settings, apiKey: "")
-            llmSettingsErrorMessage = error.localizedDescription
-        }
     }
 
     func saveSettings() {
@@ -305,13 +272,9 @@ final class NoTypeAppModel: ObservableObject {
 
         let previousSettings = settingsStore.load()
         let previousAccessTokenPresence = settingsStore.storedAccessTokenPresence()
-        let previousLLMAPIKey = (try? readLLMAPIKey(for: previousSettings.llmProvider)) ?? ""
 
         settings.appID = settings.appID.trimmed
         settings.resourceID = settings.resourceID.trimmed
-        settings.llmProvider = llmSettingsDraft.provider
-        settings.llmBaseURL = llmSettingsDraft.baseURL.trimmed
-        settings.llmModel = llmSettingsDraft.model.trimmed
 
         var persistedSettings = settings
         var warnings: [String] = []
@@ -334,7 +297,6 @@ final class NoTypeAppModel: ObservableObject {
         do {
             try settingsStore.save(persistedSettings)
             try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
-            try saveLLMAPIKey(llmSettingsDraft.apiKey, for: llmSettingsDraft.provider)
 
             let hasToken = !accessToken.trimmed.isEmpty
             settingsStore.setHasStoredAccessToken(hasToken)
@@ -342,7 +304,6 @@ final class NoTypeAppModel: ObservableObject {
             storedAccessTokenPresence = hasToken
             hasEditedAccessToken = false
             settings = persistedSettings
-            llmSettingsDraft = LLMSettingsDraft(settings: persistedSettings, apiKey: llmSettingsDraft.apiKey)
 
             if warnings.isEmpty {
                 llmSettingsStatusMessage = localizedText(zh: "设置已保存。", en: "Settings saved.")
@@ -366,7 +327,6 @@ final class NoTypeAppModel: ObservableObject {
                 settingsStore.clearStoredAccessTokenPresence()
             }
             storedAccessTokenPresence = previousAccessTokenPresence
-            try? saveLLMAPIKey(previousLLMAPIKey, for: previousSettings.llmProvider)
             hotkeyWarningMessage = nil
             llmSettingsErrorMessage = error.localizedDescription
         }
@@ -403,7 +363,7 @@ final class NoTypeAppModel: ObservableObject {
         defer { isTestingLLMSettings = false }
 
         do {
-            try await aiRewriteService.testConnection(using: llmSettingsDraft)
+            try await aiRewriteService.testConnection()
             llmSettingsStatusMessage = localizedText(
                 zh: "AI Rewrite 连接测试成功。",
                 en: "AI Rewrite connection test passed."
@@ -411,10 +371,6 @@ final class NoTypeAppModel: ObservableObject {
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }
-    }
-
-    func clearLLMAPIKeyDraft() {
-        llmSettingsDraft.apiKey = ""
     }
 
     func stopDictationFromUI() {
@@ -576,14 +532,13 @@ final class NoTypeAppModel: ObservableObject {
 
         var finalText = normalizedTranscript
 
-        if settings.llmRefinementEnabled, let rewriteDraft = loadActiveLLMDraftIfConfigured() {
+        if settings.llmRefinementEnabled, hasCodexOAuthCredentials {
             transition(to: .refining)
             resetRewritePreviewThrottle()
 
             do {
                 let rewritten = try await aiRewriteService.rewrite(
                     normalizedTranscript,
-                    with: rewriteDraft,
                     onPartial: { [weak self] partial in
                         Task { @MainActor in
                             self?.handleRewritePartial(partial, sessionID: activeSessionID)
@@ -636,18 +591,6 @@ final class NoTypeAppModel: ObservableObject {
             }
         } catch {
             failSession(error.localizedDescription)
-        }
-    }
-
-    private func loadActiveLLMDraftIfConfigured() -> LLMSettingsDraft? {
-        guard settings.llmConfiguredWithoutAPIKey else { return nil }
-
-        do {
-            let apiKey = try readLLMAPIKey(for: settings.llmProvider)
-            let draft = LLMSettingsDraft(settings: settings, apiKey: apiKey)
-            return draft.isConfigured ? draft : nil
-        } catch {
-            return nil
         }
     }
 
@@ -746,46 +689,6 @@ final class NoTypeAppModel: ObservableObject {
         hasLoadedAccessToken = true
         hasEditedAccessToken = markAsEdited
         storedAccessTokenPresence = !value.trimmed.isEmpty
-    }
-
-    private func llmAPIKeyAccount(for provider: LLMProvider) -> String {
-        switch provider {
-        case .openAICompatible:
-            "llm.api-key.openai-compatible"
-        case .gemini:
-            "llm.api-key.gemini"
-        }
-    }
-
-    private func readLLMAPIKey(for provider: LLMProvider) throws -> String {
-        let providerKey = try keychainClient.read(account: llmAPIKeyAccount(for: provider))
-        guard providerKey.trimmed.isEmpty else {
-            return providerKey
-        }
-
-        guard provider == .openAICompatible else {
-            return ""
-        }
-
-        return try keychainClient.read(account: legacyLLMAPIKeyAccount)
-    }
-
-    private func saveLLMAPIKey(_ value: String, for provider: LLMProvider) throws {
-        try keychainClient.save(value, for: llmAPIKeyAccount(for: provider))
-
-        // The pre-provider build stored only the OpenAI-compatible key here.
-        // Once that provider is saved through the new flow, migrate away from
-        // the shared slot so clearing the key actually stays cleared.
-        if provider == .openAICompatible {
-            keychainClient.delete(account: legacyLLMAPIKeyAccount)
-        }
-    }
-
-    private func providerHasStoredLLMAPIKey(_ provider: LLMProvider) -> Bool {
-        guard let apiKey = try? readLLMAPIKey(for: provider) else {
-            return false
-        }
-        return !apiKey.trimmed.isEmpty
     }
 
     private func loadAccessTokenIfNeeded() throws -> String {

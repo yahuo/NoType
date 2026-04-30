@@ -4,7 +4,6 @@ final class SettingsStore {
     private let userDefaults: UserDefaults
     private let settingsKey = "notype.settings"
     private let accessTokenPresenceKey = "notype.access-token-present"
-    private let llmAPIKeyPresenceKey = "notype.llm-api-key-present"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -35,17 +34,5 @@ final class SettingsStore {
 
     func clearStoredAccessTokenPresence() {
         userDefaults.removeObject(forKey: accessTokenPresenceKey)
-    }
-
-    func storedLLMAPIKeyPresence() -> Bool? {
-        userDefaults.object(forKey: llmAPIKeyPresenceKey) as? Bool
-    }
-
-    func setHasStoredLLMAPIKey(_ present: Bool) {
-        userDefaults.set(present, forKey: llmAPIKeyPresenceKey)
-    }
-
-    func clearStoredLLMAPIKeyPresence() {
-        userDefaults.removeObject(forKey: llmAPIKeyPresenceKey)
     }
 }

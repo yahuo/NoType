@@ -89,72 +89,30 @@ struct SettingsView: View {
                     "Enable AI Rewrite",
                     isOn: Binding(
                         get: { model.settings.llmRefinementEnabled },
-                        set: { model.settings.llmRefinementEnabled = $0 }
+                        set: { model.setAIRewriteEnabled($0) }
                     )
                 )
 
-                Picker(
-                    "Provider",
-                    selection: Binding(
-                        get: { model.llmSettingsDraft.provider },
-                        set: { model.selectLLMProvider($0) }
-                    )
-                ) {
-                    ForEach(LLMProvider.allCases) { provider in
-                        Text(provider.displayName).tag(provider)
-                    }
+                LabeledContent("Provider") {
+                    Text("Codex OAuth")
+                        .foregroundStyle(.secondary)
+                }
+
+                LabeledContent("Status") {
+                    Text(model.hasCodexOAuthCredentials ? "Logged in" : "Run `codex login` first")
+                        .foregroundStyle(model.hasCodexOAuthCredentials ? .green : .secondary)
                 }
             } header: {
                 Label("General", systemImage: "cpu")
             }
 
             Section {
-                if model.llmSettingsDraft.provider.requiresBaseURL {
-                    TextField(
-                        "API Base URL",
-                        text: Binding(
-                            get: { model.llmSettingsDraft.baseURL },
-                            set: { model.llmSettingsDraft.baseURL = $0 }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-                } else {
-                    LabeledContent("API Endpoint") {
-                        Text(model.llmSettingsDraft.provider.defaultBaseURL)
-                            .foregroundStyle(.secondary)
-                    }
+                LabeledContent("Endpoint") {
+                    Text("chatgpt.com/backend-api/codex")
+                        .foregroundStyle(.secondary)
                 }
 
-                HStack(spacing: 8) {
-                    SecureField(
-                        "API Key",
-                        text: Binding(
-                            get: { model.llmSettingsDraft.apiKey },
-                            set: { model.llmSettingsDraft.apiKey = $0 }
-                        )
-                    )
-                    .textFieldStyle(.roundedBorder)
-
-                    Button("Clear") {
-                        model.clearLLMAPIKeyDraft()
-                    }
-                    .disabled(model.llmSettingsDraft.apiKey.isEmpty)
-                }
-
-                TextField(
-                    "Model",
-                    text: Binding(
-                        get: { model.llmSettingsDraft.model },
-                        set: { model.llmSettingsDraft.model = $0 }
-                    )
-                )
-                .textFieldStyle(.roundedBorder)
-
-                Text(
-                    model.llmSettingsDraft.provider == .gemini
-                        ? "Gemini uses the native Gemini API endpoint. API Key is stored in Keychain."
-                        : "API Key is stored securely in Keychain."
-                )
+                Text("NoType reads the current Codex access token from your local Codex login and never refreshes the refresh token.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             } header: {

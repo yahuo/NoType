@@ -1,8 +1,9 @@
 import Foundation
 
 enum AIRewriteError: LocalizedError {
-    case invalidBaseURL
-    case missingConfiguration
+    case missingCodexAuth
+    case invalidCodexAuth
+    case codexAuthExpired
     case invalidResponse
     case incompleteStream
     case timedOut
@@ -10,21 +11,23 @@ enum AIRewriteError: LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .invalidBaseURL:
-            return "The AI Rewrite API Base URL is invalid."
-        case .missingConfiguration:
-            return "Base URL, API Key, and Model are all required before AI Rewrite can run."
+        case .missingCodexAuth:
+            return "Codex OAuth is not configured. Run `codex login` in Terminal first."
+        case .invalidCodexAuth:
+            return "Codex OAuth credentials are invalid. Run `codex login` again."
+        case .codexAuthExpired:
+            return "Codex OAuth access token is expired. Run `codex login status` or reopen Codex to refresh it."
         case .invalidResponse:
-            return "The AI Rewrite service returned an invalid response."
+            return "The Codex rewrite service returned an invalid response."
         case .incompleteStream:
-            return "The AI Rewrite stream ended before completion."
+            return "The Codex rewrite stream ended before completion."
         case .timedOut:
             return "AI Rewrite timed out."
         case .requestFailed(let statusCode, let body):
             if body.isEmpty {
-                return "The AI Rewrite service returned HTTP \(statusCode)."
+                return "The Codex rewrite service returned HTTP \(statusCode)."
             }
-            return "The AI Rewrite service returned HTTP \(statusCode): \(body)"
+            return "The Codex rewrite service returned HTTP \(statusCode): \(body)"
         }
     }
 }
@@ -32,29 +35,32 @@ enum AIRewriteError: LocalizedError {
 actor AIRewriteService {
     private let session: URLSession
     private let rewriteTimeout: Duration
+    private let authStore: CodexAuthStore
+    private let modelResolver: CodexModelResolver
 
-    init(session: URLSession = .shared, rewriteTimeout: Duration = .seconds(6)) {
+    init(
+        session: URLSession = .shared,
+        rewriteTimeout: Duration = .seconds(10),
+        authStore: CodexAuthStore = CodexAuthStore(),
+        modelResolver: CodexModelResolver = CodexModelResolver()
+    ) {
         self.session = session
         self.rewriteTimeout = rewriteTimeout
+        self.authStore = authStore
+        self.modelResolver = modelResolver
     }
 
     func rewrite(
         _ transcript: String,
-        with draft: LLMSettingsDraft,
         onPartial: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> String {
-        guard draft.isConfigured else {
-            throw AIRewriteError.missingConfiguration
-        }
-
         let rewriteTimeout = self.rewriteTimeout
 
         let rewritten = try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
-                try await self.performStreamingChatCompletion(
-                    using: draft,
-                    messages: Self.rewriteMessages(for: transcript),
-                    maxTokens: 2048,
+                try await self.performStreamingCodexResponse(
+                    instructions: Self.rewritePrompt,
+                    userMessage: Self.rewriteUserMessage(for: transcript),
                     onPartial: onPartial
                 )
             }
@@ -72,101 +78,34 @@ actor AIRewriteService {
         return rewritten.isEmpty ? transcript : rewritten
     }
 
-    func testConnection(using draft: LLMSettingsDraft) async throws {
-        guard draft.isConfigured else {
-            throw AIRewriteError.missingConfiguration
-        }
-
-        let content: String
-        switch draft.provider {
-        case .openAICompatible:
-            content = try await performChatCompletion(
-                using: draft,
-                messages: [
-                    ChatMessage(role: "system", content: "Reply with exactly OK."),
-                    ChatMessage(role: "user", content: "ping"),
-                ],
-                maxTokens: 8
-            )
-        case .gemini:
-            content = try await performGeminiGenerateContent(
-                using: draft,
-                systemInstruction: "Reply with exactly OK.",
-                userMessage: "ping",
-                maxTokens: 32
-            )
-        }
+    func testConnection() async throws {
+        let content = try await performStreamingCodexResponse(
+            instructions: "Reply with exactly OK.",
+            userMessage: "ping",
+            onPartial: { _ in }
+        )
 
         guard content.trimmingCharacters(in: .whitespacesAndNewlines).uppercased().contains("OK") else {
             throw AIRewriteError.invalidResponse
         }
     }
 
-    private func performChatCompletion(
-        using draft: LLMSettingsDraft,
-        messages: [ChatMessage],
-        maxTokens: Int
-    ) async throws -> String {
-        let request = try Self.makeOpenAICompatibleRequest(
-            using: draft,
-            messages: messages,
-            maxTokens: maxTokens,
-            timeoutInterval: 30,
-            stream: false
-        )
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AIRewriteError.invalidResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw AIRewriteError.requestFailed(
-                httpResponse.statusCode,
-                String(data: data, encoding: .utf8)?.trimmed ?? ""
-            )
-        }
-
-        let decoded = try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
-        guard let choice = decoded.choices.first else {
-            throw AIRewriteError.invalidResponse
-        }
-        guard let content = choice.message?.content?.text, !content.trimmed.isEmpty else {
-            throw AIRewriteError.invalidResponse
-        }
-        return content
-    }
-
-    private func performStreamingChatCompletion(
-        using draft: LLMSettingsDraft,
-        messages: [ChatMessage],
-        maxTokens: Int,
+    private func performStreamingCodexResponse(
+        instructions: String,
+        userMessage: String,
         onPartial: @escaping @Sendable (String) -> Void
     ) async throws -> String {
-        let request: URLRequest
-        let streamKind: AIRewriteStreamKind
-
-        switch draft.provider {
-        case .openAICompatible:
-            request = try Self.makeOpenAICompatibleRequest(
-                using: draft,
-                messages: messages,
-                maxTokens: maxTokens,
-                timeoutInterval: 30,
-                stream: true
-            )
-            streamKind = .openAICompatible
-        case .gemini:
-            request = try Self.makeGeminiRequest(
-                using: draft,
-                systemInstruction: Self.rewritePrompt,
-                userMessage: messages.last?.content ?? "",
-                maxTokens: maxTokens,
-                timeoutInterval: 30,
-                stream: true
-            )
-            streamKind = .gemini
+        let credentials = try authStore.loadCredentials()
+        guard !credentials.isExpired else {
+            throw AIRewriteError.codexAuthExpired
         }
+
+        let request = try Self.makeCodexResponseRequest(
+            credentials: credentials,
+            model: modelResolver.resolveModel(),
+            instructions: instructions,
+            userMessage: userMessage
+        )
 
         let (bytes, response) = try await session.bytes(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -181,221 +120,57 @@ actor AIRewriteService {
             throw AIRewriteError.requestFailed(httpResponse.statusCode, body.trimmed)
         }
 
-        switch streamKind {
-        case .openAICompatible:
-            var accumulator = AIRewriteStreamAccumulator()
-            for try await line in bytes.lines {
-                try Task.checkCancellation()
+        var accumulator = CodexResponseStreamAccumulator()
+        for try await line in bytes.lines {
+            try Task.checkCancellation()
 
-                if let partial = try accumulator.consume(line: line) {
-                    onPartial(partial)
-                }
+            if let partial = try accumulator.consume(line: line) {
+                onPartial(partial)
             }
-
-            guard accumulator.isComplete else {
-                throw AIRewriteError.incompleteStream
-            }
-
-            return accumulator.accumulatedText
-        case .gemini:
-            var accumulator = GeminiRewriteStreamAccumulator()
-            for try await line in bytes.lines {
-                try Task.checkCancellation()
-
-                if let partial = try accumulator.consume(line: line) {
-                    onPartial(partial)
-                }
-            }
-
-            guard accumulator.isComplete else {
-                throw AIRewriteError.incompleteStream
-            }
-
-            return accumulator.accumulatedText
         }
+
+        guard accumulator.isComplete else {
+            throw AIRewriteError.incompleteStream
+        }
+
+        return accumulator.accumulatedText
     }
 
-    private func performGeminiGenerateContent(
-        using draft: LLMSettingsDraft,
-        systemInstruction: String,
-        userMessage: String,
-        maxTokens: Int
-    ) async throws -> String {
-        let request = try Self.makeGeminiRequest(
-            using: draft,
-            systemInstruction: systemInstruction,
-            userMessage: userMessage,
-            maxTokens: maxTokens,
-            timeoutInterval: 30,
-            stream: false
-        )
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AIRewriteError.invalidResponse
-        }
-
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            throw AIRewriteError.requestFailed(
-                httpResponse.statusCode,
-                String(data: data, encoding: .utf8)?.trimmed ?? ""
-            )
-        }
-
-        let decoded = try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
-        guard let candidate = decoded.candidates?.first else {
-            throw AIRewriteError.invalidResponse
-        }
-
-        let text = candidate.content?.text ?? ""
-        guard !text.trimmed.isEmpty else {
-            throw AIRewriteError.invalidResponse
-        }
-
-        return text
-    }
-
-    private static func makeOpenAICompatibleRequest(
-        using draft: LLMSettingsDraft,
-        messages: [ChatMessage],
-        maxTokens: Int,
-        timeoutInterval: TimeInterval,
-        stream: Bool
-    ) throws -> URLRequest {
-        guard let url = chatCompletionsURL(from: draft.effectiveBaseURL) else {
-            throw AIRewriteError.invalidBaseURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(draft.apiKey.trimmed)", forHTTPHeaderField: "Authorization")
-        request.timeoutInterval = timeoutInterval
-
-        request.httpBody = try JSONEncoder().encode(
-            ChatCompletionRequest(
-                model: draft.model.trimmed,
-                messages: messages,
-                temperature: 0.2,
-                maxTokens: maxTokens,
-                stream: stream
-            )
-        )
-
-        return request
-    }
-
-    private static func makeGeminiRequest(
-        using draft: LLMSettingsDraft,
-        systemInstruction: String,
-        userMessage: String,
-        maxTokens: Int,
-        timeoutInterval: TimeInterval,
-        stream: Bool
-    ) throws -> URLRequest {
-        guard
-            let url = geminiGenerateContentURL(
-                from: draft.effectiveBaseURL,
-                model: draft.model.trimmed,
-                apiKey: draft.apiKey.trimmed,
-                stream: stream
-            )
-        else {
-            throw AIRewriteError.invalidBaseURL
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = timeoutInterval
-        request.httpBody = try JSONEncoder().encode(
-            GeminiGenerateContentRequest(
-                systemInstruction: GeminiContent(parts: [GeminiPart(text: systemInstruction)]),
-                contents: [
-                    GeminiContent(role: "user", parts: [GeminiPart(text: userMessage)])
-                ],
-                generationConfig: GeminiGenerationConfig(
-                    temperature: 0.2,
-                    maxOutputTokens: maxTokens,
-                    thinkingConfig: GeminiThinkingConfig(thinkingBudget: 0)
-                )
-            )
-        )
-
-        return request
-    }
-
-    static func chatCompletionsURL(from baseURL: String) -> URL? {
-        let trimmed = baseURL.trimmed
-        guard var components = URLComponents(string: trimmed) else {
-            return nil
-        }
-
-        if components.path.hasSuffix("/chat/completions") {
-            return components.url
-        }
-
-        let normalizedPath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = normalizedPath.isEmpty ? "/chat/completions" : "/\(normalizedPath)/chat/completions"
-        return components.url
-    }
-
-    static func geminiGenerateContentURL(
-        from baseURL: String,
+    static func makeCodexResponseRequest(
+        credentials: CodexOAuthCredentials,
         model: String,
-        apiKey: String,
-        stream: Bool
-    ) -> URL? {
-        let trimmed = baseURL.trimmed
-        let trimmedModel = normalizeGeminiModelID(model)
-        let trimmedAPIKey = apiKey.trimmed
-
-        guard
-            !trimmed.isEmpty,
-            !trimmedModel.isEmpty,
-            !trimmedAPIKey.isEmpty,
-            var components = URLComponents(string: trimmed)
-        else {
-            return nil
+        instructions: String,
+        userMessage: String
+    ) throws -> URLRequest {
+        var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/codex/responses")!)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
+        request.setValue("codex_cli_rs/0.0.0 (NoType)", forHTTPHeaderField: "User-Agent")
+        if let accountID = credentials.chatGPTAccountID, !accountID.isEmpty {
+            request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-ID")
         }
 
-        let endpoint = stream ? ":streamGenerateContent" : ":generateContent"
-        let normalizedPath = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        components.path = normalizedPath.isEmpty
-            ? "/models/\(trimmedModel)\(endpoint)"
-            : "/\(normalizedPath)/models/\(trimmedModel)\(endpoint)"
+        request.httpBody = try JSONEncoder().encode(
+            CodexResponseRequest(
+                model: model,
+                instructions: instructions,
+                input: [
+                    CodexInputMessage(
+                        role: "user",
+                        content: [
+                            CodexInputContent(type: "input_text", text: userMessage)
+                        ]
+                    )
+                ],
+                stream: true,
+                store: false
+            )
+        )
 
-        var queryItems = components.queryItems ?? []
-        queryItems.removeAll { $0.name == "key" || $0.name == "alt" }
-        if stream {
-            queryItems.append(URLQueryItem(name: "alt", value: "sse"))
-        }
-        queryItems.append(URLQueryItem(name: "key", value: trimmedAPIKey))
-        components.queryItems = queryItems
-        return components.url
-    }
-
-    static func normalizeGeminiModelID(_ model: String) -> String {
-        let trimmedModel = model.trimmed
-        guard !trimmedModel.isEmpty else {
-            return ""
-        }
-
-        let withoutLeadingSlashes = trimmedModel.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if let normalized = withoutLeadingSlashes.split(separator: "/", omittingEmptySubsequences: true).last {
-            if withoutLeadingSlashes.hasPrefix("models/") {
-                return String(normalized)
-            }
-        }
-
-        return withoutLeadingSlashes
-    }
-
-    static func rewriteMessages(for transcript: String) -> [ChatMessage] {
-        [
-            ChatMessage(role: "system", content: rewritePrompt),
-            ChatMessage(role: "user", content: rewriteUserMessage(for: transcript)),
-        ]
+        return request
     }
 
     static func rewriteUserMessage(for transcript: String) -> String {
@@ -430,27 +205,131 @@ actor AIRewriteService {
     """
 }
 
-private enum AIRewriteStreamKind {
-    case openAICompatible
-    case gemini
+struct CodexOAuthCredentials: Equatable, Sendable {
+    let accessToken: String
+    let chatGPTAccountID: String?
+    let expiresAt: Date?
+
+    var isExpired: Bool {
+        guard let expiresAt else { return false }
+        return expiresAt <= Date()
+    }
 }
 
-struct AIRewriteStreamAccumulator {
+struct CodexAuthStore: Sendable {
+    var codexHome: URL?
+
+    init(codexHome: URL? = nil) {
+        self.codexHome = codexHome
+    }
+
+    func loadCredentials() throws -> CodexOAuthCredentials {
+        let authURL = authFileURL()
+        guard FileManager.default.fileExists(atPath: authURL.path) else {
+            throw AIRewriteError.missingCodexAuth
+        }
+
+        let data = try Data(contentsOf: authURL)
+        let decoded = try JSONDecoder().decode(CodexAuthFile.self, from: data)
+        let accessToken = decoded.tokens.accessToken.trimmed
+        guard !accessToken.isEmpty else {
+            throw AIRewriteError.invalidCodexAuth
+        }
+
+        let claims = Self.decodeJWTPayload(accessToken)
+        let accountID = claims?["https://api.openai.com/auth"]?["chatgpt_account_id"]?.stringValue
+        let expiresAt = claims?["exp"]?.doubleValue.map { Date(timeIntervalSince1970: $0) }
+
+        return CodexOAuthCredentials(
+            accessToken: accessToken,
+            chatGPTAccountID: accountID,
+            expiresAt: expiresAt
+        )
+    }
+
+    func authFileURL() -> URL {
+        if let codexHome {
+            return codexHome.appendingPathComponent("auth.json")
+        }
+
+        if let envCodexHome = ProcessInfo.processInfo.environment["CODEX_HOME"], !envCodexHome.trimmed.isEmpty {
+            return URL(fileURLWithPath: envCodexHome).appendingPathComponent("auth.json")
+        }
+
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex")
+            .appendingPathComponent("auth.json")
+    }
+
+    static func decodeJWTPayload(_ token: String) -> [String: JSONValue]? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+
+        var base64 = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+
+        let padding = base64.count % 4
+        if padding > 0 {
+            base64 += String(repeating: "=", count: 4 - padding)
+        }
+
+        guard let data = Data(base64Encoded: base64) else { return nil }
+        return try? JSONDecoder().decode([String: JSONValue].self, from: data)
+    }
+}
+
+struct CodexModelResolver: Sendable {
+    var codexHome: URL?
+
+    init(codexHome: URL? = nil) {
+        self.codexHome = codexHome
+    }
+
+    func resolveModel() -> String {
+        configuredModel() ?? "gpt-5.5"
+    }
+
+    private func configuredModel() -> String? {
+        let configURL: URL
+        if let codexHome {
+            configURL = codexHome.appendingPathComponent("config.toml")
+        } else if let envCodexHome = ProcessInfo.processInfo.environment["CODEX_HOME"], !envCodexHome.trimmed.isEmpty {
+            configURL = URL(fileURLWithPath: envCodexHome).appendingPathComponent("config.toml")
+        } else {
+            configURL = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex")
+                .appendingPathComponent("config.toml")
+        }
+
+        guard let contents = try? String(contentsOf: configURL, encoding: .utf8) else {
+            return nil
+        }
+
+        for rawLine in contents.split(separator: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("model") else { continue }
+            let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
+            guard parts.count == 2 else { continue }
+            let value = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return value.isEmpty ? nil : value
+        }
+
+        return nil
+    }
+}
+
+struct CodexResponseStreamAccumulator {
     private(set) var accumulatedText = ""
-    private(set) var sawDone = false
-    private(set) var sawTerminalChoice = false
+    private(set) var sawTerminalEvent = false
 
     var isComplete: Bool {
-        sawDone || sawTerminalChoice
+        sawTerminalEvent
     }
 
     mutating func consume(line: String) throws -> String? {
         let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedLine.isEmpty else {
-            return nil
-        }
-
-        guard trimmedLine.hasPrefix("data:") else {
+        guard !trimmedLine.isEmpty, trimmedLine.hasPrefix("data:") else {
             return nil
         }
 
@@ -459,182 +338,110 @@ struct AIRewriteStreamAccumulator {
             return nil
         }
 
-        if payload == "[DONE]" {
-            sawDone = true
-            return nil
-        }
-
         let data = Data(payload.utf8)
-        let decoded = try JSONDecoder().decode(ChatCompletionStreamResponse.self, from: data)
-        if decoded.choices.contains(where: { $0.finishReason != nil }) {
-            sawTerminalChoice = true
-        }
-        let deltaText = decoded.choices.compactMap(\.delta?.content?.text).joined()
-        guard !deltaText.isEmpty else {
+        let decoded = try JSONDecoder().decode(CodexResponseStreamEvent.self, from: data)
+
+        switch decoded.type {
+        case "response.output_text.delta":
+            let delta = decoded.delta ?? ""
+            guard !delta.isEmpty else { return nil }
+            accumulatedText += delta
+            return accumulatedText
+        case "response.output_text.done":
+            if let text = decoded.text {
+                accumulatedText = text
+            }
+            sawTerminalEvent = true
+            return nil
+        case "response.completed":
+            sawTerminalEvent = true
+            return nil
+        case "response.failed", "response.incomplete":
+            sawTerminalEvent = true
+            return nil
+        default:
             return nil
         }
-
-        accumulatedText += deltaText
-        return accumulatedText
     }
 }
 
-struct GeminiRewriteStreamAccumulator {
-    private(set) var accumulatedText = ""
-    private(set) var sawTerminalCandidate = false
+private struct CodexAuthFile: Decodable {
+    let tokens: CodexAuthTokens
+}
 
-    var isComplete: Bool {
-        sawTerminalCandidate
-    }
+private struct CodexAuthTokens: Decodable {
+    let accessToken: String
 
-    mutating func consume(line: String) throws -> String? {
-        let trimmedLine = line.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedLine.isEmpty else {
-            return nil
-        }
-
-        guard trimmedLine.hasPrefix("data:") else {
-            return nil
-        }
-
-        let payload = String(trimmedLine.dropFirst(5)).trimmed
-        guard !payload.isEmpty else {
-            return nil
-        }
-
-        let data = Data(payload.utf8)
-        let decoded = try JSONDecoder().decode(GeminiGenerateContentResponse.self, from: data)
-        if decoded.candidates?.contains(where: { $0.finishReason != nil }) == true {
-            sawTerminalCandidate = true
-        }
-
-        let deltaText = decoded.candidates?.compactMap(\.content?.text).joined() ?? ""
-        guard !deltaText.isEmpty else {
-            return nil
-        }
-
-        accumulatedText += deltaText
-        return accumulatedText
+    private enum CodingKeys: String, CodingKey {
+        case accessToken = "access_token"
     }
 }
 
-private struct ChatCompletionRequest: Encodable {
+private struct CodexResponseRequest: Encodable {
     let model: String
-    let messages: [ChatMessage]
-    let temperature: Double
-    let maxTokens: Int
+    let instructions: String
+    let input: [CodexInputMessage]
     let stream: Bool
-
-    enum CodingKeys: String, CodingKey {
-        case model
-        case messages
-        case temperature
-        case maxTokens = "max_tokens"
-        case stream
-    }
+    let store: Bool
 }
 
-struct ChatMessage: Codable {
+private struct CodexInputMessage: Encodable {
     let role: String
-    let content: String
+    let content: [CodexInputContent]
 }
 
-private struct ChatCompletionResponse: Decodable {
-    let choices: [Choice]
-
-    struct Choice: Decodable {
-        let message: Message?
-    }
-
-    struct Message: Decodable {
-        let content: MessageContent?
-    }
+private struct CodexInputContent: Encodable {
+    let type: String
+    let text: String
 }
 
-private struct ChatCompletionStreamResponse: Decodable {
-    let choices: [Choice]
-
-    struct Choice: Decodable {
-        let delta: Delta?
-        let finishReason: String?
-
-        enum CodingKeys: String, CodingKey {
-            case delta
-            case finishReason = "finish_reason"
-        }
-    }
-
-    struct Delta: Decodable {
-        let content: MessageContent?
-    }
+private struct CodexResponseStreamEvent: Decodable {
+    let type: String
+    let delta: String?
+    let text: String?
 }
 
-private enum MessageContent: Decodable {
+enum JSONValue: Decodable, Equatable {
     case string(String)
-    case parts([Part])
+    case number(Double)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case bool(Bool)
+    case null
 
-    struct Part: Decodable {
-        let text: String?
+    var stringValue: String? {
+        if case .string(let value) = self { return value }
+        return nil
+    }
+
+    var doubleValue: Double? {
+        if case .number(let value) = self { return value }
+        return nil
+    }
+
+    subscript(key: String) -> JSONValue? {
+        if case .object(let object) = self {
+            return object[key]
+        }
+        return nil
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
-        if let value = try? container.decode(String.self) {
+        if container.decodeNil() {
+            self = .null
+        } else if let value = try? container.decode(Bool.self) {
+            self = .bool(value)
+        } else if let value = try? container.decode(Double.self) {
+            self = .number(value)
+        } else if let value = try? container.decode(String.self) {
             self = .string(value)
-            return
-        }
-        self = .parts(try container.decode([Part].self))
-    }
-
-    var text: String {
-        switch self {
-        case .string(let value):
-            value
-        case .parts(let parts):
-            parts.compactMap(\.text).joined()
+        } else if let value = try? container.decode([JSONValue].self) {
+            self = .array(value)
+        } else if let value = try? container.decode([String: JSONValue].self) {
+            self = .object(value)
+        } else {
+            throw DecodingError.dataCorruptedError(in: container, debugDescription: "Unsupported JSON value.")
         }
     }
-}
-
-private struct GeminiGenerateContentRequest: Encodable {
-    let systemInstruction: GeminiContent
-    let contents: [GeminiContent]
-    let generationConfig: GeminiGenerationConfig
-}
-
-private struct GeminiGenerationConfig: Encodable {
-    let temperature: Double
-    let maxOutputTokens: Int
-    let thinkingConfig: GeminiThinkingConfig?
-}
-
-private struct GeminiThinkingConfig: Encodable {
-    let thinkingBudget: Int
-}
-
-private struct GeminiGenerateContentResponse: Decodable {
-    let candidates: [Candidate]?
-
-    struct Candidate: Decodable {
-        let content: GeminiContent?
-        let finishReason: String?
-    }
-}
-
-private struct GeminiContent: Codable {
-    let role: String?
-    let parts: [GeminiPart]
-
-    init(role: String? = nil, parts: [GeminiPart]) {
-        self.role = role
-        self.parts = parts
-    }
-
-    var text: String {
-        parts.map(\.text).joined()
-    }
-}
-
-private struct GeminiPart: Codable {
-    let text: String
 }

@@ -3,6 +3,14 @@ import Foundation
 import Testing
 @testable import NoType
 
+private func base64URL(_ value: String) -> String {
+    Data(value.utf8)
+        .base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+}
+
 @Test
 func pcmChunkingSplitsDataIntoFixedFrames() {
     let bytes = Data(repeating: 0x7F, count: PCMUtilities.chunkByteCount * 2 + 123)
@@ -50,7 +58,6 @@ func appSettingsDecodeMigratesLegacyClusterField() throws {
 
     #expect(decoded.resourceID == "legacy-cluster")
     #expect(decoded.llmRefinementEnabled)
-    #expect(decoded.llmProvider == .openAICompatible)
 }
 
 @Test
@@ -63,10 +70,7 @@ func settingsStoreRoundTripsRestoredSettings() throws {
         resourceID: "volc.seedasr.sauc.duration",
         hotkey: .commandShiftSpace,
         language: .jaJP,
-        llmRefinementEnabled: true,
-        llmProvider: .openAICompatible,
-        llmBaseURL: "https://example.com/v1",
-        llmModel: "gpt-test"
+        llmRefinementEnabled: true
     )
 
     try store.save(settings)
@@ -85,87 +89,6 @@ func settingsStoreTracksWhetherAccessTokenExists() {
     #expect(store.storedAccessTokenPresence() == true)
     store.clearStoredAccessTokenPresence()
     #expect(store.storedAccessTokenPresence() == nil)
-}
-
-@Test
-func settingsStoreTracksWhetherLLMAPIKeyExists() {
-    let defaults = UserDefaults(suiteName: UUID().uuidString)!
-    let store = SettingsStore(userDefaults: defaults)
-
-    #expect(store.storedLLMAPIKeyPresence() == nil)
-    store.setHasStoredLLMAPIKey(true)
-    #expect(store.storedLLMAPIKeyPresence() == true)
-    store.clearStoredLLMAPIKeyPresence()
-    #expect(store.storedLLMAPIKeyPresence() == nil)
-}
-
-@Test
-func llmDraftRequiresBaseURLAPIKeyAndModel() {
-    #expect(!LLMSettingsDraft(provider: .openAICompatible, baseURL: "", apiKey: "token", model: "gpt").isConfigured)
-    #expect(!LLMSettingsDraft(provider: .openAICompatible, baseURL: "https://example.com/v1", apiKey: "", model: "gpt").isConfigured)
-    #expect(LLMSettingsDraft(provider: .openAICompatible, baseURL: "https://example.com/v1", apiKey: "token", model: "gpt").isConfigured)
-}
-
-@Test
-func geminiDraftRequiresOnlyAPIKeyAndModel() {
-    #expect(!LLMSettingsDraft(provider: .gemini, baseURL: "", apiKey: "", model: "gemini-2.5-flash").isConfigured)
-    #expect(LLMSettingsDraft(provider: .gemini, baseURL: "", apiKey: "token", model: "gemini-2.5-flash").isConfigured)
-    #expect(
-        LLMSettingsDraft(
-            provider: .gemini,
-            baseURL: "https://example.com/ignored",
-            apiKey: "token",
-            model: "gemini-2.5-flash"
-        ).effectiveBaseURL == LLMProvider.gemini.defaultBaseURL
-    )
-}
-
-@MainActor
-@Test
-func switchingLLMProviderResetsModelToNewProviderDefault() {
-    let model = NoTypeAppModel()
-    model.llmSettingsDraft.provider = .openAICompatible
-    model.llmSettingsDraft.baseURL = "https://api.openai.com/v1"
-    model.llmSettingsDraft.model = "gpt-4.1"
-
-    model.selectLLMProvider(.gemini)
-
-    #expect(model.llmSettingsDraft.provider == .gemini)
-    #expect(model.llmSettingsDraft.model == LLMProvider.gemini.defaultModel)
-}
-
-@MainActor
-@Test
-func switchingLLMProviderLoadsProviderScopedAPIKey() throws {
-    let defaults = UserDefaults(suiteName: UUID().uuidString)!
-    let settingsStore = SettingsStore(userDefaults: defaults)
-    let keychain = KeychainClient(service: UUID().uuidString)
-
-    let settings = AppSettings(
-        appID: "app-id",
-        resourceID: "volc.seedasr.sauc.duration",
-        hotkey: .optionSpace,
-        language: .zhCN,
-        llmRefinementEnabled: true,
-        llmProvider: .openAICompatible,
-        llmBaseURL: "https://api.openai.com/v1",
-        llmModel: "gpt-4.1-mini"
-    )
-    try settingsStore.save(settings)
-    try keychain.save("openai-key", for: "llm.api-key.openai-compatible")
-    try keychain.save("gemini-key", for: "llm.api-key.gemini")
-
-    let model = NoTypeAppModel(settingsStore: settingsStore, keychainClient: keychain)
-    model.prepareSettings()
-    #expect(model.llmSettingsDraft.apiKey == "openai-key")
-
-    model.selectLLMProvider(.gemini)
-    #expect(model.llmSettingsDraft.provider == .gemini)
-    #expect(model.llmSettingsDraft.apiKey == "gemini-key")
-
-    model.selectLLMProvider(.openAICompatible)
-    #expect(model.llmSettingsDraft.provider == .openAICompatible)
-    #expect(model.llmSettingsDraft.apiKey == "openai-key")
 }
 
 @Test
@@ -260,166 +183,84 @@ func inputSourceServiceRecognizesCJKLanguagesAndInputSourceMarkers() {
 }
 
 @Test
-func aiRewriteStreamAccumulatorBuildsPartialTextFromSSEChunks() throws {
-    var accumulator = AIRewriteStreamAccumulator()
+func codexResponseStreamAccumulatorBuildsPartialTextFromSSEChunks() throws {
+    var accumulator = CodexResponseStreamAccumulator()
 
     let first = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{"content":"你好"}}]}"#
+        line: #"data: {"type":"response.output_text.delta","delta":"你好"}"#
     )
     let second = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{"content":"，世界"}}]}"#
+        line: #"data: {"type":"response.output_text.delta","delta":"，世界"}"#
     )
-    let done = try accumulator.consume(line: "data: [DONE]")
+    let done = try accumulator.consume(
+        line: #"data: {"type":"response.output_text.done","text":"你好，世界"}"#
+    )
 
     #expect(first == "你好")
     #expect(second == "你好，世界")
     #expect(done == nil)
     #expect(accumulator.accumulatedText == "你好，世界")
-    #expect(accumulator.sawDone)
-}
-
-@Test
-func aiRewriteStreamAccumulatorIgnoresRoleOnlyAndEmptyDeltaEvents() throws {
-    var accumulator = AIRewriteStreamAccumulator()
-
-    let roleOnly = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{"role":"assistant"}}]}"#
-    )
-    let emptyDelta = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{}}]}"#
-    )
-    let blankLine = try accumulator.consume(line: "")
-
-    #expect(roleOnly == nil)
-    #expect(emptyDelta == nil)
-    #expect(blankLine == nil)
-    #expect(accumulator.accumulatedText.isEmpty)
-    #expect(!accumulator.sawDone)
-}
-
-@Test
-func aiRewriteStreamAccumulatorTreatsFinishReasonAsTerminalWithoutDone() throws {
-    var accumulator = AIRewriteStreamAccumulator()
-
-    let first = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{"content":"1. 修复设置页按钮颜色"}}]}"#
-    )
-    let terminal = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{},"finish_reason":"stop"}]}"#
-    )
-
-    #expect(first == "1. 修复设置页按钮颜色")
-    #expect(terminal == nil)
-    #expect(accumulator.accumulatedText == "1. 修复设置页按钮颜色")
-    #expect(!accumulator.sawDone)
-    #expect(accumulator.sawTerminalChoice)
     #expect(accumulator.isComplete)
 }
 
 @Test
-func aiRewriteStreamAccumulatorKeepsPartialOnlyStreamIncomplete() throws {
-    var accumulator = AIRewriteStreamAccumulator()
+func codexResponseStreamAccumulatorIgnoresNonDataAndNonTextEvents() throws {
+    var accumulator = CodexResponseStreamAccumulator()
 
-    let first = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{"content":"先修复设置页按钮颜色"}}]}"#
-    )
-    let second = try accumulator.consume(
-        line: #"data: {"choices":[{"delta":{"content":"，再补回归测试"}}]}"#
-    )
+    let eventLine = try accumulator.consume(line: "event: response.created")
+    let created = try accumulator.consume(line: #"data: {"type":"response.created"}"#)
+    let blankLine = try accumulator.consume(line: "")
 
-    #expect(first == "先修复设置页按钮颜色")
-    #expect(second == "先修复设置页按钮颜色，再补回归测试")
-    #expect(accumulator.accumulatedText == "先修复设置页按钮颜色，再补回归测试")
-    #expect(!accumulator.sawDone)
-    #expect(!accumulator.sawTerminalChoice)
+    #expect(eventLine == nil)
+    #expect(created == nil)
+    #expect(blankLine == nil)
+    #expect(accumulator.accumulatedText.isEmpty)
     #expect(!accumulator.isComplete)
 }
 
 @Test
-func aiRewriteChatCompletionsURLAppendsEndpointOnlyOnce() {
-    #expect(
-        AIRewriteService.chatCompletionsURL(from: "https://example.com/v1")?.absoluteString
-            == "https://example.com/v1/chat/completions"
+func codexResponseRequestUsesCodexHeadersAndStreamingBody() throws {
+    let credentials = CodexOAuthCredentials(
+        accessToken: "access-token",
+        chatGPTAccountID: "account-id",
+        expiresAt: Date(timeIntervalSinceNow: 3600)
     )
-    #expect(
-        AIRewriteService.chatCompletionsURL(from: "https://example.com/v1/chat/completions")?.absoluteString
-            == "https://example.com/v1/chat/completions"
+
+    let request = try AIRewriteService.makeCodexResponseRequest(
+        credentials: credentials,
+        model: "gpt-test",
+        instructions: "system",
+        userMessage: "user"
     )
+
+    #expect(request.url?.absoluteString == "https://chatgpt.com/backend-api/codex/responses")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer access-token")
+    #expect(request.value(forHTTPHeaderField: "originator") == "codex_cli_rs")
+    #expect(request.value(forHTTPHeaderField: "ChatGPT-Account-ID") == "account-id")
+
+    let bodyData = try #require(request.httpBody)
+    let body = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+    #expect(body["model"] as? String == "gpt-test")
+    #expect(body["stream"] as? Bool == true)
+    #expect(body["store"] as? Bool == false)
+    #expect(body["max_output_tokens"] == nil)
 }
 
 @Test
-func geminiGenerateContentURLBuildsNativeEndpoints() {
-    #expect(
-        AIRewriteService.geminiGenerateContentURL(
-            from: "https://generativelanguage.googleapis.com/v1beta",
-            model: "gemini-2.5-flash",
-            apiKey: "token",
-            stream: false
-        )?.absoluteString
-            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=token"
-    )
-    #expect(
-        AIRewriteService.geminiGenerateContentURL(
-            from: "https://generativelanguage.googleapis.com/v1beta",
-            model: "models/gemini-2.5-flash",
-            apiKey: "token",
-            stream: false
-        )?.absoluteString
-            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=token"
-    )
-    #expect(
-        AIRewriteService.geminiGenerateContentURL(
-            from: "https://generativelanguage.googleapis.com/v1beta",
-            model: "/models/gemini-2.5-flash",
-            apiKey: "token",
-            stream: true
-        )?.absoluteString
-            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:streamGenerateContent?alt=sse&key=token"
-    )
-}
+func codexAuthStoreReadsAccessTokenAndAccountID() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
 
-@Test
-func geminiModelNormalizationStripsModelsPrefix() {
-    #expect(AIRewriteService.normalizeGeminiModelID("gemini-2.5-flash") == "gemini-2.5-flash")
-    #expect(AIRewriteService.normalizeGeminiModelID("models/gemini-2.5-flash") == "gemini-2.5-flash")
-    #expect(AIRewriteService.normalizeGeminiModelID("/models/gemini-2.5-flash") == "gemini-2.5-flash")
-    #expect(AIRewriteService.normalizeGeminiModelID(" /models/gemini-2.5-flash/ ") == "gemini-2.5-flash")
-}
+    let payload = #"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-123"},"exp":4102444800}"#
+    let token = "header.\(base64URL(payload)).signature"
+    let authJSON = #"{"tokens":{"access_token":"\#(token)"}}"#
+    try authJSON.write(to: home.appendingPathComponent("auth.json"), atomically: true, encoding: .utf8)
 
-@Test
-func geminiRewriteStreamAccumulatorBuildsPartialTextFromNativeChunks() throws {
-    var accumulator = GeminiRewriteStreamAccumulator()
+    let credentials = try CodexAuthStore(codexHome: home).loadCredentials()
 
-    let first = try accumulator.consume(
-        line: #"data: {"candidates":[{"content":{"parts":[{"text":"你好"}]}}]}"#
-    )
-    let second = try accumulator.consume(
-        line: #"data: {"candidates":[{"content":{"parts":[{"text":"，世界"}]},"finishReason":"STOP"}]}"#
-    )
-
-    #expect(first == "你好")
-    #expect(second == "你好，世界")
-    #expect(accumulator.accumulatedText == "你好，世界")
-    #expect(accumulator.sawTerminalCandidate)
-    #expect(accumulator.isComplete)
-}
-
-@Test
-func geminiRewriteURLUsesNormalizedModelInPath() {
-    #expect(
-        AIRewriteService.geminiGenerateContentURL(
-            from: "https://generativelanguage.googleapis.com/v1beta",
-            model: "gemini-2.5-flash",
-            apiKey: "token",
-            stream: false
-        )?.absoluteString
-            == AIRewriteService.geminiGenerateContentURL(
-                from: "https://generativelanguage.googleapis.com/v1beta",
-                model: "models/gemini-2.5-flash",
-                apiKey: "token",
-                stream: false
-            )?.absoluteString
-    )
+    #expect(credentials.accessToken == token)
+    #expect(credentials.chatGPTAccountID == "acct-123")
+    #expect(credentials.isExpired == false)
 }
 
 @Test
@@ -442,16 +283,14 @@ func aiRewritePromptTreatsTranscriptAsEditableTextNotAssistantTask() {
 }
 
 @Test
-func aiRewriteMessagesWrapTranscriptInsideDedicatedUserPayload() {
-    let messages = AIRewriteService.rewriteMessages(
+func aiRewriteUserMessageWrapsTranscriptInsideDedicatedPayload() {
+    let message = AIRewriteService.rewriteUserMessage(
         for: "第一修按钮颜色，第二补测试。"
     )
 
-    #expect(messages.count == 2)
-    #expect(messages[0].role == "system")
-    #expect(messages[1].role == "user")
-    #expect(messages[1].content.contains("<transcript>"))
-    #expect(messages[1].content.contains("第一修按钮颜色，第二补测试。"))
+    #expect(message.contains("<transcript>"))
+    #expect(message.contains("</transcript>"))
+    #expect(message.contains("第一修按钮颜色，第二补测试。"))
 }
 
 @Test
