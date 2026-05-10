@@ -41,6 +41,11 @@ func appSettingsDefaultLanguageUsesSimplifiedChinese() {
 }
 
 @Test
+func appSettingsDefaultASRProviderUsesDoubao() {
+    #expect(AppSettings.defaults.asrProvider == .doubao)
+}
+
+@Test
 func appSettingsDecodeMigratesLegacyClusterField() throws {
     let payload = """
     {
@@ -56,6 +61,7 @@ func appSettingsDecodeMigratesLegacyClusterField() throws {
 
     let decoded = try JSONDecoder().decode(AppSettings.self, from: payload)
 
+    #expect(decoded.asrProvider == .doubao)
     #expect(decoded.resourceID == "legacy-cluster")
     #expect(decoded.llmRefinementEnabled)
 }
@@ -92,6 +98,18 @@ func settingsStoreTracksWhetherAccessTokenExists() {
 }
 
 @Test
+func settingsStoreTracksWhetherOpenAIAPIKeyExists() {
+    let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    let store = SettingsStore(userDefaults: defaults)
+
+    #expect(store.storedOpenAIAPIKeyPresence() == nil)
+    store.setHasStoredOpenAIAPIKey(true)
+    #expect(store.storedOpenAIAPIKeyPresence() == true)
+    store.clearStoredOpenAIAPIKeyPresence()
+    #expect(store.storedOpenAIAPIKeyPresence() == nil)
+}
+
+@Test
 func doubaoAudioRequestMarksFinalFrameInHeader() {
     let audio = Data([0x01, 0x02, 0x03])
 
@@ -124,6 +142,59 @@ func doubaoWebSocketRequestUsesV2ResourceHeaders() {
     #expect(request.value(forHTTPHeaderField: "X-Api-Access-Key") == "token-value")
     #expect(request.value(forHTTPHeaderField: "X-Api-Resource-Id") == "volc.seedasr.sauc.duration")
     #expect(request.value(forHTTPHeaderField: "X-Api-Connect-Id") == "connect-id")
+}
+
+@Test
+func openAIWebSocketRequestUsesTranscriptionIntentAndAuthHeaders() {
+    let request = try! OpenAIStreamASRProvider.makeWebSocketRequest(
+        apiKey: "sk-test",
+        baseURL: "https://api.openai.com/v1",
+        userID: "host-id"
+    )
+
+    #expect(request.url?.absoluteString == "wss://api.openai.com/v1/realtime?intent=transcription")
+    #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer sk-test")
+    #expect(request.value(forHTTPHeaderField: "OpenAI-Safety-Identifier") == "host-id")
+}
+
+@Test
+func openAIRealtimeURLNormalizesProxyBaseURLs() throws {
+    let httpsURL = try OpenAIStreamASRProvider.makeRealtimeWebSocketURL(
+        from: "https://proxy.example.com/openai/v1"
+    )
+    let wssURL = try OpenAIStreamASRProvider.makeRealtimeWebSocketURL(
+        from: "wss://proxy.example.com/openai/v1/realtime?intent=transcription"
+    )
+
+    #expect(httpsURL.absoluteString == "wss://proxy.example.com/openai/v1/realtime?intent=transcription")
+    #expect(wssURL.absoluteString == "wss://proxy.example.com/openai/v1/realtime?intent=transcription")
+}
+
+@Test
+func openAISessionUpdateUsesStreamingTranscriptionPayload() throws {
+    let message = OpenAIStreamASRProvider.makeSessionUpdateMessage(language: "zh")
+
+    #expect(message["type"] as? String == "transcription_session.update")
+    #expect(message["input_audio_format"] as? String == "pcm16")
+    #expect(message["turn_detection"] is NSNull)
+
+    let transcription = try #require(message["input_audio_transcription"] as? [String: Any])
+    #expect(transcription["model"] as? String == "gpt-4o-mini-transcribe")
+    #expect(transcription["language"] as? String == "zh")
+
+    let noiseReduction = try #require(message["input_audio_noise_reduction"] as? [String: Any])
+    #expect(noiseReduction["type"] as? String == "near_field")
+}
+
+@Test
+func openAIAudioAppendAndCommitMessagesHaveExpectedShape() throws {
+    let audio = Data([0xAB, 0xCD, 0xEF])
+    let append = OpenAIStreamASRProvider.makeAudioAppendMessage(data: audio)
+    let commit = OpenAIStreamASRProvider.makeCommitMessage()
+
+    #expect(append["type"] as? String == "input_audio_buffer.append")
+    #expect(append["audio"] as? String == audio.base64EncodedString())
+    #expect(commit["type"] as? String == "input_audio_buffer.commit")
 }
 
 @Test

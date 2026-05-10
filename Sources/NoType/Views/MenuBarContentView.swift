@@ -51,7 +51,7 @@ struct MenuBarContentView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .font(.caption)
-                    Text("Missing Doubao credentials")
+                    Text("Missing speech credentials")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                 }

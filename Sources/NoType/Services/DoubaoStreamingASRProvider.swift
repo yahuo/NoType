@@ -5,6 +5,7 @@ private let doubaoASRServiceURL = URL(string: "wss://openspeech.bytedance.com/ap
 @MainActor
 final class DoubaoStreamingASRProvider: NSObject, ASRProvider {
     var eventHandler: ((ASRProviderEvent) -> Void)?
+    let audioSampleRate = PCMUtilities.sampleRate
 
     nonisolated static var serviceURL: URL { doubaoASRServiceURL }
 

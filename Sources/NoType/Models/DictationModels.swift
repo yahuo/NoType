@@ -54,13 +54,40 @@ struct DictationTargetContext: Equatable {
 }
 
 struct ASRSessionConfig: Equatable {
+    let provider: ASRProviderOption
     let appID: String
     let accessToken: String
     let resourceID: String
+    let openAIAPIKey: String
+    let openAIBaseURL: String
     let userID: String
     let language: DictationLanguage
     let workflow: String
     let utteranceMode: Bool
+
+    init(
+        provider: ASRProviderOption = .doubao,
+        appID: String,
+        accessToken: String,
+        resourceID: String,
+        openAIAPIKey: String = "",
+        openAIBaseURL: String = AppSettings.defaults.openAIBaseURL,
+        userID: String,
+        language: DictationLanguage,
+        workflow: String,
+        utteranceMode: Bool
+    ) {
+        self.provider = provider
+        self.appID = appID
+        self.accessToken = accessToken
+        self.resourceID = resourceID
+        self.openAIAPIKey = openAIAPIKey
+        self.openAIBaseURL = openAIBaseURL
+        self.userID = userID
+        self.language = language
+        self.workflow = workflow
+        self.utteranceMode = utteranceMode
+    }
 }
 
 enum ASRProviderEvent: Equatable {

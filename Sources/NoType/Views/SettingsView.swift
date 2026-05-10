@@ -44,20 +44,19 @@ struct SettingsView: View {
     private var speechTab: some View {
         Form {
             Section {
-                TextField("App ID", text: $model.settings.appID)
-                    .textFieldStyle(.roundedBorder)
-
-                TextField("Resource ID", text: $model.settings.resourceID)
-                    .textFieldStyle(.roundedBorder)
-
-                SecureField("Access Token", text: $model.accessToken)
-                    .textFieldStyle(.roundedBorder)
-
-                Text("Access Token is stored securely in Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                Picker("Provider", selection: $model.settings.asrProvider) {
+                    ForEach(ASRProviderOption.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
             } header: {
-                Label("Doubao Credentials", systemImage: "key.fill")
+                Label("Provider", systemImage: "waveform")
+            }
+
+            if model.settings.asrProvider == .doubao {
+                doubaoCredentialsSection
+            } else {
+                openAICredentialsSection
             }
 
             Section {
@@ -82,6 +81,46 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
         .scrollIndicators(.hidden)
+    }
+
+    private var doubaoCredentialsSection: some View {
+        Section {
+                TextField("App ID", text: $model.settings.appID)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("Resource ID", text: $model.settings.resourceID)
+                    .textFieldStyle(.roundedBorder)
+
+                SecureField("Access Token", text: $model.accessToken)
+                    .textFieldStyle(.roundedBorder)
+
+                Text("Access Token is stored securely in Keychain.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Doubao Credentials", systemImage: "key.fill")
+            }
+    }
+
+    private var openAICredentialsSection: some View {
+        Section {
+            SecureField("API Key", text: $model.openAIAPIKey)
+                .textFieldStyle(.roundedBorder)
+
+            TextField("API Base URL", text: $model.settings.openAIBaseURL)
+                .textFieldStyle(.roundedBorder)
+
+            LabeledContent("Model") {
+                Text(OpenAIStreamASRProvider.transcriptionModel)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("API Key is stored securely in Keychain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Label("OpenAI Credentials", systemImage: "key.fill")
+        }
     }
 
     // MARK: - AI Rewrite Tab

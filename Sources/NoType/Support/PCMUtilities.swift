@@ -6,8 +6,11 @@ enum PCMUtilities {
     static let bitsPerSample = 16
     static let chunkDurationMilliseconds = 200
 
-    static let chunkByteCount =
+    static let chunkByteCount = chunkByteCount(for: sampleRate)
+
+    static func chunkByteCount(for sampleRate: Int) -> Int {
         sampleRate * channelCount * (bitsPerSample / 8) * chunkDurationMilliseconds / 1_000
+    }
 
     static func chunk(_ data: Data, chunkSize: Int = chunkByteCount) -> [Data] {
         guard !data.isEmpty else { return [] }

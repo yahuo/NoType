@@ -23,6 +23,7 @@ enum ASRProviderError: LocalizedError {
 @MainActor
 protocol ASRProvider: AnyObject {
     var eventHandler: ((ASRProviderEvent) -> Void)? { get set }
+    var audioSampleRate: Int { get }
 
     func startSession(config: ASRSessionConfig) async throws
     func sendAudioFrame(_ data: Data, isFinal: Bool) async throws

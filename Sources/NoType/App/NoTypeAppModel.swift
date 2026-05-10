@@ -12,6 +12,14 @@ final class NoTypeAppModel: ObservableObject {
             storedAccessTokenPresence = !accessToken.trimmed.isEmpty
         }
     }
+    @Published var openAIAPIKey = "" {
+        didSet {
+            guard !isInternallyUpdatingOpenAIAPIKey else { return }
+            hasLoadedOpenAIAPIKey = true
+            hasEditedOpenAIAPIKey = true
+            storedOpenAIAPIKeyPresence = !openAIAPIKey.trimmed.isEmpty
+        }
+    }
     @Published var permissionSnapshot: PermissionSnapshot
     @Published var phase: DictationPhase
     @Published var transcriptPreview = ""
@@ -30,14 +38,19 @@ final class NoTypeAppModel: ObservableObject {
     private let textInsertionService: TextInsertionService
     private let aiRewriteService: AIRewriteService
     private let hudController: HUDPanelController
-    private let providerFactory: () -> ASRProvider
+    private let providerFactory: (ASRProviderOption) -> ASRProvider
     private let doubaoAccessTokenAccount = "doubao.access-token"
+    private let openAIAPIKeyAccount = "openai.api-key"
 
     private var asrProvider: ASRProvider?
     private var hasLoadedAccessToken = false
     private var hasEditedAccessToken = false
     private var isInternallyUpdatingAccessToken = false
     private var storedAccessTokenPresence: Bool?
+    private var hasLoadedOpenAIAPIKey = false
+    private var hasEditedOpenAIAPIKey = false
+    private var isInternallyUpdatingOpenAIAPIKey = false
+    private var storedOpenAIAPIKeyPresence: Bool?
     private var feedbackTask: Task<Void, Never>?
     private var completionTask: Task<Void, Never>?
     private var pendingRewritePreviewTask: Task<Void, Never>?
@@ -55,7 +68,14 @@ final class NoTypeAppModel: ObservableObject {
         textInsertionService: TextInsertionService = TextInsertionService(),
         aiRewriteService: AIRewriteService = AIRewriteService(),
         hudController: HUDPanelController = HUDPanelController(),
-        providerFactory: @escaping () -> ASRProvider = { DoubaoStreamingASRProvider() }
+        providerFactory: @escaping (ASRProviderOption) -> ASRProvider = { provider in
+            switch provider {
+            case .doubao:
+                DoubaoStreamingASRProvider()
+            case .openAI:
+                OpenAIStreamASRProvider()
+            }
+        }
     ) {
         self.settingsStore = settingsStore
         self.keychainClient = keychainClient
@@ -70,6 +90,7 @@ final class NoTypeAppModel: ObservableObject {
         let settings = settingsStore.load()
         self.settings = settings
         storedAccessTokenPresence = settingsStore.storedAccessTokenPresence()
+        storedOpenAIAPIKeyPresence = settingsStore.storedOpenAIAPIKeyPresence()
         permissionSnapshot = PermissionSnapshot(
             microphoneAuthorized: false,
             accessibilityAuthorized: false
@@ -112,11 +133,19 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     var hasASRCredentials: Bool {
-        guard settings.hasValidASRConfiguration else { return false }
-        if hasLoadedAccessToken {
-            return !accessToken.trimmed.isEmpty
+        switch settings.asrProvider {
+        case .doubao:
+            guard settings.hasValidDoubaoConfiguration else { return false }
+            if hasLoadedAccessToken {
+                return !accessToken.trimmed.isEmpty
+            }
+            return storedAccessTokenPresence ?? true
+        case .openAI:
+            if hasLoadedOpenAIAPIKey {
+                return !openAIAPIKey.trimmed.isEmpty
+            }
+            return storedOpenAIAPIKeyPresence ?? true
         }
-        return storedAccessTokenPresence ?? true
     }
 
     var hotkeyDisplayName: String {
@@ -164,10 +193,18 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         if !hasASRCredentials {
-            return localizedText(
-                zh: "先在 Settings 中配置豆包 App ID、Resource ID 和 Access Token。",
-                en: "Configure the Doubao App ID, Resource ID, and Access Token in Settings first."
-            )
+            switch settings.asrProvider {
+            case .doubao:
+                return localizedText(
+                    zh: "先在 Settings 中配置豆包 App ID、Resource ID 和 Access Token。",
+                    en: "Configure the Doubao App ID, Resource ID, and Access Token in Settings first."
+                )
+            case .openAI:
+                return localizedText(
+                    zh: "先在 Settings 中配置 OpenAI API Key。",
+                    en: "Configure the OpenAI API Key in Settings first."
+                )
+            }
         }
 
         switch phase {
@@ -269,6 +306,15 @@ final class NoTypeAppModel: ObservableObject {
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }
+
+        do {
+            let openAIKey = try keychainClient.read(account: openAIAPIKeyAccount)
+            assignOpenAIAPIKey(openAIKey, markAsEdited: false)
+        } catch {
+            if llmSettingsErrorMessage == nil {
+                llmSettingsErrorMessage = error.localizedDescription
+            }
+        }
     }
 
     func saveSettings() {
@@ -277,9 +323,11 @@ final class NoTypeAppModel: ObservableObject {
 
         let previousSettings = settingsStore.load()
         let previousAccessTokenPresence = settingsStore.storedAccessTokenPresence()
+        let previousOpenAIAPIKeyPresence = settingsStore.storedOpenAIAPIKeyPresence()
 
         settings.appID = settings.appID.trimmed
         settings.resourceID = settings.resourceID.trimmed
+        settings.openAIBaseURL = normalizedOpenAIBaseURL(settings.openAIBaseURL)
 
         var persistedSettings = settings
         var warnings: [String] = []
@@ -302,12 +350,17 @@ final class NoTypeAppModel: ObservableObject {
         do {
             try settingsStore.save(persistedSettings)
             try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
+            try keychainClient.save(openAIAPIKey, for: openAIAPIKeyAccount)
 
             let hasToken = !accessToken.trimmed.isEmpty
+            let hasOpenAIKey = !openAIAPIKey.trimmed.isEmpty
             settingsStore.setHasStoredAccessToken(hasToken)
+            settingsStore.setHasStoredOpenAIAPIKey(hasOpenAIKey)
 
             storedAccessTokenPresence = hasToken
+            storedOpenAIAPIKeyPresence = hasOpenAIKey
             hasEditedAccessToken = false
+            hasEditedOpenAIAPIKey = false
             settings = persistedSettings
 
             if warnings.isEmpty {
@@ -331,7 +384,13 @@ final class NoTypeAppModel: ObservableObject {
             } else {
                 settingsStore.clearStoredAccessTokenPresence()
             }
+            if let previousOpenAIAPIKeyPresence {
+                settingsStore.setHasStoredOpenAIAPIKey(previousOpenAIAPIKeyPresence)
+            } else {
+                settingsStore.clearStoredOpenAIAPIKeyPresence()
+            }
             storedAccessTokenPresence = previousAccessTokenPresence
+            storedOpenAIAPIKeyPresence = previousOpenAIAPIKeyPresence
             hotkeyWarningMessage = nil
             llmSettingsErrorMessage = error.localizedDescription
         }
@@ -345,13 +404,20 @@ final class NoTypeAppModel: ObservableObject {
 
         do {
             guard let config = try currentASRSessionConfig() else {
-                llmSettingsErrorMessage = localizedText(
-                    zh: "请先填写 App ID、Resource ID 和 Access Token。",
-                    en: "Fill in App ID, Resource ID, and Access Token first."
-                )
+                llmSettingsErrorMessage = missingASRConfigurationMessage()
                 return
             }
-            try await DoubaoStreamingASRProvider.testConnection(config: config)
+            switch config.provider {
+            case .doubao:
+                try await DoubaoStreamingASRProvider.testConnection(config: config)
+            case .openAI:
+                try await OpenAIStreamASRProvider.testConnection(
+                    apiKey: config.openAIAPIKey,
+                    baseURL: config.openAIBaseURL,
+                    userID: config.userID,
+                    language: config.language.openAITranscriptionLanguageCode
+                )
+            }
             llmSettingsStatusMessage = localizedText(
                 zh: "语音识别连接测试成功。",
                 en: "Speech connection test passed."
@@ -416,19 +482,14 @@ final class NoTypeAppModel: ObservableObject {
 
         do {
             guard let config = try currentASRSessionConfig() else {
-                failSession(
-                    localizedText(
-                        zh: "豆包配置不完整。请先填写 App ID、Resource ID 和 Access Token。",
-                        en: "Doubao configuration is incomplete. Fill the App ID, Resource ID, and Access Token first."
-                    )
-                )
+                failSession(missingASRConfigurationMessage())
                 return
             }
 
             resetSessionStateForStart()
             currentOutputMode = mode
             let activeSessionID = sessionID
-            let provider = providerFactory()
+            let provider = providerFactory(config.provider)
             provider.eventHandler = { [weak self] event in
                 Task { @MainActor in
                     self?.handleASREvent(event, sessionID: activeSessionID)
@@ -439,6 +500,7 @@ final class NoTypeAppModel: ObservableObject {
             asrProvider = provider
 
             _ = try audioCaptureService.startCapture(
+                sampleRate: provider.audioSampleRate,
                 onChunk: { [weak self] frame in
                     guard let self else { return }
                     Task { @MainActor in
@@ -797,6 +859,15 @@ final class NoTypeAppModel: ObservableObject {
         storedAccessTokenPresence = !value.trimmed.isEmpty
     }
 
+    private func assignOpenAIAPIKey(_ value: String, markAsEdited: Bool) {
+        isInternallyUpdatingOpenAIAPIKey = true
+        openAIAPIKey = value
+        isInternallyUpdatingOpenAIAPIKey = false
+        hasLoadedOpenAIAPIKey = true
+        hasEditedOpenAIAPIKey = markAsEdited
+        storedOpenAIAPIKeyPresence = !value.trimmed.isEmpty
+    }
+
     private func loadAccessTokenIfNeeded() throws -> String {
         guard !hasLoadedAccessToken else {
             return accessToken
@@ -807,25 +878,79 @@ final class NoTypeAppModel: ObservableObject {
         return token
     }
 
+    private func loadOpenAIAPIKeyIfNeeded() throws -> String {
+        guard !hasLoadedOpenAIAPIKey else {
+            return openAIAPIKey
+        }
+
+        let key = try keychainClient.read(account: openAIAPIKeyAccount)
+        assignOpenAIAPIKey(key, markAsEdited: false)
+        return key
+    }
+
     private func currentASRSessionConfig() throws -> ASRSessionConfig? {
-        guard settings.hasValidASRConfiguration else {
-            return nil
-        }
+        let userID = ProcessInfo.processInfo.hostName
 
-        let token = try loadAccessTokenIfNeeded().trimmed
-        guard !token.isEmpty else {
-            return nil
-        }
+        switch settings.asrProvider {
+        case .doubao:
+            guard settings.hasValidDoubaoConfiguration else {
+                return nil
+            }
 
-        return ASRSessionConfig(
-            appID: settings.appID.trimmed,
-            accessToken: token,
-            resourceID: settings.resourceID.trimmed,
-            userID: ProcessInfo.processInfo.hostName,
-            language: settings.language,
-            workflow: "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate",
-            utteranceMode: true
-        )
+            let token = try loadAccessTokenIfNeeded().trimmed
+            guard !token.isEmpty else {
+                return nil
+            }
+
+            return ASRSessionConfig(
+                provider: .doubao,
+                appID: settings.appID.trimmed,
+                accessToken: token,
+                resourceID: settings.resourceID.trimmed,
+                userID: userID,
+                language: settings.language,
+                workflow: "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate",
+                utteranceMode: true
+            )
+        case .openAI:
+            let key = try loadOpenAIAPIKeyIfNeeded().trimmed
+            guard !key.isEmpty else {
+                return nil
+            }
+
+            return ASRSessionConfig(
+                provider: .openAI,
+                appID: "",
+                accessToken: "",
+                resourceID: "",
+                openAIAPIKey: key,
+                openAIBaseURL: normalizedOpenAIBaseURL(settings.openAIBaseURL),
+                userID: userID,
+                language: settings.language,
+                workflow: "",
+                utteranceMode: false
+            )
+        }
+    }
+
+    private func missingASRConfigurationMessage() -> String {
+        switch settings.asrProvider {
+        case .doubao:
+            localizedText(
+                zh: "豆包配置不完整。请先填写 App ID、Resource ID 和 Access Token。",
+                en: "Doubao configuration is incomplete. Fill the App ID, Resource ID, and Access Token first."
+            )
+        case .openAI:
+            localizedText(
+                zh: "OpenAI 配置不完整。请先填写 API Key。",
+                en: "OpenAI configuration is incomplete. Fill the API Key first."
+            )
+        }
+    }
+
+    private func normalizedOpenAIBaseURL(_ value: String) -> String {
+        let trimmed = value.trimmed
+        return trimmed.isEmpty ? AppSettings.defaults.openAIBaseURL : trimmed
     }
 
     private func transition(to newPhase: DictationPhase) {

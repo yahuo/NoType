@@ -4,6 +4,7 @@ final class SettingsStore {
     private let userDefaults: UserDefaults
     private let settingsKey = "notype.settings"
     private let accessTokenPresenceKey = "notype.access-token-present"
+    private let openAIAPIKeyPresenceKey = "notype.openai-api-key-present"
 
     init(userDefaults: UserDefaults = .standard) {
         self.userDefaults = userDefaults
@@ -34,5 +35,17 @@ final class SettingsStore {
 
     func clearStoredAccessTokenPresence() {
         userDefaults.removeObject(forKey: accessTokenPresenceKey)
+    }
+
+    func storedOpenAIAPIKeyPresence() -> Bool? {
+        userDefaults.object(forKey: openAIAPIKeyPresenceKey) as? Bool
+    }
+
+    func setHasStoredOpenAIAPIKey(_ present: Bool) {
+        userDefaults.set(present, forKey: openAIAPIKeyPresenceKey)
+    }
+
+    func clearStoredOpenAIAPIKeyPresence() {
+        userDefaults.removeObject(forKey: openAIAPIKeyPresenceKey)
     }
 }

@@ -20,6 +20,7 @@
 		5082B82940E567B087F7B3CC /* HistoryWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E677A58A95B75C83D91043 /* HistoryWindowView.swift */; };
 		54C123C741B8D5FA97F5EA98 /* HotkeyService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06E1D0215D5C1283B1D6AD8F /* HotkeyService.swift */; };
 		630861CB20936E4D05315E79 /* DoubaoStreamingASRProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E5875C9BBBF953712CFDAC2 /* DoubaoStreamingASRProvider.swift */; };
+		6D3F67D2D0E940A7AD347AB9 /* OpenAIStreamASRProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = E469D8EEA47A4F99A5B3C2A1 /* OpenAIStreamASRProvider.swift */; };
 		7C304BCC0FD6E15F5580A3B5 /* NoTypeIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = 70E6AA021CC3B73731B42FC9 /* NoTypeIcon.icns */; };
 		7FA2AC6F4D6F80743F3F87DC /* AudioCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61A17AF8998ED49DB59C36F9 /* AudioCaptureService.swift */; };
 		83AB4D42E393C523B722B7E0 /* AppSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE190296FF2D261D125E77F1 /* AppSettings.swift */; };
@@ -78,6 +79,7 @@
 		D790BB47B55ADDCF81B11413 /* HUDPanelController.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HUDPanelController.swift; sourceTree = "<group>"; };
 		D7E677A58A95B75C83D91043 /* HistoryWindowView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HistoryWindowView.swift; sourceTree = "<group>"; };
 		D9BA226A1E3DED1BB33AC1D9 /* ASRProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ASRProvider.swift; sourceTree = "<group>"; };
+		E469D8EEA47A4F99A5B3C2A1 /* OpenAIStreamASRProvider.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = OpenAIStreamASRProvider.swift; sourceTree = "<group>"; };
 		F3205E994A8F612B9F70B5AD /* TextInsertionService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TextInsertionService.swift; sourceTree = "<group>"; };
 		FF7F26B139170380B21CFB2B /* HUDPanelView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HUDPanelView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -164,6 +166,7 @@
 				06E1D0215D5C1283B1D6AD8F /* HotkeyService.swift */,
 				4CF26C63C564767D4F2D18BA /* KeychainClient.swift */,
 				B035CC07C4A92C9BCDDC4AA7 /* LoginItemService.swift */,
+				E469D8EEA47A4F99A5B3C2A1 /* OpenAIStreamASRProvider.swift */,
 				4E6057537FF3ED3147DDA680 /* PermissionService.swift */,
 				0ED8A76B4A348917A62E440B /* SettingsStore.swift */,
 				F3205E994A8F612B9F70B5AD /* TextInsertionService.swift */,
@@ -366,6 +369,7 @@
 				54C123C741B8D5FA97F5EA98 /* HotkeyService.swift in Sources */,
 				DF36DEB886B1303A6B738DF9 /* KeychainClient.swift in Sources */,
 				95592BE41022B181F90360A4 /* LoginItemService.swift in Sources */,
+				6D3F67D2D0E940A7AD347AB9 /* OpenAIStreamASRProvider.swift in Sources */,
 				8E9FE64622454561509E04F0 /* PermissionService.swift in Sources */,
 				32540C155755790E492BD876 /* SettingsStore.swift in Sources */,
 				1E41BB48F8DF8D65E53B8533 /* TextInsertionService.swift in Sources */,

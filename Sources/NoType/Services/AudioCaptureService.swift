@@ -14,6 +14,7 @@ final class AudioCaptureService {
     private(set) var recordingURL: URL?
     private var chunkHandler: ((Data) -> Void)?
     private var levelHandler: ((Double) -> Void)?
+    private var activeChunkByteCount = PCMUtilities.chunkByteCount
 
     private final class ConversionState: @unchecked Sendable {
         var didProvideInput = false
@@ -28,12 +29,14 @@ final class AudioCaptureService {
     }
 
     func startCapture(
+        sampleRate: Int = PCMUtilities.sampleRate,
         onChunk: @escaping (Data) -> Void,
         onLevel: @escaping (Double) -> Void
     ) throws -> URL {
         try stopCapture(flushRemainder: false)
 
         pendingPCM.removeAll()
+        activeChunkByteCount = PCMUtilities.chunkByteCount(for: sampleRate)
         chunkHandler = onChunk
         levelHandler = onLevel
 
@@ -47,7 +50,7 @@ final class AudioCaptureService {
         let inputFormat = inputNode.inputFormat(forBus: 0)
         guard let targetFormat = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
-            sampleRate: Double(PCMUtilities.sampleRate),
+            sampleRate: Double(sampleRate),
             channels: AVAudioChannelCount(PCMUtilities.channelCount),
             interleaved: true
         ) else {
@@ -144,9 +147,9 @@ final class AudioCaptureService {
 
         pendingPCM.append(source.assumingMemoryBound(to: UInt8.self), count: byteCount)
 
-        while pendingPCM.count >= PCMUtilities.chunkByteCount {
-            let frame = pendingPCM.prefix(PCMUtilities.chunkByteCount)
-            pendingPCM.removeFirst(PCMUtilities.chunkByteCount)
+        while pendingPCM.count >= activeChunkByteCount {
+            let frame = pendingPCM.prefix(activeChunkByteCount)
+            pendingPCM.removeFirst(activeChunkByteCount)
             try? writeAndEmit(frame: Data(frame))
         }
     }
