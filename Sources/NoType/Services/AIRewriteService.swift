@@ -381,9 +381,8 @@ struct CodexModelResolver: Sendable {
 
         for rawLine in contents.split(separator: "\n") {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
-            guard line.hasPrefix("model") else { continue }
             let parts = line.split(separator: "=", maxSplits: 1).map { $0.trimmingCharacters(in: .whitespaces) }
-            guard parts.count == 2 else { continue }
+            guard parts.count == 2, parts[0] == "model" else { continue }
             let value = parts[1].trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
             return value.isEmpty ? nil : value
         }

@@ -247,6 +247,22 @@ func codexResponseRequestUsesCodexHeadersAndStreamingBody() throws {
 }
 
 @Test
+func codexModelResolverIgnoresReasoningEffortConfig() throws {
+    let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+    let config = """
+    model_reasoning_effort = "high"
+    plan_mode_reasoning_effort = "high"
+    model = "gpt-5.5"
+    """
+    try config.write(to: home.appendingPathComponent("config.toml"), atomically: true, encoding: .utf8)
+
+    let model = CodexModelResolver(codexHome: home).resolveModel()
+
+    #expect(model == "gpt-5.5")
+}
+
+@Test
 func codexAuthStoreReadsAccessTokenAndAccountID() throws {
     let home = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
