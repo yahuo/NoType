@@ -82,8 +82,45 @@ final class TextInsertionService {
         return copiedText
     }
 
+    func prepareFocusedFieldForTripleSpaceTranslation() async -> String? {
+        try? await Task.sleep(for: .milliseconds(40))
+
+        guard
+            let focusedElement = Self.currentFocusedUIElement(),
+            Self.isEditableTextElement(focusedElement),
+            !Self.isSecureTextElement(focusedElement),
+            let fieldValue = Self.copyStringAttribute(kAXValueAttribute as CFString, from: focusedElement),
+            let sourceText = Self.tripleSpaceTranslationSource(from: fieldValue)
+        else {
+            return nil
+        }
+
+        guard Self.isStillFocused(focusedElement) else { return nil }
+        for _ in 0..<3 {
+            guard postKeyboardCommand(virtualKey: CGKeyCode(kVK_Delete), flags: []) else {
+                return nil
+            }
+        }
+
+        try? await Task.sleep(for: .milliseconds(40))
+        guard Self.isStillFocused(focusedElement) else { return nil }
+        guard postKeyboardCommand(virtualKey: CGKeyCode(kVK_ANSI_A), flags: .maskCommand) else {
+            return nil
+        }
+
+        try? await Task.sleep(for: .milliseconds(80))
+        guard Self.isStillFocused(focusedElement) else { return nil }
+        return sourceText
+    }
+
     nonisolated static func shouldInsert(_ text: String) -> Bool {
         !text.trimmed.isEmpty
+    }
+
+    nonisolated static func tripleSpaceTranslationSource(from fieldValue: String) -> String? {
+        guard fieldValue.hasSuffix("   ") else { return nil }
+        let sourceText = String(fieldValue.dropLast(3))
+        return sourceText.trimmed.isEmpty ? nil : sourceText
     }
 
     nonisolated static func shouldRestorePasteboard(currentChangeCount: Int, insertedChangeCount: Int) -> Bool {
@@ -91,20 +128,11 @@ final class TextInsertionService {
     }
 
     nonisolated static func hasEditableTextFocus() -> Bool {
-        let systemElement = AXUIElementCreateSystemWide()
-        var focusedValue: CFTypeRef?
-        let focusedResult = AXUIElementCopyAttributeValue(
-            systemElement,
-            kAXFocusedUIElementAttribute as CFString,
-            &focusedValue
-        )
+        guard let focusedElement = currentFocusedUIElement() else { return false }
+        return isEditableTextElement(focusedElement)
+    }
 
-        guard focusedResult == .success, let focusedValue else {
-            return false
-        }
-
-        let focusedElement = focusedValue as! AXUIElement
-
+    private nonisolated static func isEditableTextElement(_ focusedElement: AXUIElement) -> Bool {
         if let role = copyStringAttribute(kAXRoleAttribute as CFString, from: focusedElement),
            editableRoles.contains(role) {
             return true
@@ -137,6 +165,11 @@ final class TextInsertionService {
     }
 
     nonisolated static func currentSelectedTextViaAccessibility() -> String? {
+        guard let focusedElement = currentFocusedUIElement() else { return nil }
+        return copyStringAttribute(kAXSelectedTextAttribute as CFString, from: focusedElement)
+    }
+
+    private nonisolated static func currentFocusedUIElement() -> AXUIElement? {
         let systemElement = AXUIElementCreateSystemWide()
         var focusedValue: CFTypeRef?
         let focusedResult = AXUIElementCopyAttributeValue(
@@ -149,8 +182,17 @@ final class TextInsertionService {
             return nil
         }
 
-        let focusedElement = focusedValue as! AXUIElement
-        return copyStringAttribute(kAXSelectedTextAttribute as CFString, from: focusedElement)
+        return (focusedValue as! AXUIElement)
+    }
+
+    private nonisolated static func isSecureTextElement(_ element: AXUIElement) -> Bool {
+        copyStringAttribute(kAXSubroleAttribute as CFString, from: element)
+            == kAXSecureTextFieldSubrole as String
+    }
+
+    private nonisolated static func isStillFocused(_ element: AXUIElement) -> Bool {
+        guard let currentElement = currentFocusedUIElement() else { return false }
+        return CFEqual(element, currentElement)
     }
 
     private func postPasteCommand() throws {

@@ -22,34 +22,20 @@ struct HUDPanelView: View {
 
     @ViewBuilder
     private var controlBar: some View {
-        HStack(spacing: 14) {
-            hudButton(symbol: "xmark", accent: Color.white.opacity(0.16)) {
-                model.cancelFromUI()
-            }
-
-            centerIndicator
-                .frame(maxWidth: .infinity)
-
-            hudButton(
-                symbol: model.phase == .recording ? "checkmark" : "hourglass",
-                accent: .white
-            ) {
-                model.stopDictationFromUI()
-            }
-            .disabled(model.phase != .recording)
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .frame(width: 194)
-        .background(
-            Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.96))
-                .overlay(
-                    Capsule(style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.12))
-                )
-        )
-        .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
+        centerIndicator
+            .frame(maxWidth: .infinity, minHeight: 36)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(width: 194)
+            .background(
+                Capsule(style: .continuous)
+                    .fill(Color.black.opacity(0.96))
+                    .overlay(
+                        Capsule(style: .continuous)
+                            .strokeBorder(Color.white.opacity(0.12))
+                    )
+            )
+            .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
     }
 
     @ViewBuilder
@@ -94,20 +80,6 @@ struct HUDPanelView: View {
                 .font(.system(size: 11, weight: .medium))
                 .foregroundStyle(.white.opacity(0.88))
         }
-    }
-
-    private func hudButton(symbol: String, accent: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            ZStack {
-                Circle()
-                    .fill(accent)
-                Image(systemName: symbol)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(accent == .white ? .black : .white)
-            }
-            .frame(width: 36, height: 36)
-        }
-        .buttonStyle(.plain)
     }
 
     @ViewBuilder

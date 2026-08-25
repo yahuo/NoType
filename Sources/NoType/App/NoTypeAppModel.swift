@@ -26,6 +26,7 @@ final class NoTypeAppModel: ObservableObject {
     private let keychainClient: KeychainClient
     private let permissionService: PermissionService
     private let hotkeyService: HotkeyService
+    private let tripleSpaceTriggerService: TripleSpaceTriggerService
     private let audioCaptureService: AudioCaptureService
     private let textInsertionService: TextInsertionService
     private let aiRewriteService: AIRewriteService
@@ -51,6 +52,7 @@ final class NoTypeAppModel: ObservableObject {
         keychainClient: KeychainClient = KeychainClient(),
         permissionService: PermissionService = PermissionService(),
         hotkeyService: HotkeyService = HotkeyService(),
+        tripleSpaceTriggerService: TripleSpaceTriggerService = TripleSpaceTriggerService(),
         audioCaptureService: AudioCaptureService = AudioCaptureService(),
         textInsertionService: TextInsertionService = TextInsertionService(),
         aiRewriteService: AIRewriteService = AIRewriteService(),
@@ -61,6 +63,7 @@ final class NoTypeAppModel: ObservableObject {
         self.keychainClient = keychainClient
         self.permissionService = permissionService
         self.hotkeyService = hotkeyService
+        self.tripleSpaceTriggerService = tripleSpaceTriggerService
         self.audioCaptureService = audioCaptureService
         self.textInsertionService = textInsertionService
         self.aiRewriteService = aiRewriteService
@@ -79,6 +82,11 @@ final class NoTypeAppModel: ObservableObject {
         hotkeyService.eventHandler = { [weak self] event in
             Task { @MainActor in
                 self?.handleHotkey(event)
+            }
+        }
+        tripleSpaceTriggerService.eventHandler = { [weak self] in
+            Task { @MainActor in
+                await self?.translateFocusedFieldAfterTripleSpace()
             }
         }
 
@@ -215,6 +223,8 @@ final class NoTypeAppModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
 
+        registerTripleSpaceTriggerIfPossible()
+
         scheduleHUDLayoutUpdate(animated: false)
     }
 
@@ -223,6 +233,7 @@ final class NoTypeAppModel: ObservableObject {
         if phase != .recording, phase != .transcribing, phase != .refining {
             transition(to: permissionSnapshot.ready ? .idle : .onboarding)
         }
+        registerTripleSpaceTriggerIfPossible()
     }
 
     func requestPermissions() async {
@@ -378,16 +389,6 @@ final class NoTypeAppModel: ObservableObject {
         }
     }
 
-    func stopDictationFromUI() {
-        Task {
-            await stopDictation()
-        }
-    }
-
-    func cancelFromUI() {
-        cancelCurrentSession()
-    }
-
     func handleHotkey(_ event: NoTypeHotkeyEvent) {
         switch event {
         case .startDictation(let mode):
@@ -506,6 +507,22 @@ final class NoTypeAppModel: ObservableObject {
             return false
         }
 
+        guard validateTranslationCredentials() else { return true }
+        await translateTextReplacingCurrentSelection(selectedText)
+        return true
+    }
+
+    private func translateFocusedFieldAfterTripleSpace() async {
+        guard phase == .idle else { return }
+        guard validateTranslationCredentials() else { return }
+        guard let sourceText = await textInsertionService.prepareFocusedFieldForTripleSpaceTranslation() else {
+            return
+        }
+
+        await translateTextReplacingCurrentSelection(sourceText)
+    }
+
+    private func validateTranslationCredentials() -> Bool {
         guard hasCodexOAuthCredentials else {
             failSession(
                 localizedText(
@@ -513,26 +530,29 @@ final class NoTypeAppModel: ObservableObject {
                     en: "Translation requires Codex login. Run codex login first."
                 )
             )
-            return true
+            return false
         }
+        return true
+    }
 
+    private func translateTextReplacingCurrentSelection(_ sourceText: String) async {
         resetSessionStateForStart()
         currentOutputMode = .translation
         let activeSessionID = sessionID
-        transcriptPreview = selectedText
+        transcriptPreview = sourceText
         transition(to: .refining)
         resetRewritePreviewThrottle()
 
         do {
             let translated = try await aiRewriteService.translateToEnglish(
-                selectedText,
+                sourceText,
                 onPartial: { [weak self] partial in
                     Task { @MainActor in
                         self?.handleRewritePartial(partial, sessionID: activeSessionID)
                     }
                 }
             )
-            guard activeSessionID == sessionID else { return true }
+            guard activeSessionID == sessionID else { return }
             pendingRewritePreviewTask?.cancel()
             pendingRewritePreviewText = nil
             await insertFinalText(
@@ -544,13 +564,11 @@ final class NoTypeAppModel: ObservableObject {
                 )
             )
         } catch is CancellationError {
-            return true
+            return
         } catch {
-            guard activeSessionID == sessionID else { return true }
+            guard activeSessionID == sessionID else { return }
             failSession(error.localizedDescription)
         }
-
-        return true
     }
 
     private func handleASREvent(_ event: ASRProviderEvent, sessionID activeSessionID: UUID) {
@@ -826,6 +844,22 @@ final class NoTypeAppModel: ObservableObject {
             workflow: "audio_in,resample,partition,vad,fe,decode,itn,nlu_punctuate",
             utteranceMode: true
         )
+    }
+
+    private func registerTripleSpaceTriggerIfPossible() {
+        guard permissionSnapshot.accessibilityAuthorized else { return }
+
+        do {
+            try tripleSpaceTriggerService.register()
+        } catch {
+            let message = error.localizedDescription
+            if let currentWarning = hotkeyWarningMessage, !currentWarning.isEmpty {
+                guard !currentWarning.contains(message) else { return }
+                hotkeyWarningMessage = currentWarning + "\n" + message
+            } else {
+                hotkeyWarningMessage = message
+            }
+        }
     }
 
     private func transition(to newPhase: DictationPhase) {

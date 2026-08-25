@@ -33,6 +33,11 @@ enum AIRewriteError: LocalizedError {
 }
 
 actor AIRewriteService {
+    static let rewriteModel = "gpt-5.6-terra"
+    static let rewriteReasoningEffort = "high"
+    static let translationModel = "gpt-5.6-luna"
+    static let translationReasoningEffort = "none"
+
     private let session: URLSession
     private let rewriteTimeout: Duration
     private let authStore: CodexAuthStore
@@ -61,6 +66,8 @@ actor AIRewriteService {
                 try await self.performStreamingCodexResponse(
                     instructions: Self.rewritePrompt,
                     userMessage: Self.rewriteUserMessage(for: transcript),
+                    model: Self.rewriteModel,
+                    reasoningEffort: Self.rewriteReasoningEffort,
                     onPartial: onPartial
                 )
             }
@@ -89,6 +96,8 @@ actor AIRewriteService {
                 try await self.performStreamingCodexResponse(
                     instructions: Self.translationPrompt,
                     userMessage: Self.translationUserMessage(for: text),
+                    model: Self.translationModel,
+                    reasoningEffort: Self.translationReasoningEffort,
                     onPartial: onPartial
                 )
             }
@@ -124,6 +133,8 @@ actor AIRewriteService {
     private func performStreamingCodexResponse(
         instructions: String,
         userMessage: String,
+        model: String? = nil,
+        reasoningEffort: String? = nil,
         onPartial: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         let credentials = try authStore.loadCredentials()
@@ -133,7 +144,8 @@ actor AIRewriteService {
 
         let request = try Self.makeCodexResponseRequest(
             credentials: credentials,
-            model: modelResolver.resolveModel(),
+            model: model ?? modelResolver.resolveModel(),
+            reasoningEffort: reasoningEffort,
             instructions: instructions,
             userMessage: userMessage
         )
@@ -170,6 +182,7 @@ actor AIRewriteService {
     static func makeCodexResponseRequest(
         credentials: CodexOAuthCredentials,
         model: String,
+        reasoningEffort: String? = nil,
         instructions: String,
         userMessage: String
     ) throws -> URLRequest {
@@ -187,6 +200,7 @@ actor AIRewriteService {
         request.httpBody = try JSONEncoder().encode(
             CodexResponseRequest(
                 model: model,
+                reasoning: reasoningEffort.map(CodexReasoning.init(effort:)),
                 instructions: instructions,
                 input: [
                     CodexInputMessage(
@@ -451,10 +465,15 @@ private struct CodexAuthTokens: Decodable {
 
 private struct CodexResponseRequest: Encodable {
     let model: String
+    let reasoning: CodexReasoning?
     let instructions: String
     let input: [CodexInputMessage]
     let stream: Bool
     let store: Bool
+}
+
+private struct CodexReasoning: Encodable {
+    let effort: String
 }
 
 private struct CodexInputMessage: Encodable {

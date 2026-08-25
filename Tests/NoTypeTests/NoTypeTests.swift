@@ -41,6 +41,39 @@ func appSettingsDefaultLanguageUsesSimplifiedChinese() {
 }
 
 @Test
+func tripleSpaceDetectorTriggersOnlyWhenThreePlainSpacesArriveWithinOneSecond() {
+    var detector = TripleSpaceSequenceDetector()
+
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.0) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.4) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.9) == true)
+}
+
+@Test
+func tripleSpaceDetectorResetsAfterTimeoutOtherKeysAndKeyRepeat() {
+    var detector = TripleSpaceSequenceDetector()
+
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.0) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.5) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.1) == false)
+
+    #expect(detector.consume(isPlainSpace: false, isRepeat: false, timestamp: 21.2) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.3) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: true, timestamp: 21.4) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.5) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.7) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.9) == true)
+}
+
+@Test
+func tripleSpaceTranslationSourceRemovesExactlyTheTriggerSpaces() {
+    #expect(TextInsertionService.tripleSpaceTranslationSource(from: "请翻译这个输入框   ") == "请翻译这个输入框")
+    #expect(TextInsertionService.tripleSpaceTranslationSource(from: "保留原有空格    ") == "保留原有空格 ")
+    #expect(TextInsertionService.tripleSpaceTranslationSource(from: "没有触发空格") == nil)
+    #expect(TextInsertionService.tripleSpaceTranslationSource(from: "   ") == nil)
+}
+
+@Test
 func appSettingsDecodeMigratesLegacyClusterField() throws {
     let payload = """
     {
@@ -244,6 +277,55 @@ func codexResponseRequestUsesCodexHeadersAndStreamingBody() throws {
     #expect(body["stream"] as? Bool == true)
     #expect(body["store"] as? Bool == false)
     #expect(body["max_output_tokens"] == nil)
+    #expect(body["reasoning"] == nil)
+}
+
+@Test
+func aiRewriteRequestUsesBalancedTerraProfile() throws {
+    let credentials = CodexOAuthCredentials(
+        accessToken: "access-token",
+        chatGPTAccountID: nil,
+        expiresAt: Date(timeIntervalSinceNow: 3600)
+    )
+
+    let request = try AIRewriteService.makeCodexResponseRequest(
+        credentials: credentials,
+        model: AIRewriteService.rewriteModel,
+        reasoningEffort: AIRewriteService.rewriteReasoningEffort,
+        instructions: "rewrite",
+        userMessage: "source"
+    )
+
+    let bodyData = try #require(request.httpBody)
+    let body = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+    let reasoning = try #require(body["reasoning"] as? [String: Any])
+
+    #expect(body["model"] as? String == "gpt-5.6-terra")
+    #expect(reasoning["effort"] as? String == "high")
+}
+
+@Test
+func aiTranslationRequestUsesFastLunaProfile() throws {
+    let credentials = CodexOAuthCredentials(
+        accessToken: "access-token",
+        chatGPTAccountID: nil,
+        expiresAt: Date(timeIntervalSinceNow: 3600)
+    )
+
+    let request = try AIRewriteService.makeCodexResponseRequest(
+        credentials: credentials,
+        model: AIRewriteService.translationModel,
+        reasoningEffort: AIRewriteService.translationReasoningEffort,
+        instructions: "translate",
+        userMessage: "source"
+    )
+
+    let bodyData = try #require(request.httpBody)
+    let body = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
+    let reasoning = try #require(body["reasoning"] as? [String: Any])
+
+    #expect(body["model"] as? String == "gpt-5.6-luna")
+    #expect(reasoning["effort"] as? String == "none")
 }
 
 @Test
