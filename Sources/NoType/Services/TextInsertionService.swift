@@ -3,6 +3,33 @@ import AppKit
 import Carbon
 import Foundation
 
+enum TripleSpaceFieldValuePollResult: Equatable {
+    case waiting
+    case ready(String)
+    case timedOut
+}
+
+struct TripleSpaceFieldValuePoller {
+    private let maximumAttempts: Int
+    private var attemptCount = 0
+
+    init(maximumAttempts: Int) {
+        precondition(maximumAttempts > 0)
+        self.maximumAttempts = maximumAttempts
+    }
+
+    mutating func consume(_ fieldValue: String?) -> TripleSpaceFieldValuePollResult {
+        attemptCount += 1
+
+        if let fieldValue,
+           let sourceText = TextInsertionService.tripleSpaceTranslationSource(from: fieldValue) {
+            return .ready(sourceText)
+        }
+
+        return attemptCount < maximumAttempts ? .waiting : .timedOut
+    }
+}
+
 enum TextInsertionServiceError: LocalizedError {
     case pasteCommandSynthesisFailed
 
@@ -83,16 +110,35 @@ final class TextInsertionService {
     }
 
     func prepareFocusedFieldForTripleSpaceTranslation() async -> String? {
-        try? await Task.sleep(for: .milliseconds(40))
-
         guard
             let focusedElement = Self.currentFocusedUIElement(),
             Self.isEditableTextElement(focusedElement),
-            !Self.isSecureTextElement(focusedElement),
-            let fieldValue = Self.copyStringAttribute(kAXValueAttribute as CFString, from: focusedElement),
-            let sourceText = Self.tripleSpaceTranslationSource(from: fieldValue)
+            !Self.isSecureTextElement(focusedElement)
         else {
             return nil
+        }
+
+        var valuePoller = TripleSpaceFieldValuePoller(maximumAttempts: 16)
+        let sourceText: String
+        valuePolling: while true {
+            let fieldValue = Self.copyStringAttribute(
+                kAXValueAttribute as CFString,
+                from: focusedElement
+            )
+
+            switch valuePoller.consume(fieldValue) {
+            case let .ready(value):
+                sourceText = value
+                break valuePolling
+            case .waiting:
+                // Event taps observe keyDown before rich editors publish the character through AX.
+                try? await Task.sleep(for: .milliseconds(20))
+                guard Self.isStillFocused(focusedElement) else {
+                    return nil
+                }
+            case .timedOut:
+                return nil
+            }
         }
 
         guard Self.isStillFocused(focusedElement) else { return nil }

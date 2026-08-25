@@ -74,6 +74,14 @@ func tripleSpaceTranslationSourceRemovesExactlyTheTriggerSpaces() {
 }
 
 @Test
+func tripleSpaceValuePollerWaitsForDelayedThirdSpace() {
+    var poller = TripleSpaceFieldValuePoller(maximumAttempts: 3)
+
+    #expect(poller.consume("请翻译这个输入框  ") == .waiting)
+    #expect(poller.consume("请翻译这个输入框   ") == .ready("请翻译这个输入框"))
+}
+
+@Test
 func appSettingsDecodeMigratesLegacyClusterField() throws {
     let payload = """
     {
