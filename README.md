@@ -41,7 +41,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
 - 英文翻译：
   - 有选中文本时，`Option + Shift + Space` 会直接翻译选中文本并替换
   - 没有选中文本时，`Option + Shift + Space` 会先录音，再把语音转写结果翻译成英文
-  - 实验性的本地 Unix socket bridge 可让 Pi 直接翻译并替换 TUI draft，不依赖终端 AX 输入框
+  - 本地 Unix socket bridge 可让 Pi、Claude Code 和 Codex CLI 翻译并替换 TUI draft，不依赖终端 AX 输入框
 - HUD 在录音和转写阶段显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
 - 文本注入统一走剪贴板 + 模拟 `Cmd + V`
 - 如果没有可编辑焦点，则不会强行注入，而是把结果保留到剪贴板供手动粘贴
@@ -225,10 +225,13 @@ Sources/NoType/Models      配置、状态和数据模型
 Sources/NoType/Services    音频采集、热键、ASR、AI Rewrite、权限、文本插入等服务
 Sources/NoType/Views       菜单栏、设置、HUD、引导界面
 Sources/NoType/Support     PCM 与转写文本处理辅助工具
+Sources/NoTypeEditor       Claude/Codex external-editor 代理
+Sources/NoTypeEditorCore   external-editor draft 解析逻辑
 scripts/                   构建、图标、Xcode 工程生成脚本
 packaging/                 App bundle 资源与图标
 Tests/NoTypeTests          测试
 integrations/pi            Pi TUI 的 NoType bridge 扩展
+integrations/agent-editor  Claude Code / Codex CLI 的 external-editor 安装脚本
 ```
 
 ## Roadmap
@@ -237,6 +240,7 @@ integrations/pi            Pi TUI 的 NoType bridge 扩展
 - [x] Doubao 主链与基础设置
 - [x] 可选 AI Rewrite
 - [x] 语音英文翻译与选中文本英文翻译
+- [x] Pi、Claude Code、Codex CLI 的本地 draft 翻译 bridge
 - [x] 跨输入法的剪贴板注入与恢复
 - [ ] 更完整的安装与分发流程
 - [ ] 更稳定的跨应用文本插入兼容性
@@ -262,5 +266,6 @@ integrations/pi            Pi TUI 的 NoType bridge 扩展
 - 文本插入统一依赖 Accessibility + 模拟粘贴，不再走 AX 直写优先。
 - `AI Rewrite` 依赖本机 Codex 登录态和 Codex 后端可用性。
 - 英文翻译同样依赖本机 Codex 登录态和 Codex 后端可用性。
+- Agent TUI bridge 当前只支持本机进程；远程 SSH 会话需要额外转发 socket。
 - Doubao 协议兼容性以当前仓库实现为准，升级资源协议时需要重新核对字段和握手行为。
 - 它已经是一个能工作的 MVP，但还不是面向普通用户大规模分发的最终形态。

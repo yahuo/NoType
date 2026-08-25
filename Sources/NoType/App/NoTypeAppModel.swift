@@ -28,6 +28,7 @@ final class NoTypeAppModel: ObservableObject {
     private let hotkeyService: HotkeyService
     private let tripleSpaceTriggerService: TripleSpaceTriggerService
     private let bridgeService: NoTypeBridgeService
+    private let agentEditorIntegrationService: AgentEditorIntegrationService
     private let audioCaptureService: AudioCaptureService
     private let textInsertionService: TextInsertionService
     private let aiRewriteService: AIRewriteService
@@ -48,6 +49,7 @@ final class NoTypeAppModel: ObservableObject {
     private var sessionID = UUID()
     private var currentOutputMode: DictationOutputMode = .dictation
     private var activeBridgeRequestID: String?
+    private var lastDirectBridgeRequest: (timestamp: TimeInterval, processIdentifier: Int32)?
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
@@ -56,6 +58,8 @@ final class NoTypeAppModel: ObservableObject {
         hotkeyService: HotkeyService = HotkeyService(),
         tripleSpaceTriggerService: TripleSpaceTriggerService = TripleSpaceTriggerService(),
         bridgeService: NoTypeBridgeService = NoTypeBridgeService(),
+        agentEditorIntegrationService: AgentEditorIntegrationService =
+            AgentEditorIntegrationService(),
         audioCaptureService: AudioCaptureService = AudioCaptureService(),
         textInsertionService: TextInsertionService = TextInsertionService(),
         aiRewriteService: AIRewriteService = AIRewriteService(),
@@ -68,6 +72,7 @@ final class NoTypeAppModel: ObservableObject {
         self.hotkeyService = hotkeyService
         self.tripleSpaceTriggerService = tripleSpaceTriggerService
         self.bridgeService = bridgeService
+        self.agentEditorIntegrationService = agentEditorIntegrationService
         self.audioCaptureService = audioCaptureService
         self.textInsertionService = textInsertionService
         self.aiRewriteService = aiRewriteService
@@ -234,6 +239,7 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     func shutdown() {
+        agentEditorIntegrationService.shutdown()
         bridgeService.stop()
     }
 
@@ -277,6 +283,12 @@ final class NoTypeAppModel: ObservableObject {
                 en: "AI Rewrite is enabled but Codex is not logged in, so raw transcripts will still be used."
             )
         }
+    }
+
+    func setAgentTUITranslationEnabled(_ enabled: Bool) {
+        guard settings.agentTUITranslationEnabled != enabled else { return }
+        settings.agentTUITranslationEnabled = enabled
+        persistSettings()
     }
 
     func prepareSettings() {
@@ -524,11 +536,38 @@ final class NoTypeAppModel: ObservableObject {
     private func translateFocusedFieldAfterTripleSpace() async {
         guard phase == .idle else { return }
         guard validateTranslationCredentials() else { return }
-        guard let sourceText = await textInsertionService.prepareFocusedFieldForTripleSpaceTranslation() else {
+
+        let target = DictationTargetContext.currentFrontmost()
+        if AgentEditorIntegrationService.supportsTerminal(target) {
+            // Never treat a terminal's rendered AXValue as an editable field. Pi's native
+            // adapter receives the same third Space just after this event tap, so give it
+            // a brief chance to claim the draft before opening an external editor.
+            guard settings.agentTUITranslationEnabled else { return }
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !hasRecentDirectBridgeRequest(for: target) else { return }
+
+            do {
+                try agentEditorIntegrationService.triggerExternalEditor(for: target)
+            } catch {
+                appendWarning(error.localizedDescription)
+            }
             return
         }
 
+        guard let sourceText = await textInsertionService.prepareFocusedFieldForTripleSpaceTranslation() else {
+            return
+        }
         await translateTextReplacingCurrentSelection(sourceText)
+    }
+
+    private func hasRecentDirectBridgeRequest(for target: DictationTargetContext) -> Bool {
+        guard let lastDirectBridgeRequest,
+              lastDirectBridgeRequest.processIdentifier == target.processIdentifier
+        else {
+            return false
+        }
+        let age = Date.timeIntervalSinceReferenceDate - lastDirectBridgeRequest.timestamp
+        return age >= 0 && age < 2
     }
 
     private func handleBridgeRequest(_ request: NoTypeBridgeRequest) async -> NoTypeBridgeResponse {
@@ -552,7 +591,38 @@ final class NoTypeAppModel: ObservableObject {
             return .success(id: request.id, text: "pong")
         }
 
-        guard request.method == NoTypeBridgeProtocol.translateMethod else {
+        switch request.method {
+        case NoTypeBridgeProtocol.translateMethod:
+            if request.client == "pi" {
+                let target = DictationTargetContext.currentFrontmost()
+                lastDirectBridgeRequest = (
+                    timestamp: Date.timeIntervalSinceReferenceDate,
+                    processIdentifier: target.processIdentifier
+                )
+            }
+        case NoTypeBridgeProtocol.translateEditorMethod:
+            guard request.client == "agent-editor",
+                  request.trigger == "triple-space",
+                  let token = request.token,
+                  UUID(uuidString: token) != nil,
+                  let processID = request.processID,
+                  let parentProcessID = request.parentProcessID,
+                  let terminal = request.terminal,
+                  terminal.utf8.count <= 1_024,
+                  agentEditorIntegrationService.consumePendingTrigger(
+                    token: token,
+                    processID: processID,
+                    parentProcessID: parentProcessID,
+                    terminal: terminal
+                  )
+            else {
+                return .failure(
+                    id: request.id,
+                    code: "invalid_editor_trigger",
+                    message: "The NoType agent editor trigger is missing, stale, or belongs to another terminal."
+                )
+            }
+        default:
             return .failure(
                 id: request.id,
                 code: "unsupported_method",

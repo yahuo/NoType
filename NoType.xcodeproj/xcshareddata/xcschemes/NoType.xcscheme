@@ -14,9 +14,23 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D937AACA608DB77D20FAA3D5"
+               BlueprintIdentifier = "FE3A9BDC67DC50FA39828176"
                BuildableName = "NoType.app"
                BlueprintName = "NoType"
+               ReferencedContainer = "container:NoType.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "1B79E749E325364E0450CE01"
+               BuildableName = "NoTypeEditor"
+               BlueprintName = "NoTypeEditor"
                ReferencedContainer = "container:NoType.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -30,7 +44,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D937AACA608DB77D20FAA3D5"
+            BlueprintIdentifier = "FE3A9BDC67DC50FA39828176"
             BuildableName = "NoType.app"
             BlueprintName = "NoType"
             ReferencedContainer = "container:NoType.xcodeproj">
@@ -41,7 +55,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8EA72A27F37DA5B54BC6CC3F"
+               BlueprintIdentifier = "11F059312823F4A81214B8B6"
                BuildableName = "NoTypeTests.xctest"
                BlueprintName = "NoTypeTests"
                ReferencedContainer = "container:NoType.xcodeproj">
@@ -63,7 +77,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D937AACA608DB77D20FAA3D5"
+            BlueprintIdentifier = "FE3A9BDC67DC50FA39828176"
             BuildableName = "NoType.app"
             BlueprintName = "NoType"
             ReferencedContainer = "container:NoType.xcodeproj">
@@ -80,7 +94,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "D937AACA608DB77D20FAA3D5"
+            BlueprintIdentifier = "FE3A9BDC67DC50FA39828176"
             BuildableName = "NoType.app"
             BlueprintName = "NoType"
             ReferencedContainer = "container:NoType.xcodeproj">

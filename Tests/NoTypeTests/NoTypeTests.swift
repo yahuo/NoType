@@ -2,6 +2,7 @@ import Carbon
 import Foundation
 import Testing
 @testable import NoType
+@testable import NoTypeEditorCore
 
 private enum NoTypeTestError: Error {
     case timedOut
@@ -89,9 +90,14 @@ func tripleSpaceValuePollerWaitsForDelayedThirdSpace() {
 func bridgeFrameCodecHandlesFragmentedMultilineRequests() throws {
     let request = NoTypeBridgeRequest(
         id: "request-id",
-        method: NoTypeBridgeProtocol.translateMethod,
-        client: "pi",
-        text: "第一行\n第二行"
+        method: NoTypeBridgeProtocol.translateEditorMethod,
+        client: "agent-editor",
+        text: "第一行\n第二行",
+        token: "2c259eaf-686d-4be3-8b30-f4728fed6ca0",
+        processID: 123,
+        parentProcessID: 122,
+        terminal: "/dev/ttys001",
+        trigger: "triple-space"
     )
     let frame = try NoTypeBridgeFrameCodec.encode(request)
     var decoder = NoTypeBridgeFrameDecoder()
@@ -171,6 +177,98 @@ func bridgeServiceRoundTripsRequestsOverAUnixSocket() async throws {
 }
 
 @Test
+func agentEditorAcceptsOnlyClaudeAndCodexTemporaryMarkdownPaths() {
+    #expect(NoTypeEditorBufferPath.supports(
+        URL(fileURLWithPath: "/tmp/claude-501/claude-prompt-2c259eaf-686d-4be3-8b30-f4728fed6ca0.md")
+    ))
+    #expect(NoTypeEditorBufferPath.supports(
+        URL(fileURLWithPath: "/Users/test/.codex/editor/.tmpAbCd.md")
+    ))
+    #expect(!NoTypeEditorBufferPath.supports(
+        URL(fileURLWithPath: "/tmp/project/notes.md")
+    ))
+}
+
+@Test
+func agentEditorParsesRawCodexDraftAndPreservesItsFinalNewline() throws {
+    let buffer = try #require(
+        NoTypeEditorBuffer.parseTriggeredBuffer("第一行\n第二行   \n")
+    )
+
+    #expect(buffer.preservedPrefix.isEmpty)
+    #expect(buffer.sourceText == "第一行\n第二行")
+    #expect(buffer.trailingLineEndings == "\n")
+    #expect(buffer.replacingSource(with: "First line\nSecond line") == "First line\nSecond line\n")
+}
+
+@Test
+func agentEditorPreservesClaudeResponseContextAndReplacesOnlyTheReply() throws {
+    let contextPrefix = """
+    # ─── Claude's last response (for reference; removed on save) ───
+    # I updated the parser and added its tests.
+    # ─── Write your reply below this line ──────────────────────────
+    """
+    let context = contextPrefix + "\n\n" + "请继续检查边界情况" + "   "
+    let buffer = try #require(NoTypeEditorBuffer.parseTriggeredBuffer(context))
+
+    #expect(buffer.sourceText == "请继续检查边界情况")
+    #expect(buffer.preservedPrefix.contains("# I updated the parser"))
+    #expect(buffer.preservedPrefix.hasSuffix("\n\n"))
+    #expect(
+        buffer.replacingSource(with: "Please continue checking edge cases.")
+            .hasSuffix("Please continue checking edge cases.")
+    )
+}
+
+@Test
+func agentEditorRequiresTrailingTriggerSpacesAndRemovesExactlyThree() throws {
+    #expect(NoTypeEditorBuffer.parseTriggeredBuffer("draft  ") == nil)
+    let buffer = try #require(NoTypeEditorBuffer.parseTriggeredBuffer("draft    "))
+    #expect(buffer.sourceText == "draft ")
+    #expect(NoTypeEditorBuffer.parseTriggeredBuffer("   ") == nil)
+}
+
+@Test
+func agentEditorPendingTokenMustMatchAndRemainFresh() {
+    let token = UUID().uuidString
+    let trigger = AgentEditorPendingTrigger(
+        token: token,
+        createdAtMilliseconds: 10_000,
+        targetProcessID: 123,
+        targetBundleIdentifier: "com.mitchellh.ghostty"
+    )
+
+    #expect(trigger.accepts(token: token, nowMilliseconds: 14_999))
+    #expect(!trigger.accepts(token: UUID().uuidString, nowMilliseconds: 10_001))
+    #expect(!trigger.accepts(token: token, nowMilliseconds: 15_001))
+}
+
+@Test
+func agentEditorRecognizesSupportedTerminalHosts() {
+    #expect(AgentEditorIntegrationService.supportsTerminal(
+        DictationTargetContext(
+            processIdentifier: 1,
+            bundleIdentifier: "com.mitchellh.ghostty",
+            localizedName: "Ghostty"
+        )
+    ))
+    #expect(AgentEditorIntegrationService.supportsTerminal(
+        DictationTargetContext(
+            processIdentifier: 1,
+            bundleIdentifier: "unknown",
+            localizedName: "Herdr"
+        )
+    ))
+    #expect(!AgentEditorIntegrationService.supportsTerminal(
+        DictationTargetContext(
+            processIdentifier: 1,
+            bundleIdentifier: "com.apple.TextEdit",
+            localizedName: "TextEdit"
+        )
+    ))
+}
+
+@Test
 func appSettingsDecodeMigratesLegacyClusterField() throws {
     let payload = """
     {
@@ -188,6 +286,7 @@ func appSettingsDecodeMigratesLegacyClusterField() throws {
 
     #expect(decoded.resourceID == "legacy-cluster")
     #expect(decoded.llmRefinementEnabled)
+    #expect(!decoded.agentTUITranslationEnabled)
 }
 
 @Test
@@ -200,7 +299,8 @@ func settingsStoreRoundTripsRestoredSettings() throws {
         resourceID: "volc.seedasr.sauc.duration",
         hotkey: .commandShiftSpace,
         language: .jaJP,
-        llmRefinementEnabled: true
+        llmRefinementEnabled: true,
+        agentTUITranslationEnabled: true
     )
 
     try store.save(settings)

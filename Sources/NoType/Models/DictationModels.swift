@@ -41,12 +41,14 @@ struct AudioInputDevice: Identifiable, Equatable, Hashable {
 }
 
 struct DictationTargetContext: Equatable {
+    let processIdentifier: Int32
     let bundleIdentifier: String
     let localizedName: String
 
     static func currentFrontmost() -> DictationTargetContext {
         let app = NSWorkspace.shared.frontmostApplication
         return DictationTargetContext(
+            processIdentifier: app?.processIdentifier ?? 0,
             bundleIdentifier: app?.bundleIdentifier ?? "unknown",
             localizedName: app?.localizedName ?? "Unknown App"
         )

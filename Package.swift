@@ -11,9 +11,16 @@ let package = Package(
         .executableTarget(
             name: "NoType"
         ),
+        .target(
+            name: "NoTypeEditorCore"
+        ),
+        .executableTarget(
+            name: "NoTypeEditor",
+            dependencies: ["NoTypeEditorCore"]
+        ),
         .testTarget(
             name: "NoTypeTests",
-            dependencies: ["NoType"]
+            dependencies: ["NoType", "NoTypeEditorCore"]
         ),
     ],
     swiftLanguageModes: [.v6]

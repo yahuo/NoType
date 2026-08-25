@@ -12,6 +12,7 @@ ICON_BUILD_DIR="$STAGING_DIR/icon-build"
 APP_DIR="$STAGING_DIR/$APP_NAME"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
+HELPERS_DIR="$CONTENTS_DIR/Helpers"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 ICONSET_DIR="$ICON_BUILD_DIR/AppIcon.iconset"
 OUTPUT_ICNS="$ICON_BUILD_DIR/NoTypeIcon.icns"
@@ -105,14 +106,15 @@ ICONSET_DIR="$ICONSET_DIR" OUTPUT_ICNS="$OUTPUT_ICNS" "$ROOT_DIR/scripts/build_i
 echo "Preparing app bundle..."
 rm -rf "$DIST_APP_DIR"
 rm -rf "$APP_DIR"
-mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
+mkdir -p "$MACOS_DIR" "$HELPERS_DIR" "$RESOURCES_DIR"
 mkdir -p "$DIST_DIR"
 
 cp "$BUILD_DIR/NoType" "$MACOS_DIR/NoType"
+cp "$BUILD_DIR/NoTypeEditor" "$HELPERS_DIR/notype-editor"
 cp "$ROOT_DIR/packaging/Info.plist" "$CONTENTS_DIR/Info.plist"
 cp "$OUTPUT_ICNS" "$RESOURCES_DIR/NoTypeIcon.icns"
 
-chmod +x "$MACOS_DIR/NoType"
+chmod +x "$MACOS_DIR/NoType" "$HELPERS_DIR/notype-editor"
 
 SIGN_IDENTITY="$(select_codesign_identity)"
 if [[ "$SIGN_IDENTITY" == "-" ]]; then

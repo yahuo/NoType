@@ -12,6 +12,8 @@ end
 ROOT = File.expand_path('..', __dir__)
 PROJECT_PATH = File.join(ROOT, 'NoType.xcodeproj')
 APP_TARGET_NAME = 'NoType'
+EDITOR_CORE_TARGET_NAME = 'NoTypeEditorCore'
+EDITOR_TARGET_NAME = 'NoTypeEditor'
 TEST_TARGET_NAME = 'NoTypeTests'
 DEPLOYMENT_TARGET = '14.0'
 APP_BUNDLE_ID = 'com.opensource.notype'
@@ -46,10 +48,22 @@ project.root_object.attributes['LastUpgradeCheck'] = '2640'
 project.root_object.attributes['TargetAttributes'] ||= {}
 
 app_target = project.new_target(:application, APP_TARGET_NAME, :osx, DEPLOYMENT_TARGET)
+editor_core_target = project.new_target(:static_library, EDITOR_CORE_TARGET_NAME, :osx, DEPLOYMENT_TARGET)
+editor_target = project.new_target(:command_line_tool, EDITOR_TARGET_NAME, :osx, DEPLOYMENT_TARGET)
 test_target = project.new_target(:unit_test_bundle, TEST_TARGET_NAME, :osx, DEPLOYMENT_TARGET)
+editor_target.add_dependency(editor_core_target)
+editor_target.frameworks_build_phase.add_file_reference(editor_core_target.product_reference)
 test_target.add_dependency(app_target)
+test_target.add_dependency(editor_core_target)
+test_target.frameworks_build_phase.add_file_reference(editor_core_target.product_reference)
 
 project.root_object.attributes['TargetAttributes'][app_target.uuid] = {
+  'CreatedOnToolsVersion' => '26.4'
+}
+project.root_object.attributes['TargetAttributes'][editor_core_target.uuid] = {
+  'CreatedOnToolsVersion' => '26.4'
+}
+project.root_object.attributes['TargetAttributes'][editor_target.uuid] = {
   'CreatedOnToolsVersion' => '26.4'
 }
 project.root_object.attributes['TargetAttributes'][test_target.uuid] = {
@@ -73,6 +87,25 @@ app_target.build_configurations.each do |config|
   settings['ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS'] = 'NO'
 end
 
+editor_core_target.build_configurations.each do |config|
+  settings = config.build_settings
+  settings['PRODUCT_NAME'] = EDITOR_CORE_TARGET_NAME
+  settings['SWIFT_VERSION'] = '6.0'
+  settings['MACOSX_DEPLOYMENT_TARGET'] = DEPLOYMENT_TARGET
+  settings['CODE_SIGN_STYLE'] = 'Automatic'
+  settings['DEFINES_MODULE'] = 'YES'
+  settings['SKIP_INSTALL'] = 'YES'
+end
+
+editor_target.build_configurations.each do |config|
+  settings = config.build_settings
+  settings['PRODUCT_NAME'] = EDITOR_TARGET_NAME
+  settings['SWIFT_VERSION'] = '6.0'
+  settings['MACOSX_DEPLOYMENT_TARGET'] = DEPLOYMENT_TARGET
+  settings['CODE_SIGN_STYLE'] = 'Automatic'
+  settings['ENABLE_HARDENED_RUNTIME'] = 'YES'
+end
+
 test_target.build_configurations.each do |config|
   settings = config.build_settings
   settings['PRODUCT_NAME'] = TEST_TARGET_NAME
@@ -87,17 +120,22 @@ test_target.build_configurations.each do |config|
 end
 
 app_source_refs = each_file(ROOT, 'Sources/NoType/**/*.swift').map { |path| add_file_reference(project, path) }
+editor_core_source_refs = each_file(ROOT, 'Sources/NoTypeEditorCore/**/*.swift').map { |path| add_file_reference(project, path) }
+editor_source_refs = each_file(ROOT, 'Sources/NoTypeEditor/**/*.swift').map { |path| add_file_reference(project, path) }
 test_source_refs = each_file(ROOT, 'Tests/NoTypeTests/**/*.swift').map { |path| add_file_reference(project, path) }
 icon_ref = add_file_reference(project, 'packaging/NoTypeIcon.icns')
 add_file_reference(project, 'packaging/Info.plist')
 
 app_target.add_file_references(app_source_refs)
+editor_core_target.add_file_references(editor_core_source_refs)
+editor_target.add_file_references(editor_source_refs)
 test_target.add_file_references(test_source_refs)
 app_target.resources_build_phase.add_file_reference(icon_ref, true)
 
 scheme = Xcodeproj::XCScheme.new
 scheme.set_launch_target(app_target)
 scheme.add_build_target(app_target)
+scheme.add_build_target(editor_target)
 scheme.add_test_target(test_target)
 scheme.save_as(PROJECT_PATH, APP_TARGET_NAME, true)
 

@@ -62,6 +62,41 @@ Failure response:
 
 The `ping` method returns `pong` in the response `text` field.
 
+## Claude Code and Codex CLI integration
+
+Claude Code and Codex CLI both support editing their current draft through `$VISUAL`/`$EDITOR` (`Ctrl+G`; Claude also supports `Ctrl+X Ctrl+E`). NoType bundles a transparent proxy at:
+
+```text
+/Applications/NoType.app/Contents/Helpers/notype-editor
+```
+
+Quit any running NoType process, build and install the current app, reopen it, then install the proxy:
+
+```bash
+make install
+open /Applications/NoType.app
+./integrations/agent-editor/install.sh
+```
+
+The installer creates `~/.local/bin/notype-editor` and `~/.config/notype/agent-editor.sh`, but deliberately does not edit shell startup files. Add this line to `~/.zshrc` **after** any existing `VISUAL`/`EDITOR` exports:
+
+```bash
+source "$HOME/.config/notype/agent-editor.sh"
+```
+
+Start a new shell, restart Claude/Codex from that shell, and enable **Claude/Codex Triple-Space** in **NoType Settings → AI Rewrite**.
+
+The shell environment saves the prior `$VISUAL` and `$EDITOR` as `$NOTYPE_REAL_VISUAL` and `$NOTYPE_REAL_EDITOR`. A normal manual external-editor shortcut therefore delegates to the original editor. It defaults to `/usr/bin/vi` only when neither original variable was configured.
+
+For an automatic translation, NoType does the following:
+
+1. Detects triple-Space in a supported terminal without reading or selecting the terminal's rendered `AXValue`.
+2. Writes a private, single-use trigger token with a five-second lifetime and synthesizes `Ctrl+G`.
+3. The proxy accepts only a user-owned Claude/Codex Markdown temp buffer from an inherited user-owned TTY, verifies that its editable draft ends in three spaces, and sends the draft plus token to NoType.
+4. On success, the proxy replaces only the draft and exits, returning control to the TUI without submitting it.
+
+Claude's optional `externalEditorContext` block is preserved. The proxy recognizes Claude's `# ─── Write your reply below this line` marker and translates only the reply below it. If the token, path, TTY, translation, or socket validation fails, the original temp file remains unchanged.
+
 ## Pi integration
 
 The native Pi extension is at [`integrations/pi/notype.ts`](../integrations/pi/notype.ts). It listens to terminal input without replacing Pi's editor component, so it remains compatible with custom Pi editors.
@@ -77,6 +112,10 @@ Then run `/reload` in Pi. With NoType running and Codex logged in, enter a non-e
 
 The Pi adapter does not use or remap `Ctrl+G`.
 
+## Editor-only bridge request
+
+The bundled proxy uses the `translate_editor` method. In addition to the normal request fields it sends the short-lived token, helper/parent PIDs, TTY path, and `trigger: "triple-space"`. NoType accepts the token once only, while the terminal that generated it remains focused. This method is internal to the bundled proxy; third-party clients should use `translate`.
+
 ## Current boundary
 
-The bridge server and Pi adapter are implemented. Claude Code and Codex CLI will use the same bridge protocol through an external-editor adapter; that adapter is not installed automatically and remains a separate integration step.
+Pi, Claude Code, and Codex CLI are supported for local TUI sessions. Remote SSH sessions cannot reach the Mac-local Unix socket unless the socket is explicitly forwarded or another transport is added.

@@ -64,13 +64,15 @@ struct AppSettings: Codable, Equatable {
     var hotkey: HotkeyOption
     var language: DictationLanguage
     var llmRefinementEnabled: Bool
+    var agentTUITranslationEnabled: Bool
 
     static let defaults = AppSettings(
         appID: "",
         resourceID: "volc.seedasr.sauc.duration",
         hotkey: .optionSpace,
         language: .zhCN,
-        llmRefinementEnabled: false
+        llmRefinementEnabled: false,
+        agentTUITranslationEnabled: false
     )
 
     var hasValidASRConfiguration: Bool {
@@ -84,6 +86,7 @@ struct AppSettings: Codable, Equatable {
         case hotkey
         case language
         case llmRefinementEnabled
+        case agentTUITranslationEnabled
     }
 
     init(
@@ -91,13 +94,15 @@ struct AppSettings: Codable, Equatable {
         resourceID: String,
         hotkey: HotkeyOption,
         language: DictationLanguage,
-        llmRefinementEnabled: Bool
+        llmRefinementEnabled: Bool,
+        agentTUITranslationEnabled: Bool
     ) {
         self.appID = appID
         self.resourceID = resourceID
         self.hotkey = hotkey
         self.language = language
         self.llmRefinementEnabled = llmRefinementEnabled
+        self.agentTUITranslationEnabled = agentTUITranslationEnabled
     }
 
     init(from decoder: Decoder) throws {
@@ -113,6 +118,10 @@ struct AppSettings: Codable, Equatable {
         hotkey = try container.decodeIfPresent(HotkeyOption.self, forKey: .hotkey) ?? .optionSpace
         language = try container.decodeIfPresent(DictationLanguage.self, forKey: .language) ?? .zhCN
         llmRefinementEnabled = try container.decodeIfPresent(Bool.self, forKey: .llmRefinementEnabled) ?? false
+        agentTUITranslationEnabled = try container.decodeIfPresent(
+            Bool.self,
+            forKey: .agentTUITranslationEnabled
+        ) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -122,6 +131,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(hotkey, forKey: .hotkey)
         try container.encode(language, forKey: .language)
         try container.encode(llmRefinementEnabled, forKey: .llmRefinementEnabled)
+        try container.encode(agentTUITranslationEnabled, forKey: .agentTUITranslationEnabled)
     }
 }
 

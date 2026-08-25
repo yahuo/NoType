@@ -111,6 +111,22 @@ struct SettingsView: View {
             }
 
             Section {
+                Toggle(
+                    "Enable Claude/Codex Triple-Space",
+                    isOn: Binding(
+                        get: { model.settings.agentTUITranslationEnabled },
+                        set: { model.setAgentTUITranslationEnabled($0) }
+                    )
+                )
+
+                Text("Requires the bundled notype-editor proxy to be configured as VISUAL and EDITOR before starting the agent. Manual external-editor shortcuts continue to open your original editor.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Label("Agent TUI Translation", systemImage: "terminal")
+            }
+
+            Section {
                 LabeledContent("Endpoint") {
                     Text("chatgpt.com/backend-api/codex")
                         .foregroundStyle(.secondary)

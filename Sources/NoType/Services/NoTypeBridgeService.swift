@@ -7,6 +7,7 @@ enum NoTypeBridgeProtocol {
     static let maximumFrameBytes = 1_048_576
     static let pingMethod = "ping"
     static let translateMethod = "translate"
+    static let translateEditorMethod = "translate_editor"
 }
 
 struct NoTypeBridgeRequest: Codable, Equatable, Sendable {
@@ -15,19 +16,34 @@ struct NoTypeBridgeRequest: Codable, Equatable, Sendable {
     let method: String
     let client: String?
     let text: String?
+    let token: String?
+    let processID: Int32?
+    let parentProcessID: Int32?
+    let terminal: String?
+    let trigger: String?
 
     init(
         version: Int = NoTypeBridgeProtocol.version,
         id: String = UUID().uuidString,
         method: String,
         client: String? = nil,
-        text: String? = nil
+        text: String? = nil,
+        token: String? = nil,
+        processID: Int32? = nil,
+        parentProcessID: Int32? = nil,
+        terminal: String? = nil,
+        trigger: String? = nil
     ) {
         self.version = version
         self.id = id
         self.method = method
         self.client = client
         self.text = text
+        self.token = token
+        self.processID = processID
+        self.parentProcessID = parentProcessID
+        self.terminal = terminal
+        self.trigger = trigger
     }
 }
 
