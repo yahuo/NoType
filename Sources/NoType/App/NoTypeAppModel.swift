@@ -27,6 +27,7 @@ final class NoTypeAppModel: ObservableObject {
     private let permissionService: PermissionService
     private let hotkeyService: HotkeyService
     private let tripleSpaceTriggerService: TripleSpaceTriggerService
+    private let bridgeService: NoTypeBridgeService
     private let audioCaptureService: AudioCaptureService
     private let textInsertionService: TextInsertionService
     private let aiRewriteService: AIRewriteService
@@ -46,6 +47,7 @@ final class NoTypeAppModel: ObservableObject {
     private var lastRewritePreviewUpdate = 0.0
     private var sessionID = UUID()
     private var currentOutputMode: DictationOutputMode = .dictation
+    private var activeBridgeRequestID: String?
 
     init(
         settingsStore: SettingsStore = SettingsStore(),
@@ -53,6 +55,7 @@ final class NoTypeAppModel: ObservableObject {
         permissionService: PermissionService = PermissionService(),
         hotkeyService: HotkeyService = HotkeyService(),
         tripleSpaceTriggerService: TripleSpaceTriggerService = TripleSpaceTriggerService(),
+        bridgeService: NoTypeBridgeService = NoTypeBridgeService(),
         audioCaptureService: AudioCaptureService = AudioCaptureService(),
         textInsertionService: TextInsertionService = TextInsertionService(),
         aiRewriteService: AIRewriteService = AIRewriteService(),
@@ -64,6 +67,7 @@ final class NoTypeAppModel: ObservableObject {
         self.permissionService = permissionService
         self.hotkeyService = hotkeyService
         self.tripleSpaceTriggerService = tripleSpaceTriggerService
+        self.bridgeService = bridgeService
         self.audioCaptureService = audioCaptureService
         self.textInsertionService = textInsertionService
         self.aiRewriteService = aiRewriteService
@@ -224,8 +228,13 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         registerTripleSpaceTriggerIfPossible()
+        startBridgeService()
 
         scheduleHUDLayoutUpdate(animated: false)
+    }
+
+    func shutdown() {
+        bridgeService.stop()
     }
 
     func refreshPermissions() {
@@ -520,6 +529,78 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         await translateTextReplacingCurrentSelection(sourceText)
+    }
+
+    private func handleBridgeRequest(_ request: NoTypeBridgeRequest) async -> NoTypeBridgeResponse {
+        guard request.version == NoTypeBridgeProtocol.version else {
+            return .failure(
+                id: request.id,
+                code: "unsupported_version",
+                message: "Unsupported NoType bridge protocol version: \(request.version)."
+            )
+        }
+
+        guard !request.id.isEmpty, request.id.utf8.count <= 128 else {
+            return .failure(
+                id: request.id,
+                code: "invalid_request_id",
+                message: "The NoType bridge request ID must contain 1 to 128 bytes."
+            )
+        }
+
+        if request.method == NoTypeBridgeProtocol.pingMethod {
+            return .success(id: request.id, text: "pong")
+        }
+
+        guard request.method == NoTypeBridgeProtocol.translateMethod else {
+            return .failure(
+                id: request.id,
+                code: "unsupported_method",
+                message: "Unsupported NoType bridge method: \(request.method)."
+            )
+        }
+
+        guard let sourceText = request.text, !sourceText.trimmed.isEmpty else {
+            return .failure(
+                id: request.id,
+                code: "empty_text",
+                message: "The NoType bridge translation text is empty."
+            )
+        }
+
+        guard activeBridgeRequestID == nil,
+              phase != .recording,
+              phase != .transcribing,
+              phase != .refining
+        else {
+            return .failure(
+                id: request.id,
+                code: "busy",
+                message: "NoType is already processing another request."
+            )
+        }
+
+        guard hasCodexOAuthCredentials else {
+            return .failure(
+                id: request.id,
+                code: "missing_codex_auth",
+                message: "Translation requires Codex login. Run `codex login` first."
+            )
+        }
+
+        activeBridgeRequestID = request.id
+        defer { activeBridgeRequestID = nil }
+
+        do {
+            let translated = try await aiRewriteService.translateToEnglish(sourceText)
+            return .success(id: request.id, text: translated)
+        } catch {
+            return .failure(
+                id: request.id,
+                code: "translation_failed",
+                message: error.localizedDescription
+            )
+        }
     }
 
     private func validateTranslationCredentials() -> Bool {
@@ -846,19 +927,46 @@ final class NoTypeAppModel: ObservableObject {
         )
     }
 
+    private func startBridgeService() {
+        do {
+            try bridgeService.start(
+                requestHandler: { [weak self] request in
+                    guard let self else {
+                        return .failure(
+                            id: request.id,
+                            code: "app_unavailable",
+                            message: "NoType is shutting down."
+                        )
+                    }
+                    return await self.handleBridgeRequest(request)
+                },
+                failureHandler: { [weak self] message in
+                    Task { @MainActor [weak self] in
+                        self?.appendWarning("NoType bridge: \(message)")
+                    }
+                }
+            )
+        } catch {
+            appendWarning(error.localizedDescription)
+        }
+    }
+
     private func registerTripleSpaceTriggerIfPossible() {
         guard permissionSnapshot.accessibilityAuthorized else { return }
 
         do {
             try tripleSpaceTriggerService.register()
         } catch {
-            let message = error.localizedDescription
-            if let currentWarning = hotkeyWarningMessage, !currentWarning.isEmpty {
-                guard !currentWarning.contains(message) else { return }
-                hotkeyWarningMessage = currentWarning + "\n" + message
-            } else {
-                hotkeyWarningMessage = message
-            }
+            appendWarning(error.localizedDescription)
+        }
+    }
+
+    private func appendWarning(_ message: String) {
+        if let currentWarning = hotkeyWarningMessage, !currentWarning.isEmpty {
+            guard !currentWarning.contains(message) else { return }
+            hotkeyWarningMessage = currentWarning + "\n" + message
+        } else {
+            hotkeyWarningMessage = message
         }
     }
 

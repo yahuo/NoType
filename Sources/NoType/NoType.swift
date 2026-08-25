@@ -5,9 +5,14 @@ import SwiftUI
 @MainActor
 final class NoTypeAppDelegate: NSObject, NSApplicationDelegate {
     static var launchHandler: (() -> Void)?
+    static var terminationHandler: (() -> Void)?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         Self.launchHandler?()
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        Self.terminationHandler?()
     }
 }
 
@@ -24,6 +29,9 @@ struct NoTypeApp: App {
         settingsWindowController = SettingsWindowController(model: model)
         NoTypeAppDelegate.launchHandler = {
             model.bootstrap()
+        }
+        NoTypeAppDelegate.terminationHandler = {
+            model.shutdown()
         }
     }
 

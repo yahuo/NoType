@@ -3,6 +3,10 @@ import Foundation
 import Testing
 @testable import NoType
 
+private enum NoTypeTestError: Error {
+    case timedOut
+}
+
 private func base64URL(_ value: String) -> String {
     Data(value.utf8)
         .base64EncodedString()
@@ -79,6 +83,91 @@ func tripleSpaceValuePollerWaitsForDelayedThirdSpace() {
 
     #expect(poller.consume("请翻译这个输入框  ") == .waiting)
     #expect(poller.consume("请翻译这个输入框   ") == .ready("请翻译这个输入框"))
+}
+
+@Test
+func bridgeFrameCodecHandlesFragmentedMultilineRequests() throws {
+    let request = NoTypeBridgeRequest(
+        id: "request-id",
+        method: NoTypeBridgeProtocol.translateMethod,
+        client: "pi",
+        text: "第一行\n第二行"
+    )
+    let frame = try NoTypeBridgeFrameCodec.encode(request)
+    var decoder = NoTypeBridgeFrameDecoder()
+
+    #expect(try decoder.append(Data(frame.prefix(2))) == nil)
+    #expect(try decoder.append(Data(frame.dropFirst(2).prefix(5))) == nil)
+
+    let decodedPayload = try decoder.append(Data(frame.dropFirst(7)))
+    let payload = try #require(decodedPayload)
+    let decoded = try JSONDecoder().decode(NoTypeBridgeRequest.self, from: payload)
+
+    #expect(decoded == request)
+}
+
+@Test
+func bridgeFrameDecoderRejectsOversizedPayloadsBeforeReadingTheBody() {
+    var decoder = NoTypeBridgeFrameDecoder()
+    let oversizedLength = UInt32(NoTypeBridgeProtocol.maximumFrameBytes + 1)
+    let header = Data([
+        UInt8((oversizedLength >> 24) & 0xFF),
+        UInt8((oversizedLength >> 16) & 0xFF),
+        UInt8((oversizedLength >> 8) & 0xFF),
+        UInt8(oversizedLength & 0xFF),
+    ])
+
+    #expect(throws: NoTypeBridgeFrameError.frameTooLarge(Int(oversizedLength))) {
+        try decoder.append(header)
+    }
+}
+
+@Test @MainActor
+func bridgeServiceRoundTripsRequestsOverAUnixSocket() async throws {
+    let runtimeDirectory = URL(
+        fileURLWithPath: "/tmp/notype-test-\(UUID().uuidString.prefix(8))",
+        isDirectory: true
+    )
+    let service = NoTypeBridgeService(runtimeDirectory: runtimeDirectory)
+    defer {
+        service.stop()
+        try? FileManager.default.removeItem(at: runtimeDirectory)
+    }
+
+    try service.start { request in
+        .success(id: request.id, text: "echo:\(request.text ?? "")")
+    }
+
+    let competingService = NoTypeBridgeService(runtimeDirectory: runtimeDirectory)
+    do {
+        try competingService.start { request in
+            .success(id: request.id)
+        }
+        Issue.record("A second bridge service unexpectedly acquired the active runtime lock.")
+        competingService.stop()
+    } catch NoTypeBridgeServiceError.anotherInstanceIsListening {
+        // Expected: the active service keeps ownership of its socket.
+    }
+
+    for _ in 0..<100 where !FileManager.default.fileExists(atPath: service.socketURL.path) {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    guard FileManager.default.fileExists(atPath: service.socketURL.path) else {
+        throw NoTypeTestError.timedOut
+    }
+
+    let request = NoTypeBridgeRequest(
+        id: "round-trip",
+        method: NoTypeBridgeProtocol.translateMethod,
+        client: "test",
+        text: "你好"
+    )
+    let response = try await NoTypeBridgeClient(
+        socketURL: service.socketURL,
+        timeout: 2
+    ).send(request)
+
+    #expect(response == .success(id: "round-trip", text: "echo:你好"))
 }
 
 @Test

@@ -41,6 +41,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
 - 英文翻译：
   - 有选中文本时，`Option + Shift + Space` 会直接翻译选中文本并替换
   - 没有选中文本时，`Option + Shift + Space` 会先录音，再把语音转写结果翻译成英文
+  - 实验性的本地 Unix socket bridge 可让 Pi 直接翻译并替换 TUI draft，不依赖终端 AX 输入框
 - HUD 在录音和转写阶段显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
 - 文本注入统一走剪贴板 + 模拟 `Cmd + V`
 - 如果没有可编辑焦点，则不会强行注入，而是把结果保留到剪贴板供手动粘贴
@@ -214,7 +215,7 @@ make package
 NOTYPE_NOTARY_PROFILE=AC_NOTARY make notarize
 ```
 
-当前默认的实验性分发说明见 [docs/release.md](./docs/release.md)。官网静态站位于 [site/README.md](./site/README.md)。
+当前默认的实验性分发说明见 [docs/release.md](./docs/release.md)。本地 Agent TUI 通信协议与 Pi 安装方式见 [docs/bridge.md](./docs/bridge.md)。官网静态站位于 [site/README.md](./site/README.md)。
 
 ## 项目结构
 
@@ -227,6 +228,7 @@ Sources/NoType/Support     PCM 与转写文本处理辅助工具
 scripts/                   构建、图标、Xcode 工程生成脚本
 packaging/                 App bundle 资源与图标
 Tests/NoTypeTests          测试
+integrations/pi            Pi TUI 的 NoType bridge 扩展
 ```
 
 ## Roadmap
