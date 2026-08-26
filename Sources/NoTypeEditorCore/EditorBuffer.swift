@@ -2,18 +2,28 @@ import Foundation
 
 public enum NoTypeEditorBufferPath {
     public static func supports(_ url: URL) -> Bool {
-        let name = url.lastPathComponent
-        guard url.pathExtension.lowercased() == "md" else { return false }
+        isClaude(url) || isCodex(url)
+    }
 
-        let claudePrefix = "claude-prompt-"
-        if name.hasPrefix(claudePrefix),
-           url.deletingLastPathComponent().lastPathComponent.hasPrefix("claude-") {
-            let identifier = String(name.dropFirst(claudePrefix.count).dropLast(3))
-            return UUID(uuidString: identifier) != nil
+    public static func isClaude(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
+        let prefix = "claude-prompt-"
+        guard url.pathExtension.lowercased() == "md",
+              name.hasPrefix(prefix),
+              url.deletingLastPathComponent().lastPathComponent.hasPrefix("claude-")
+        else {
+            return false
         }
 
+        let identifier = String(name.dropFirst(prefix.count).dropLast(3))
+        return UUID(uuidString: identifier) != nil
+    }
+
+    private static func isCodex(_ url: URL) -> Bool {
+        let name = url.lastPathComponent
         let parent = url.deletingLastPathComponent()
-        return name.hasPrefix(".tmp")
+        return url.pathExtension.lowercased() == "md"
+            && name.hasPrefix(".tmp")
             && parent.lastPathComponent == "editor"
             && parent.deletingLastPathComponent().lastPathComponent == ".codex"
     }

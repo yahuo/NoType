@@ -95,6 +95,8 @@ For an automatic translation, NoType does the following:
 3. The proxy accepts only a user-owned Claude/Codex Markdown temp buffer from an inherited user-owned TTY, verifies that its editable draft ends in three spaces, and sends the draft plus token to NoType.
 4. On success, the proxy replaces only the draft and exits, returning control to the TUI without submitting it.
 
+Claude temporarily switches to its external-editor screen while translation is running. The proxy shows progress there, and Claude redraws its TUI after the helper exits. Codex remains silent because terminal output can otherwise linger beside its draft.
+
 Claude's optional `externalEditorContext` block is preserved. The proxy recognizes Claude's `# ─── Write your reply below this line` marker and translates only the reply below it. If the token, path, TTY, translation, or socket validation fails, the original temp file remains unchanged.
 
 ## Pi integration

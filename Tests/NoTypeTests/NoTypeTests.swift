@@ -178,15 +178,17 @@ func bridgeServiceRoundTripsRequestsOverAUnixSocket() async throws {
 
 @Test
 func agentEditorAcceptsOnlyClaudeAndCodexTemporaryMarkdownPaths() {
-    #expect(NoTypeEditorBufferPath.supports(
-        URL(fileURLWithPath: "/tmp/claude-501/claude-prompt-2c259eaf-686d-4be3-8b30-f4728fed6ca0.md")
-    ))
-    #expect(NoTypeEditorBufferPath.supports(
-        URL(fileURLWithPath: "/Users/test/.codex/editor/.tmpAbCd.md")
-    ))
-    #expect(!NoTypeEditorBufferPath.supports(
-        URL(fileURLWithPath: "/tmp/project/notes.md")
-    ))
+    let claude = URL(
+        fileURLWithPath: "/tmp/claude-501/claude-prompt-2c259eaf-686d-4be3-8b30-f4728fed6ca0.md"
+    )
+    let codex = URL(fileURLWithPath: "/Users/test/.codex/editor/.tmpAbCd.md")
+    let unsupported = URL(fileURLWithPath: "/tmp/project/notes.md")
+
+    #expect(NoTypeEditorBufferPath.supports(claude))
+    #expect(NoTypeEditorBufferPath.isClaude(claude))
+    #expect(NoTypeEditorBufferPath.supports(codex))
+    #expect(!NoTypeEditorBufferPath.isClaude(codex))
+    #expect(!NoTypeEditorBufferPath.supports(unsupported))
 }
 
 @Test

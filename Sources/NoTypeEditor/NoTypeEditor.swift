@@ -25,6 +25,10 @@ struct NoTypeEditorMain {
             return
         }
 
+        if NoTypeEditorBufferPath.isClaude(fileURL) {
+            writeError("NoType: translating…\n")
+        }
+
         do {
             let translated = try NoTypeEditorBridgeClient(
                 socketURL: bridgeSocketURL(environment: environment)
