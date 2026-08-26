@@ -25,7 +25,6 @@ struct NoTypeEditorMain {
             return
         }
 
-        writeError("NoType: translating…\n")
         do {
             let translated = try NoTypeEditorBridgeClient(
                 socketURL: bridgeSocketURL(environment: environment)
