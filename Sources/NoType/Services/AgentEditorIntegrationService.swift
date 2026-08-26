@@ -91,7 +91,7 @@ final class AgentEditorIntegrationService {
         pendingTrigger = trigger
         scheduleExpiration(for: trigger.token)
 
-        guard Self.postControlG() else {
+        guard Self.postControlG(to: target.processIdentifier) else {
             clearPendingTrigger()
             throw AgentEditorIntegrationServiceError.shortcutSynthesisFailed
         }
@@ -181,23 +181,25 @@ final class AgentEditorIntegrationService {
         try? FileManager.default.removeItem(at: triggerURL)
     }
 
-    private nonisolated static func postControlG() -> Bool {
-        guard let keyDown = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_ANSI_G),
-            keyDown: true
-        ), let keyUp = CGEvent(
-            keyboardEventSource: nil,
-            virtualKey: CGKeyCode(kVK_ANSI_G),
-            keyDown: false
-        ) else {
+    private nonisolated static func postControlG(to processIdentifier: Int32) -> Bool {
+        guard processIdentifier > 0,
+              let keyDown = CGEvent(
+                  keyboardEventSource: nil,
+                  virtualKey: CGKeyCode(kVK_ANSI_G),
+                  keyDown: true
+              ), let keyUp = CGEvent(
+                  keyboardEventSource: nil,
+                  virtualKey: CGKeyCode(kVK_ANSI_G),
+                  keyDown: false
+              )
+        else {
             return false
         }
 
         keyDown.flags = .maskControl
         keyUp.flags = .maskControl
-        keyDown.post(tap: .cghidEventTap)
-        keyUp.post(tap: .cghidEventTap)
+        keyDown.postToPid(pid_t(processIdentifier))
+        keyUp.postToPid(pid_t(processIdentifier))
         return true
     }
 
