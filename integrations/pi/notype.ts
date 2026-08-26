@@ -7,7 +7,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const PROTOCOL_VERSION = 1;
 const MAXIMUM_FRAME_BYTES = 1_048_576;
 const TRIGGER_WINDOW_MS = 1_000;
-const MINIMUM_SPACE_INTERVAL_MS = 45;
+const KEY_REPEAT_INITIAL_GAP_MS = 120;
+const KEY_REPEAT_FAST_GAP_MS = 80;
 const STATUS_KEY = "notype-translation";
 
 type BridgeResponse = {
@@ -105,16 +106,12 @@ function translateThroughNoType(text: string): Promise<string> {
 
 export default function (pi: ExtensionAPI) {
 	let unsubscribeTerminalInput: (() => void) | undefined;
-	let firstSpaceTimestamp: number | undefined;
-	let lastSpaceTimestamp: number | undefined;
-	let spaceCount = 0;
+	let spaceTimestamps: number[] = [];
 	let translationGeneration = 0;
 	let translationInFlight = false;
 
 	const resetTrigger = () => {
-		firstSpaceTimestamp = undefined;
-		lastSpaceTimestamp = undefined;
-		spaceCount = 0;
+		spaceTimestamps = [];
 	};
 
 	const translateCurrentDraft = async (ctx: ExtensionContext) => {
@@ -164,41 +161,50 @@ export default function (pi: ExtensionAPI) {
 		if (ctx.mode !== "tui") return;
 
 		unsubscribeTerminalInput = ctx.ui.onTerminalInput((data) => {
-			if (data !== " ") {
+			let shouldTranslate = false;
+
+			// stdin can coalesce several fast key presses into one chunk. Process every
+			// character instead of requiring each callback to contain exactly one Space.
+			for (const character of data) {
+				if (character !== " ") {
+					resetTrigger();
+					continue;
+				}
+
+				const now = performance.now();
+				const firstTimestamp = spaceTimestamps[0];
+				if (
+					firstTimestamp === undefined ||
+					now < firstTimestamp ||
+					now - firstTimestamp > TRIGGER_WINDOW_MS
+				) {
+					spaceTimestamps = [now];
+				} else {
+					spaceTimestamps.push(now);
+				}
+
+				if (spaceTimestamps.length !== 3) continue;
+
+				const [first, second, third] = spaceTimestamps as [number, number, number];
+				const firstGap = second - first;
+				const secondGap = third - second;
 				resetTrigger();
-				return;
+
+				// Pi does not expose the terminal key-repeat flag. A held key normally has
+				// one long initial delay followed by rapid repeats; reject that shape while
+				// still accepting three intentionally fast taps, including a coalesced chunk.
+				const looksLikeKeyRepeat =
+					firstGap >= KEY_REPEAT_INITIAL_GAP_MS &&
+					secondGap <= KEY_REPEAT_FAST_GAP_MS;
+				if (!looksLikeKeyRepeat) shouldTranslate = true;
+				break;
 			}
 
-			const now = performance.now();
-			if (
-				lastSpaceTimestamp !== undefined &&
-				now >= lastSpaceTimestamp &&
-				now - lastSpaceTimestamp < MINIMUM_SPACE_INTERVAL_MS
-			) {
-				// Pi does not expose the terminal key-repeat flag. Reject intervals typical
-				// of auto-repeat so holding Space cannot trigger a translation.
-				resetTrigger();
-				return;
-			}
+			if (!shouldTranslate) return;
 
-			if (
-				firstSpaceTimestamp === undefined ||
-				now < firstSpaceTimestamp ||
-				now - firstSpaceTimestamp > TRIGGER_WINDOW_MS
-			) {
-				firstSpaceTimestamp = now;
-				spaceCount = 1;
-			} else {
-				spaceCount += 1;
-			}
-			lastSpaceTimestamp = now;
-
-			if (spaceCount === 3) {
-				resetTrigger();
-				// Terminal listeners run before the focused editor. Defer until Pi has inserted
-				// the third space, then verify the complete draft before changing anything.
-				queueMicrotask(() => void translateCurrentDraft(ctx));
-			}
+			// Terminal listeners run before the focused editor. Defer until Pi has inserted
+			// the third space, then verify the complete draft before changing anything.
+			queueMicrotask(() => void translateCurrentDraft(ctx));
 		});
 	});
 
