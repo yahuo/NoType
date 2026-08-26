@@ -33,5 +33,5 @@ Installed NoType agent editor integration:
 Add this line to ~/.zshrc after existing VISUAL/EDITOR exports, then start a new shell before launching Claude or Codex:
   source "$ENV_FILE"
 
-Finally enable “Claude/Codex Triple-Space” in NoType Settings → AI Rewrite.
+Finally enable “Translate Claude/Codex drafts with triple Space” in NoType Settings → General.
 EOF
