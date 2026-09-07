@@ -596,7 +596,10 @@ final class NoTypeAppModel: ObservableObject {
         return age >= 0 && age < 2
     }
 
-    private func handleBridgeRequest(_ request: NoTypeBridgeRequest) async -> NoTypeBridgeResponse {
+    private func handleBridgeRequest(
+        _ request: NoTypeBridgeRequest,
+        onPartial: @escaping NoTypeBridgeService.ProgressHandler
+    ) async -> NoTypeBridgeResponse {
         guard request.version == NoTypeBridgeProtocol.version else {
             return .failure(
                 id: request.id,
@@ -618,6 +621,8 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         switch request.method {
+        case NoTypeBridgeProtocol.translateChineseMethod, NoTypeBridgeProtocol.translateChineseBatchMethod:
+            break
         case NoTypeBridgeProtocol.translateMethod:
             if request.client == "pi" {
                 let target = DictationTargetContext.currentFrontmost()
@@ -656,7 +661,15 @@ final class NoTypeAppModel: ObservableObject {
             )
         }
 
-        guard let sourceText = request.text, !sourceText.trimmed.isEmpty else {
+        let isBatch = request.method == NoTypeBridgeProtocol.translateChineseBatchMethod
+        if isBatch {
+            do { try NoTypeBrowserBatch.validate(request.items ?? []) }
+            catch {
+                return .failure(id: request.id, code: "invalid_batch", message: "翻译批次无效或超过段数/长度限制。")
+            }
+        }
+        let sourceText = request.text ?? ""
+        guard isBatch || !sourceText.trimmed.isEmpty else {
             return .failure(
                 id: request.id,
                 code: "empty_text",
@@ -688,7 +701,22 @@ final class NoTypeAppModel: ObservableObject {
         defer { activeBridgeRequestID = nil }
 
         do {
-            let translated = try await aiRewriteService.translateToEnglish(sourceText)
+            if isBatch {
+                let items = try await aiRewriteService.translateBrowserBatch(request.items ?? []) { partial in
+                    var progress = NoTypeBridgeResponse.success(id: request.id, text: partial)
+                    progress.partial = true
+                    onPartial(progress)
+                }
+                var response = NoTypeBridgeResponse.success(id: request.id)
+                response.items = items
+                return response
+            }
+            let translated: String
+            if request.method == NoTypeBridgeProtocol.translateChineseMethod {
+                translated = try await aiRewriteService.translateToChinese(sourceText)
+            } else {
+                translated = try await aiRewriteService.translateToEnglish(sourceText)
+            }
             return .success(id: request.id, text: translated)
         } catch {
             return .failure(
@@ -1026,7 +1054,7 @@ final class NoTypeAppModel: ObservableObject {
     private func startBridgeService() {
         do {
             try bridgeService.start(
-                requestHandler: { [weak self] request in
+                requestHandler: { [weak self] request, onPartial in
                     guard let self else {
                         return .failure(
                             id: request.id,
@@ -1034,7 +1062,7 @@ final class NoTypeAppModel: ObservableObject {
                             message: "NoType is shutting down."
                         )
                     }
-                    return await self.handleBridgeRequest(request)
+                    return await self.handleBridgeRequest(request, onPartial: onPartial)
                 },
                 failureHandler: { [weak self] message in
                     Task { @MainActor [weak self] in

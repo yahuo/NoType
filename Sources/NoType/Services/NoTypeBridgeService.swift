@@ -1,13 +1,44 @@
 import Darwin
 import Foundation
 import Network
+import OSLog
 
 enum NoTypeBridgeProtocol {
     static let version = 1
     static let maximumFrameBytes = 1_048_576
     static let pingMethod = "ping"
     static let translateMethod = "translate"
+    static let translateChineseMethod = "translate_chinese"
+    static let translateChineseBatchMethod = "translate_chinese_batch"
     static let translateEditorMethod = "translate_editor"
+}
+
+struct NoTypeTranslationItem: Codable, Equatable, Sendable {
+    let id: String
+    let text: String
+}
+
+enum NoTypeBrowserBatch {
+    static func validate(_ items: [NoTypeTranslationItem]) throws {
+        guard (1...4).contains(items.count), Set(items.map(\.id)).count == items.count,
+              items.allSatisfy({
+                  !$0.text.trimmed.isEmpty && $0.text.utf16.count <= 12_000 &&
+                  $0.id.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil
+              }),
+              items.count == 1 || items.reduce(0, { $0 + $1.text.utf16.count }) <= 6_000
+        else { throw AIRewriteError.invalidResponse }
+    }
+
+    static func decode(_ text: String, for items: [NoTypeTranslationItem]) throws -> [NoTypeTranslationItem] {
+        let result = try text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            .map { try JSONDecoder().decode(NoTypeTranslationItem.self, from: Data($0.utf8)) }
+        guard result.count == items.count,
+              Set(result.map(\.id)) == Set(items.map(\.id)),
+              result.allSatisfy({ !$0.text.trimmed.isEmpty })
+        else { throw AIRewriteError.invalidResponse }
+        let byID = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0) })
+        return items.compactMap { byID[$0.id] }
+    }
 }
 
 struct NoTypeBridgeRequest: Codable, Equatable, Sendable {
@@ -21,6 +52,8 @@ struct NoTypeBridgeRequest: Codable, Equatable, Sendable {
     let parentProcessID: Int32?
     let terminal: String?
     let trigger: String?
+    var items: [NoTypeTranslationItem]? = nil
+    var keepAlive: Bool? = nil
 
     init(
         version: Int = NoTypeBridgeProtocol.version,
@@ -58,6 +91,8 @@ struct NoTypeBridgeResponse: Codable, Equatable, Sendable {
     let ok: Bool
     let text: String?
     let error: Failure?
+    var items: [NoTypeTranslationItem]? = nil
+    var partial: Bool? = nil
 
     static func success(id: String, text: String? = nil) -> NoTypeBridgeResponse {
         NoTypeBridgeResponse(
@@ -139,7 +174,9 @@ struct NoTypeBridgeFrameDecoder {
         }
         guard buffer.count >= 4 + payloadByteCount else { return nil }
 
-        return Data(buffer[4..<(4 + payloadByteCount)])
+        let payload = Data(buffer[4..<(4 + payloadByteCount)])
+        buffer = Data(buffer.dropFirst(4 + payloadByteCount))
+        return payload
     }
 }
 
@@ -168,7 +205,8 @@ enum NoTypeBridgeServiceError: LocalizedError {
 
 @MainActor
 final class NoTypeBridgeService {
-    typealias RequestHandler = @Sendable (NoTypeBridgeRequest) async -> NoTypeBridgeResponse
+    typealias ProgressHandler = @Sendable (NoTypeBridgeResponse) -> Void
+    typealias RequestHandler = @Sendable (NoTypeBridgeRequest, @escaping ProgressHandler) async -> NoTypeBridgeResponse
     typealias FailureHandler = @Sendable (String) -> Void
 
     nonisolated static var defaultRuntimeDirectory: URL {
@@ -186,6 +224,7 @@ final class NoTypeBridgeService {
     private let lockURL: URL
     private let queue = DispatchQueue(label: "com.opensource.notype.bridge", qos: .userInitiated)
     private var listener: NWListener?
+    private var connections: [UUID: NoTypeBridgeConnection] = [:]
     private var lockFileDescriptor: Int32 = -1
     private var failureHandler: FailureHandler?
 
@@ -213,16 +252,26 @@ final class NoTypeBridgeService {
             let parameters = NWParameters.tcp
             parameters.requiredLocalEndpoint = .unix(path: socketURL.path)
             let listener = try NWListener(using: parameters)
-            listener.newConnectionLimit = 16
-            listener.newConnectionHandler = { connection in
-                NoTypeBridgeConnection(
-                    connection: connection,
-                    queue: DispatchQueue(
-                        label: "com.opensource.notype.bridge.connection.\(UUID().uuidString)",
-                        qos: .userInitiated
-                    ),
-                    requestHandler: requestHandler
-                ).start()
+            // newConnectionLimit is a lifetime acceptance budget, not a concurrency cap.
+            listener.newConnectionHandler = { [weak self, weak listener] connection in
+                Task { @MainActor [weak self, weak listener] in
+                    guard let self, let listener, self.listener === listener,
+                          self.connections.count < 16 else {
+                        connection.cancel()
+                        return
+                    }
+                    let id = UUID()
+                    let client = NoTypeBridgeConnection(
+                        connection: connection,
+                        queue: DispatchQueue(label: "com.opensource.notype.bridge.connection.\(id)", qos: .userInitiated),
+                        requestHandler: requestHandler,
+                        onFinish: { [weak self] in
+                            Task { @MainActor [weak self] in self?.connections.removeValue(forKey: id) }
+                        }
+                    )
+                    self.connections[id] = client
+                    client.start()
+                }
             }
             listener.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor [weak self] in
@@ -241,6 +290,8 @@ final class NoTypeBridgeService {
     }
 
     func stop() {
+        connections.values.forEach { $0.cancel() }
+        connections.removeAll()
         listener?.stateUpdateHandler = nil
         listener?.newConnectionHandler = nil
         listener?.cancel()
@@ -543,117 +594,124 @@ struct NoTypeBridgeClient: Sendable {
 }
 
 private final class NoTypeBridgeConnection: @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.opensource.notype", category: "BrowserBridge")
     private let connection: NWConnection
     private let queue: DispatchQueue
     private let requestHandler: NoTypeBridgeService.RequestHandler
+    private let onFinish: @Sendable () -> Void
+    private let connectionID = UUID().uuidString
     private var frameDecoder = NoTypeBridgeFrameDecoder()
     private var finished = false
+    private var closing = false
+    private var requestTask: Task<Void, Never>?
+    private var activeRequestID: String?
+    private var requestStarted = Date()
+    private var firstProgress = false
 
     init(
         connection: NWConnection,
         queue: DispatchQueue,
-        requestHandler: @escaping NoTypeBridgeService.RequestHandler
+        requestHandler: @escaping NoTypeBridgeService.RequestHandler,
+        onFinish: @escaping @Sendable () -> Void
     ) {
         self.connection = connection
         self.queue = queue
         self.requestHandler = requestHandler
+        self.onFinish = onFinish
     }
 
     func start() {
-        connection.start(queue: queue)
-        receiveNextChunk()
+        queue.async { [self] in
+            Self.logger.info("connection_open connection=\(self.connectionID, privacy: .public)")
+            connection.start(queue: queue)
+            receiveNextChunk()
+        }
+    }
+
+    func cancel() {
+        queue.async { [self] in finish(reason: "service_stopped") }
     }
 
     private func receiveNextChunk() {
-        connection.receive(
-            minimumIncompleteLength: 1,
-            maximumLength: 64 * 1024
-        ) { [self] data, _, isComplete, error in
-            guard !finished else { return }
-
-            if let error {
-                finish(error: error)
-                return
-            }
-
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [self] data, _, isComplete, error in
+            guard !finished, !closing else { return }
+            if error != nil { finish(reason: "receive_failed"); return }
             do {
-                if let data, !data.isEmpty,
-                   let payload = try frameDecoder.append(data) {
-                    try handle(payload: payload)
-                    return
+                var payload = try frameDecoder.append(data ?? Data())
+                while let frame = payload {
+                    guard activeRequestID == nil else { finish(reason: "overlapping_request"); return }
+                    try handle(payload: frame)
+                    payload = try frameDecoder.append(Data())
                 }
             } catch {
-                send(
-                    .failure(
-                        id: "",
-                        code: "invalid_frame",
-                        message: error.localizedDescription
-                    )
-                )
+                closing = true
+                requestTask?.cancel()
+                activeRequestID = nil
+                send(.failure(id: "", code: error is DecodingError ? "invalid_request" : "invalid_frame",
+                              message: "The NoType bridge request frame is invalid."), closeAfter: true)
                 return
             }
-
-            if isComplete {
-                send(
-                    .failure(
-                        id: "",
-                        code: "incomplete_frame",
-                        message: "The NoType bridge request ended before a complete frame was received."
-                    )
-                )
-                return
-            }
-
+            if isComplete { finish(reason: "client_disconnected"); return }
             receiveNextChunk()
         }
     }
 
     private func handle(payload: Data) throws {
-        let request: NoTypeBridgeRequest
-        do {
-            request = try JSONDecoder().decode(NoTypeBridgeRequest.self, from: payload)
-        } catch {
-            send(
-                .failure(
-                    id: "",
-                    code: "invalid_request",
-                    message: "The NoType bridge request is not valid JSON."
-                )
-            )
-            return
-        }
-
-        Task { [self] in
-            let response = await requestHandler(request)
+        let request = try JSONDecoder().decode(NoTypeBridgeRequest.self, from: payload)
+        let keepAlive = request.keepAlive == true && request.client == "browser"
+        activeRequestID = request.id
+        requestStarted = Date()
+        firstProgress = false
+        let count = request.items?.count ?? 1
+        let characters = request.items?.reduce(0, { $0 + $1.text.utf16.count }) ?? request.text?.utf16.count ?? 0
+        Self.logger.info("request_start connection=\(self.connectionID, privacy: .public) request=\(request.id, privacy: .public) paragraphs=\(count) characters=\(characters)")
+        requestTask = Task { [self] in
+            let response = await requestHandler(request) { [self] progress in
+                queue.async { [self] in
+                    guard !finished, !closing, activeRequestID == request.id else { return }
+                    if !firstProgress {
+                        firstProgress = true
+                        Self.logger.info("first_progress connection=\(self.connectionID, privacy: .public) request=\(request.id, privacy: .public) elapsed_ms=\(Int(Date().timeIntervalSince(self.requestStarted) * 1000))")
+                    }
+                    send(progress, closeAfter: false)
+                }
+            }
             queue.async { [self] in
-                send(response)
+                guard !finished, !closing, activeRequestID == request.id else { return }
+                Self.logger.info("request_end connection=\(self.connectionID, privacy: .public) request=\(request.id, privacy: .public) ok=\(response.ok) code=\(response.error?.code ?? "none", privacy: .public) elapsed_ms=\(Int(Date().timeIntervalSince(self.requestStarted) * 1000))")
+                // Clear before sending: a fast client can immediately submit the next batch.
+                activeRequestID = nil
+                requestTask = nil
+                closing = !keepAlive
+                send(response, closeAfter: !keepAlive)
             }
         }
     }
 
-    private func send(_ response: NoTypeBridgeResponse) {
+    private func send(_ response: NoTypeBridgeResponse, closeAfter: Bool) {
         guard !finished else { return }
-
         do {
             let frame = try NoTypeBridgeFrameCodec.encode(response)
-            connection.send(
-                content: frame,
-                contentContext: .defaultMessage,
-                isComplete: true,
+            connection.send(content: frame, contentContext: .defaultMessage, isComplete: true,
                 completion: .contentProcessed { [self] error in
                     queue.async { [self] in
-                        finish(error: error)
+                        if error != nil { finish(reason: "send_failed") }
+                        else if closeAfter { finish(reason: "response_complete") }
                     }
-                }
-            )
+                })
         } catch {
-            finish(error: error)
+            finish(reason: "encode_failed")
         }
     }
 
-    private func finish(error: Error?) {
+    private func finish(reason: String) {
         guard !finished else { return }
         finished = true
+        Self.logger.info("connection_close connection=\(self.connectionID, privacy: .public) request=\(self.activeRequestID ?? "none", privacy: .public) reason=\(reason, privacy: .public)")
+        requestTask?.cancel()
+        requestTask = nil
+        activeRequestID = nil
         connection.cancel()
+        onFinish()
     }
 }

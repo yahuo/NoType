@@ -1,0 +1,9 @@
+{
+  "manifest_version": 3,
+  "name": "NoType 网页双语翻译",
+  "version": "0.2.3",
+  "description": "通过本机 NoType 翻译网页段落，在原文下方显示中文。再次点击移除译文。",
+  "permissions": ["activeTab", "scripting", "nativeMessaging"],
+  "action": { "default_title": "NoType：翻译当前页 / 移除译文" },
+  "background": { "service_worker": "background.js" }
+}

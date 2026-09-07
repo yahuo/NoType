@@ -140,13 +140,13 @@ func bridgeServiceRoundTripsRequestsOverAUnixSocket() async throws {
         try? FileManager.default.removeItem(at: runtimeDirectory)
     }
 
-    try service.start { request in
+    try service.start { request, _ in
         .success(id: request.id, text: "echo:\(request.text ?? "")")
     }
 
     let competingService = NoTypeBridgeService(runtimeDirectory: runtimeDirectory)
     do {
-        try competingService.start { request in
+        try competingService.start { request, _ in
             .success(id: request.id)
         }
         Issue.record("A second bridge service unexpectedly acquired the active runtime lock.")
@@ -676,4 +676,53 @@ func permissionRequirementMessageMentionsBothPermissionsInEnglish() {
     #expect(
         message == "Microphone, Accessibility permissions are required. Open Setup and grant them before trying again."
     )
+}
+
+@Test
+func browserBatchValidatesLimitsAndMapsOutOfOrderResults() throws {
+    let items = [NoTypeTranslationItem(id: "a", text: "Hello"), NoTypeTranslationItem(id: "b", text: "World")]
+    try NoTypeBrowserBatch.validate(items)
+    let result = try NoTypeBrowserBatch.decode("{\"id\":\"b\",\"text\":\"世界\"}\n{\"id\":\"a\",\"text\":\"你好\"}", for: items)
+    #expect(result.map(\.id) == ["a", "b"])
+    #expect(result.map(\.text) == ["你好", "世界"])
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.validate([items[0], items[0]]) }
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.validate([]) }
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.validate([.init(id: "x", text: String(repeating: "x", count: 12001))]) }
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"你好\"}", for: items) }
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"你好\"}\n{\"id\":\"a\",\"text\":\"世界\"}", for: items) }
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"\"}\n{\"id\":\"b\",\"text\":\"世界\"}", for: items) }
+}
+
+private actor BrowserCancellationFlag {
+    var cancelled = false
+    func mark() { cancelled = true }
+}
+
+@Test @MainActor
+func browserBridgeStreamsBeforeCompletionAndCancelsOnDisconnect() async throws {
+    let directory = URL(fileURLWithPath: "/tmp/nt-stream-\(UUID().uuidString.prefix(8))")
+    let service = NoTypeBridgeService(runtimeDirectory: directory)
+    let flag = BrowserCancellationFlag()
+    defer { service.stop(); try? FileManager.default.removeItem(at: directory) }
+    try service.start { request, progress in
+        var partial = NoTypeBridgeResponse.success(id: request.id, text: "第一段")
+        partial.partial = true
+        progress(partial)
+        do { try await Task.sleep(for: .seconds(10)) }
+        catch { await flag.mark() }
+        return .success(id: request.id, text: "最终译文")
+    }
+    for _ in 0..<100 where !FileManager.default.fileExists(atPath: service.socketURL.path) {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    // The old one-response client closes the socket immediately after the first frame.
+    let response = try await NoTypeBridgeClient(socketURL: service.socketURL, timeout: 2)
+        .send(.init(method: NoTypeBridgeProtocol.translateChineseBatchMethod))
+    #expect(response.partial == true)
+    #expect(response.text == "第一段")
+    for _ in 0..<100 {
+        if await flag.cancelled { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(await flag.cancelled)
 }

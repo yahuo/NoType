@@ -16,7 +16,7 @@ The bridge starts from `NoTypeAppModel.bootstrap()` and stops during application
 
 ## Protocol
 
-Each connection carries one request and one response, then closes. A frame consists of:
+By default, each connection carries one request and one final response, then closes. Browser clients may set `client: "browser"` and `keepAlive: true` on each request to keep the socket open after the final response and send the next request. Requests on one socket are sequential; pipelining is rejected. The `translate_chinese_batch` method additionally emits zero or more progress frames before that final response. A frame consists of:
 
 1. Four-byte unsigned big-endian JSON payload length.
 2. UTF-8 JSON payload.
@@ -61,6 +61,16 @@ Failure response:
 ```
 
 The `ping` method returns `pong` in the response `text` field.
+
+## 浏览器网页双语翻译
+
+`translate_chinese` 使用同一请求/响应结构，把 `text` 翻译为中文；原来的 `translate` 和 `translate_editor` 仍翻译为英文。中文方法复用 `AIRewriteService.translateToChinese` 的登录态、模型与 180 秒总超时，不操作剪贴板或当前选区。
+
+Chrome / Edge 使用 `translate_chinese_batch`，请求包含 `items: [{"id":"p0","text":"Hello"}]`，无需 `text` 字段。每批 1–4 段，段落 ID 唯一，总长度最多 6000 UTF-16 字符；单段可独立请求至 12000 字符。
+
+批次复用模型请求方法、现有登录态和 180 秒总时限。响应均有相同 `version`、请求 `id` 和 `ok`；`partial: true` 的进度帧在 `text` 中携带累计 JSON Lines 输出。最终成功帧包含完整的 `items`，按输入 ID 对齐；失败沿用 `error`。客户端不能把进度帧当成最终成功，断开 socket 会取消处理任务。
+
+Native Messaging 连接程序只转发中文单段/批次方法，并设置 `client: "browser"`。它在本机字节序和 socket 大端长度前缀之间转换，逐帧输出、复用浏览器会话的进程；同一个页面翻译会话复用一个 socket，逐批请求，最终响应只结束本批次。关闭翻译或标签页时断开连接并取消当前任务；应用退出时关闭全部连接。桥接器最多保留 16 个同时存活的连接，关闭后释放名额，不限制累计连接次数。发生断线或超时后停止当前批次，不自动重发结果未知的请求。安装与边界见 [浏览器集成说明](../integrations/browser/README.md)。
 
 ## Claude Code and Codex CLI integration
 
@@ -121,3 +131,13 @@ The bundled proxy uses the `translate_editor` method. In addition to the normal 
 ## Current boundary
 
 Pi, Claude Code, and Codex CLI are supported for local TUI sessions. Remote SSH sessions cannot reach the Mac-local Unix socket unless the socket is explicitly forwarded or another transport is added.
+
+## 浏览器连接诊断
+
+连接程序记录在 `~/Library/Logs/NoType/browser-bridge.log`，每个文件最多 1 MiB，保留两份轮转备份。日志包含进程、请求 ID、段数、UTF-16 字符数、首帧/总耗时、取消及失败类型；不记录正文、译文或凭据。NoType 的统一日志提供连接 ID、请求 ID、首个进度帧、完成状态和关闭原因：
+
+```sh
+/usr/bin/log show --last 10m --style compact --info --predicate 'subsystem == "com.opensource.notype" AND category == "BrowserBridge"'
+```
+
+首个进度帧可能只有 JSON 前缀，不等同于首个可显示中文字。等待模型响应、接收译文和等待滚动分别显示不同页面状态。模型网络等待/总时限仍为 60/180 秒，连接程序和扩展分别以 190/195 秒作为外层等待上限。

@@ -438,3 +438,47 @@ func selectionPermissionFailureIsPresented() async {
     #expect(model.errorMessage == "需要辅助功能权限")
     #expect(!model.isLoading)
 }
+
+private final class BrowserBatchProtocol: URLProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var completion: DispatchWorkItem?
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(url: request.url!, statusCode: 200,
+            httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "text/event-stream"])!, cacheStoragePolicy: .notAllowed)
+        emit(type: "response.output_text.delta", delta: "{\"id\":\"a\",\"text\":\"第一")
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.lock.withLock({ self.completion?.isCancelled ?? true }) else { return }
+            self.emit(type: "response.output_text.delta", delta: "段\"}\n{\"id\":\"b\",\"text\":\"第二段\"}")
+            self.emit(type: "response.completed")
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        lock.withLock { completion = work }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.1, execute: work)
+    }
+    override func stopLoading() { lock.withLock { completion?.cancel() } }
+    private func emit(type: String, delta: String? = nil) {
+        var event = ["type": type]
+        event["delta"] = delta
+        let data = try! JSONSerialization.data(withJSONObject: event)
+        client?.urlProtocol(self, didLoad: Data("data: ".utf8) + data + Data("\n\n".utf8))
+    }
+}
+
+@Test
+func browserBatchReusesStreamingChannelAndEnforcesDeadline() async throws {
+    try await withTranslationSession(protocolClass: BrowserBatchProtocol.self) { session, authStore in
+        let service = AIRewriteService(session: session, authStore: authStore)
+        let items = [NoTypeTranslationItem(id: "a", text: "First"), NoTypeTranslationItem(id: "b", text: "Second")]
+        let result = try await service.translateBrowserBatch(items)
+        #expect(result.map(\.text) == ["第一段", "第二段"])
+        let timed = AIRewriteService(session: session, selectionTranslationTimeout: .milliseconds(20), authStore: authStore)
+        do {
+            _ = try await timed.translateBrowserBatch(items)
+            Issue.record("Batch translation unexpectedly ignored its deadline")
+        } catch AIRewriteError.translationTimedOut {
+            // Expected: the same reading timeout bounds a whole batch.
+        }
+    }
+}

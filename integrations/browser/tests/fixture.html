@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>NoType bilingual fixture</title>
+<style>
+  body { max-width: 760px; margin: 48px auto; padding: 0 24px; color: #263441; background: #fafaf7; font: 18px/1.7 system-ui; }
+  h1 { font-size: 32px; line-height: 1.2; }
+  a { color: #2b6a8c; }
+  pre { padding: 16px; background: #eaece9; }
+  nav, footer { font-size: 14px; color: #737e87; }
+  td { border: 1px solid #c2c9cd; padding: 10px; }
+</style>
+<nav>Navigation should stay untouched.</nav>
+<main>
+  <h1>Read the web in two languages</h1>
+  <div id="wrapper">
+    <p id="first">Browser extensions can <a href="#details">read a page</a> and <strong>preserve its layout</strong>.</p>
+    <p id="second">Translation appears below the original paragraph. Use <code>textContent</code> to insert plain text safely.</p>
+  </div>
+  <div id="leaf">A simple div can also be a paragraph.</div>
+  <ul><li id="list-item">A list item with <em>emphasis</em>.</li><li><p>A nested list paragraph is translated once.</p></li></ul>
+  <table><tbody><tr><td id="cell">A table cell.</td></tr></tbody></table>
+  <p id="chinese">这是一段中文，不需要翻译。</p>
+  <p hidden>Hidden text must not be sent.</p>
+  <div style="display:none"><p>Hidden ancestor text must not be sent.</p></div>
+  <div contenteditable="true"><p>Private editable draft must not be sent.</p></div>
+  <p translate="no">Do not translate this paragraph.</p>
+  <pre><code>const codeBlock = "leave this unchanged";</code></pre>
+  <p id="mixed">Visible text.<span hidden>Private hidden text.</span><button>Button text.</button></p>
+</main>
+<footer>Footer should stay untouched.</footer>
+</html>
