@@ -35,6 +35,50 @@ enum AIRewriteError: LocalizedError {
     }
 }
 
+struct RewriteTimeouts: Sendable {
+    var firstText: Duration = .seconds(30)
+    var idle: Duration = .seconds(15)
+    var total: Duration = .seconds(120)
+}
+
+private final class RewriteDeadline: @unchecked Sendable {
+    private let clock = ContinuousClock()
+    private let lock = NSLock()
+    private let totalDeadline: ContinuousClock.Instant
+    private let idleTimeout: Duration
+    // Both mutable fields are accessed only under lock.
+    private var progressDeadline: ContinuousClock.Instant
+    private var receivedByteCount = 0
+
+    init(timeouts: RewriteTimeouts) {
+        let start = clock.now
+        totalDeadline = start.advanced(by: timeouts.total)
+        progressDeadline = start.advanced(by: timeouts.firstText)
+        idleTimeout = timeouts.idle
+    }
+
+    func recordText(_ text: String) {
+        let byteCount = text.utf8.count
+        lock.withLock {
+            guard byteCount > receivedByteCount else { return }
+            receivedByteCount = byteCount
+            progressDeadline = clock.now.advanced(by: idleTimeout)
+        }
+    }
+
+    func waitUntilExpired() async throws {
+        while true {
+            try Task.checkCancellation()
+            let now = clock.now
+            let deadline = lock.withLock { min(totalDeadline, progressDeadline) }
+            guard now < deadline else { return }
+            // First text can shorten the deadline; recheck instead of sleeping until
+            // the original first-text deadline. Detection lag is at most 100 ms.
+            try await clock.sleep(until: min(deadline, now.advanced(by: .milliseconds(100))))
+        }
+    }
+}
+
 actor AIRewriteService {
     static let rewriteModel = "gpt-5.6-terra"
     static let rewriteReasoningEffort = "high"
@@ -42,20 +86,23 @@ actor AIRewriteService {
     static let translationReasoningEffort = "none"
 
     private let session: URLSession
-    private let rewriteTimeout: Duration
+    private let rewriteTimeouts: RewriteTimeouts
+    private let englishTranslationTimeout: Duration
     private let selectionTranslationTimeout: Duration
     private let authStore: CodexAuthStore
     private let modelResolver: CodexModelResolver
 
     init(
         session: URLSession = .shared,
-        rewriteTimeout: Duration = .seconds(10),
+        rewriteTimeouts: RewriteTimeouts = RewriteTimeouts(),
+        englishTranslationTimeout: Duration = .seconds(10),
         selectionTranslationTimeout: Duration = .seconds(180),
         authStore: CodexAuthStore = CodexAuthStore(),
         modelResolver: CodexModelResolver = CodexModelResolver()
     ) {
         self.session = session
-        self.rewriteTimeout = rewriteTimeout
+        self.rewriteTimeouts = rewriteTimeouts
+        self.englishTranslationTimeout = englishTranslationTimeout
         self.selectionTranslationTimeout = selectionTranslationTimeout
         self.authStore = authStore
         self.modelResolver = modelResolver
@@ -65,7 +112,7 @@ actor AIRewriteService {
         _ transcript: String,
         onPartial: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> String {
-        let rewriteTimeout = self.rewriteTimeout
+        let deadline = RewriteDeadline(timeouts: rewriteTimeouts)
 
         let rewritten = try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
@@ -74,12 +121,15 @@ actor AIRewriteService {
                     userMessage: Self.rewriteUserMessage(for: transcript),
                     model: Self.rewriteModel,
                     reasoningEffort: Self.rewriteReasoningEffort,
-                    onPartial: onPartial
+                    onPartial: { partial in
+                        deadline.recordText(partial)
+                        onPartial(partial)
+                    }
                 )
             }
 
             group.addTask {
-                try await Task.sleep(for: rewriteTimeout)
+                try await deadline.waitUntilExpired()
                 throw AIRewriteError.timedOut
             }
 
@@ -117,7 +167,7 @@ actor AIRewriteService {
         onPartial: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         // Reading a long selection can take much longer than refining a short dictation.
-        let timeout = toChinese ? selectionTranslationTimeout : rewriteTimeout
+        let timeout = toChinese ? selectionTranslationTimeout : englishTranslationTimeout
 
         let translated = try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {

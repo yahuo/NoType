@@ -169,6 +169,8 @@ open NoType.xcodeproj
 - `AI Rewrite On` 且本机存在 Codex 登录态：先调用 Codex 改写，再插入最终文本
 - `AI Rewrite On` 但未登录 Codex：不阻塞主链，继续使用原始转写
 
+听写改写最多等待 30 秒收到首段文字；开始输出后，连续 15 秒没有新增文字才判定停滞，总时限为 2 分钟。正常流式输出会延长等待，不再在第 10 秒硬性中断。超时或其他改写失败时，仍使用原始转写结果插入；可随时按 `Option + Esc` 取消。
+
 NoType 只读取本机 Codex access token，不刷新 refresh token；`AI Rewrite` 和英文翻译都会复用这份 Codex 登录态。如果登录态过期，请在终端运行 `codex login status` 或重新 `codex login`。
 
 `AI Rewrite` 的目标不是重度润色，而是把口语稿整理成更适合发送和更适合 AI 执行的文本：

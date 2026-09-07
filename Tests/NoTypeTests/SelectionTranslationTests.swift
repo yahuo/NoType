@@ -38,6 +38,7 @@ private final class DelayedTranslationProtocol: URLProtocol, @unchecked Sendable
 
 private func withTranslationSession(
     protocolClass: AnyClass = DelayedTranslationProtocol.self,
+    headers: [String: String] = [:],
     _ body: (URLSession, CodexAuthStore) async throws -> Void
 ) async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -47,16 +48,143 @@ private func withTranslationSession(
         .write(to: directory.appendingPathComponent("auth.json"))
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [protocolClass]
+    configuration.httpAdditionalHeaders = headers
     let session = URLSession(configuration: configuration)
     defer { session.invalidateAndCancel() }
     try await body(session, CodexAuthStore(codexHome: directory))
 }
 
 @Test
-func selectionTranslationCanOutlastTheDictationRewriteDeadline() async throws {
+func dictationRewriteKeepsWaitingWhileTextIsBeingProduced() async throws {
     try await withTranslationSession { session, authStore in
         let service = AIRewriteService(
-            session: session, rewriteTimeout: .milliseconds(40), authStore: authStore
+            session: session,
+            rewriteTimeouts: RewriteTimeouts(firstText: .milliseconds(100), idle: .seconds(1), total: .seconds(2)),
+            authStore: authStore
+        )
+        let result = try await service.rewrite("第一段第二段")
+        #expect(result == "第一段第二段")
+    }
+}
+
+private final class ScriptedRewriteProtocol: URLProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var pending: [DispatchWorkItem] = []
+    private var stopped = false
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        client?.urlProtocol(self, didReceive: HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/event-stream"]
+        )!, cacheStoragePolicy: .notAllowed)
+
+        let delta = #"data: {"type":"response.output_text.delta","delta":"段"}"#
+        let done = #"data: {"type":"response.completed"}"#
+        let events: [(Double, String)]
+        switch request.value(forHTTPHeaderField: "X-NoType-Test-Scenario") {
+        case "waiting":
+            events = [(0, "data: {\"type\":\"response.created\"}"),
+                      (0.04, ": keepalive"), (0.12, ": keepalive"), (0.35, delta), (0.38, done)]
+        case "stalled":
+            let duplicate = #"data: {"type":"response.output_text.done","text":"段"}"#
+            events = [(0, delta)] + (1...10).map { (Double($0) * 0.04, duplicate) } + [(0.45, done)]
+        case "slow-first":
+            events = [(0.18, delta), (0.24, delta), (0.28, done)]
+        default:
+            events = (0...5).map { (Double($0) * 0.06, delta) } + [(0.32, done)]
+        }
+
+        for (delay, line) in events {
+            let work = DispatchWorkItem { [weak self] in
+                guard let self, !self.lock.withLock({ self.stopped }) else { return }
+                self.client?.urlProtocol(self, didLoad: Data((line + "\n\n").utf8))
+                if line == done { self.client?.urlProtocolDidFinishLoading(self) }
+            }
+            lock.withLock { pending.append(work) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
+
+    override func stopLoading() {
+        lock.withLock {
+            stopped = true
+            pending.forEach { $0.cancel() }
+        }
+    }
+}
+
+@Test(arguments: ["waiting", "stalled", "total"])
+func dictationRewriteEnforcesFirstTextIdleAndTotalDeadlines(scenario: String) async throws {
+    try await withTranslationSession(
+        protocolClass: ScriptedRewriteProtocol.self,
+        headers: ["X-NoType-Test-Scenario": scenario]
+    ) { session, authStore in
+        let timeouts: RewriteTimeouts
+        switch scenario {
+        case "waiting":
+            timeouts = RewriteTimeouts(firstText: .milliseconds(80), idle: .seconds(1), total: .seconds(2))
+        case "stalled":
+            timeouts = RewriteTimeouts(firstText: .seconds(1), idle: .milliseconds(80), total: .seconds(2))
+        default:
+            timeouts = RewriteTimeouts(firstText: .milliseconds(150), idle: .milliseconds(150), total: .milliseconds(220))
+        }
+        let service = AIRewriteService(session: session, rewriteTimeouts: timeouts, authStore: authStore)
+        do {
+            _ = try await service.rewrite("原始转写")
+            Issue.record("Expected the \(scenario) deadline to interrupt the stream")
+        } catch AIRewriteError.timedOut {
+        }
+    }
+}
+
+@Test(arguments: ["progress", "slow-first"])
+func dictationRewriteUsesSeparateFirstTextAndRenewableIdleBudgets(scenario: String) async throws {
+    try await withTranslationSession(
+        protocolClass: ScriptedRewriteProtocol.self,
+        headers: ["X-NoType-Test-Scenario": scenario]
+    ) { session, authStore in
+        let service = AIRewriteService(
+            session: session,
+            rewriteTimeouts: RewriteTimeouts(
+                firstText: scenario == "slow-first" ? .milliseconds(300) : .milliseconds(150),
+                idle: .milliseconds(150), total: .seconds(2)
+            ),
+            authStore: authStore
+        )
+        let result = try await service.rewrite("原始转写")
+        #expect(result == String(repeating: "段", count: scenario == "slow-first" ? 2 : 6))
+    }
+}
+
+@Test
+func dictationRewriteCanCancelWhileWaitingForMoreText() async throws {
+    try await withTranslationSession { session, authStore in
+        let service = AIRewriteService(session: session, authStore: authStore)
+        let partials = AsyncStream<String>.makeStream()
+        let task = Task {
+            try await service.rewrite("原始转写") { partial in
+                partials.continuation.yield(partial)
+            }
+        }
+        for await _ in partials.stream { break }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled rewrite must not complete")
+        } catch is CancellationError {
+        } catch let error as URLError where error.code == .cancelled {
+        }
+    }
+}
+
+@Test
+func selectionTranslationCanOutlastTheEnglishTranslationDeadline() async throws {
+    try await withTranslationSession { session, authStore in
+        let service = AIRewriteService(
+            session: session, englishTranslationTimeout: .milliseconds(40), authStore: authStore
         )
         let result = try await service.translateToChinese(String(repeating: "Long source text. ", count: 200))
         #expect(result == "第一段第二段")
@@ -67,7 +195,7 @@ func selectionTranslationCanOutlastTheDictationRewriteDeadline() async throws {
 func selectionTranslationStillEnforcesItsOwnDeadline() async throws {
     try await withTranslationSession { session, authStore in
         let service = AIRewriteService(
-            session: session, rewriteTimeout: .seconds(1),
+            session: session, englishTranslationTimeout: .seconds(1),
             selectionTranslationTimeout: .milliseconds(40), authStore: authStore
         )
         do {
@@ -83,7 +211,7 @@ func selectionTranslationStillEnforcesItsOwnDeadline() async throws {
 func englishTranslationKeepsItsExistingDeadline() async throws {
     try await withTranslationSession { session, authStore in
         let service = AIRewriteService(
-            session: session, rewriteTimeout: .milliseconds(40), authStore: authStore
+            session: session, englishTranslationTimeout: .milliseconds(40), authStore: authStore
         )
         do {
             _ = try await service.translateToEnglish("slow source")
