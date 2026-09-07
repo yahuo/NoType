@@ -42,6 +42,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
   - 有选中文本时，`Option + Shift + Space` 会直接翻译选中文本并替换
   - 没有选中文本时，`Option + Shift + Space` 会先录音，再把语音转写结果翻译成英文
   - 本地 Unix socket bridge 可让 Pi、Claude Code 和 Codex CLI 翻译并替换 TUI draft，不依赖终端 AX 输入框
+- 选词中文翻译：选中文字后按 `Option + Control + Space`，在独立浮窗阅读中文译文，原文保持不变；支持滚动、展开原文和复制译文
 - HUD 在录音和转写阶段显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
 - 文本注入统一走剪贴板 + 模拟 `Cmd + V`
 - 如果没有可编辑焦点，则不会强行注入，而是把结果保留到剪贴板供手动粘贴
@@ -195,6 +196,15 @@ NoType 只读取本机 Codex access token，不刷新 refresh token；`AI Rewrit
 
 1. 选中一段文本后按 `Option + Shift + Space`，NoType 会读取选中文本，调用 Codex 翻译成英文，再替换当前选区。
 2. 没有选中文本时按 `Option + Shift + Space`，NoType 会开始录音；再次按 `Option + Space` 结束后，先完成 ASR，再把转写结果翻译成英文并插入。
+
+选词中文翻译流程：
+
+1. 在网页、文档或输入框中选中一段文字，按 `Option + Control + Space`。
+2. NoType 优先通过辅助功能读取选区，读取不到时尝试模拟复制并恢复原剪贴板；未读到文字时在浮窗提示，不会开始录音。
+3. 独立浮窗流式显示简体中文译文，可滚动阅读、展开原文，完成后点击“复制译文”才会把译文写入剪贴板。不会替换或粘贴到原应用。
+4. 点击“关闭”或按 `Option + Esc` 关闭浮窗并取消当前翻译。
+
+此功能只需要辅助功能权限与现有 Codex 登录态，不需要配置麦克风或 Doubao；录音或其他 AI 处理进行中时不响应此快捷键。
 
 ## 验证
 

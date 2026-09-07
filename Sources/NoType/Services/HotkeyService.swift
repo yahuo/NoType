@@ -28,6 +28,7 @@ final class HotkeyService {
     private var eventHandlerRef: EventHandlerRef?
     private var primaryHotKeyRef: EventHotKeyRef?
     private var translationHotKeyRef: EventHotKeyRef?
+    private var selectionTranslationHotKeyRef: EventHotKeyRef?
     private var cancelHotKeyRef: EventHotKeyRef?
     private var phase: DictationPhase = .idle
 
@@ -65,6 +66,16 @@ final class HotkeyService {
             &translationHotKeyRef
         )
 
+        let selectionTranslationID = EventHotKeyID(signature: Self.signature, id: 4)
+        let selectionTranslationStatus = RegisterEventHotKey(
+            UInt32(kVK_Space),
+            UInt32(optionKey | controlKey),
+            selectionTranslationID,
+            GetApplicationEventTarget(),
+            0,
+            &selectionTranslationHotKeyRef
+        )
+
         let cancelID = EventHotKeyID(signature: Self.signature, id: 2)
         cancelHotKeyRef = nil
         let cancelStatus = RegisterEventHotKey(
@@ -78,13 +89,17 @@ final class HotkeyService {
 
         let result = Self.registrationResult(
             translationStatus: translationStatus,
-            cancelStatus: cancelStatus
+            cancelStatus: cancelStatus,
+            selectionTranslationStatus: selectionTranslationStatus
         )
         if translationStatus != noErr {
             translationHotKeyRef = nil
         }
         if cancelStatus != noErr {
             cancelHotKeyRef = nil
+        }
+        if selectionTranslationStatus != noErr {
+            selectionTranslationHotKeyRef = nil
         }
         return result
     }
@@ -132,6 +147,11 @@ final class HotkeyService {
             self.translationHotKeyRef = nil
         }
 
+        if let selectionTranslationHotKeyRef {
+            UnregisterEventHotKey(selectionTranslationHotKeyRef)
+            self.selectionTranslationHotKeyRef = nil
+        }
+
         if let cancelHotKeyRef {
             UnregisterEventHotKey(cancelHotKeyRef)
             self.cancelHotKeyRef = nil
@@ -161,6 +181,8 @@ final class HotkeyService {
             eventHandler?(.cancelDictation)
         case 3:
             eventHandler?(NoTypeAppModel.hotkeyAction(for: phase, requestedMode: .translation))
+        case 4:
+            eventHandler?(.translateSelectionToChinese)
         default:
             break
         }
@@ -172,7 +194,8 @@ final class HotkeyService {
 
     static func registrationResult(
         translationStatus: OSStatus,
-        cancelStatus: OSStatus
+        cancelStatus: OSStatus,
+        selectionTranslationStatus: OSStatus = noErr
     ) -> HotkeyRegistrationResult {
         var warnings: [String] = []
         if translationStatus != noErr {
@@ -180,6 +203,9 @@ final class HotkeyService {
         }
         if cancelStatus != noErr {
             warnings.append(HotkeyServiceError.cancelRegistrationFailed(cancelStatus).errorDescription ?? "")
+        }
+        if selectionTranslationStatus != noErr {
+            warnings.append("Unable to register selection translation hotkey Option + Control + Space (\(selectionTranslationStatus)).")
         }
 
         return HotkeyRegistrationResult(warningMessage: warnings.isEmpty ? nil : warnings.joined(separator: "\n"))

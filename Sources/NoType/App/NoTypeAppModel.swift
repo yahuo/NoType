@@ -33,6 +33,7 @@ final class NoTypeAppModel: ObservableObject {
     private let textInsertionService: TextInsertionService
     private let aiRewriteService: AIRewriteService
     private let hudController: HUDPanelController
+    private let selectionTranslationController: SelectionTranslationPanelController
     private let providerFactory: () -> ASRProvider
     private let doubaoAccessTokenAccount = "doubao.access-token"
 
@@ -77,6 +78,21 @@ final class NoTypeAppModel: ObservableObject {
         self.textInsertionService = textInsertionService
         self.aiRewriteService = aiRewriteService
         self.hudController = hudController
+        self.selectionTranslationController = SelectionTranslationPanelController(
+            model: SelectionTranslationModel(
+                readSelection: { [permissionService, textInsertionService] in
+                    guard permissionService.accessibilityAuthorized else {
+                        throw NSError(domain: "NoType", code: 1, userInfo: [
+                            NSLocalizedDescriptionKey: "需要辅助功能权限才能读取选中文字。请打开 Setup 完成授权。",
+                        ])
+                    }
+                    return await textInsertionService.selectedText()
+                },
+                translate: { [aiRewriteService] text, onPartial in
+                    try await aiRewriteService.translateToChinese(text, onPartial: onPartial)
+                }
+            )
+        )
         self.providerFactory = providerFactory
 
         let settings = settingsStore.load()
@@ -142,6 +158,10 @@ final class NoTypeAppModel: ObservableObject {
 
     var translationHotkeyDisplayName: String {
         "Option + Shift + Space"
+    }
+
+    var selectionTranslationHotkeyDisplayName: String {
+        "Option + Control + Space"
     }
 
     var hudDisplayText: String {
@@ -239,6 +259,7 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     func shutdown() {
+        selectionTranslationController.close()
         agentEditorIntegrationService.shutdown()
         bridgeService.stop()
     }
@@ -412,7 +433,11 @@ final class NoTypeAppModel: ObservableObject {
 
     func handleHotkey(_ event: NoTypeHotkeyEvent) {
         switch event {
+        case .translateSelectionToChinese:
+            guard phase != .recording, phase != .transcribing, phase != .refining else { return }
+            selectionTranslationController.show()
         case .startDictation(let mode):
+            selectionTranslationController.close()
             Task {
                 await startDictation(mode: mode)
             }
@@ -421,6 +446,7 @@ final class NoTypeAppModel: ObservableObject {
                 await stopDictation()
             }
         case .cancelDictation:
+            selectionTranslationController.close()
             cancelCurrentSession()
         }
     }

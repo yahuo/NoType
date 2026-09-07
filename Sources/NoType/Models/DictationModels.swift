@@ -72,6 +72,7 @@ enum ASRProviderEvent: Equatable {
 }
 
 enum NoTypeHotkeyEvent: Equatable {
+    case translateSelectionToChinese
     case startDictation(DictationOutputMode)
     case stopDictation
     case cancelDictation

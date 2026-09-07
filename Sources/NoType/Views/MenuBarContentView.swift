@@ -102,6 +102,15 @@ struct MenuBarContentView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
+            VStack(alignment: .leading, spacing: 3) {
+                Label("选词译为中文 · 浮窗查看", systemImage: "character.bubble")
+                    .font(.caption)
+                Text(model.selectionTranslationHotkeyDisplayName)
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
             settingsTiles
         }
         .padding(12)

@@ -71,6 +71,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                LabeledContent("选词译为中文") {
+                    Text(model.selectionTranslationHotkeyDisplayName)
+                        .foregroundStyle(.secondary)
+                }
+
+                Text("选中文字后按快捷键，在浮窗查看中文译文，原文保持不变。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
                 Picker("Language", selection: $model.settings.language) {
                     ForEach(DictationLanguage.allCases) { language in
                         Text(language.displayName).tag(language)
