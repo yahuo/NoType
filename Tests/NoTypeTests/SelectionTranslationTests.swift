@@ -3,6 +3,141 @@ import Carbon
 import Testing
 @testable import NoType
 
+private final class DelayedTranslationProtocol: URLProtocol, @unchecked Sendable {
+    private let lock = NSLock()
+    private var completion: DispatchWorkItem?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/event-stream"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        send(#"data: {"type":"response.output_text.delta","delta":"第一段"}"#)
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.lock.withLock({ self.completion?.isCancelled ?? true }) else { return }
+            self.send(#"data: {"type":"response.output_text.delta","delta":"第二段"}"#)
+            self.send(#"data: {"type":"response.completed"}"#)
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+        lock.withLock { completion = work }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.2, execute: work)
+    }
+
+    override func stopLoading() {
+        lock.withLock { completion?.cancel() }
+    }
+
+    private func send(_ line: String) {
+        client?.urlProtocol(self, didLoad: Data((line + "\n\n").utf8))
+    }
+}
+
+private func withTranslationSession(
+    protocolClass: AnyClass = DelayedTranslationProtocol.self,
+    _ body: (URLSession, CodexAuthStore) async throws -> Void
+) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try Data(#"{"tokens":{"access_token":"test-only-token"}}"#.utf8)
+        .write(to: directory.appendingPathComponent("auth.json"))
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [protocolClass]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    try await body(session, CodexAuthStore(codexHome: directory))
+}
+
+@Test
+func selectionTranslationCanOutlastTheDictationRewriteDeadline() async throws {
+    try await withTranslationSession { session, authStore in
+        let service = AIRewriteService(
+            session: session, rewriteTimeout: .milliseconds(40), authStore: authStore
+        )
+        let result = try await service.translateToChinese(String(repeating: "Long source text. ", count: 200))
+        #expect(result == "第一段第二段")
+    }
+}
+
+@Test
+func selectionTranslationStillEnforcesItsOwnDeadline() async throws {
+    try await withTranslationSession { session, authStore in
+        let service = AIRewriteService(
+            session: session, rewriteTimeout: .seconds(1),
+            selectionTranslationTimeout: .milliseconds(40), authStore: authStore
+        )
+        do {
+            _ = try await service.translateToChinese("slow source")
+            Issue.record("Translation should time out before the delayed stream completes")
+        } catch AIRewriteError.translationTimedOut {
+            #expect(AIRewriteError.translationTimedOut.localizedDescription.contains("翻译超时"))
+        }
+    }
+}
+
+@Test
+func englishTranslationKeepsItsExistingDeadline() async throws {
+    try await withTranslationSession { session, authStore in
+        let service = AIRewriteService(
+            session: session, rewriteTimeout: .milliseconds(40), authStore: authStore
+        )
+        do {
+            _ = try await service.translateToEnglish("slow source")
+            Issue.record("English translation should retain the existing deadline")
+        } catch AIRewriteError.timedOut {
+            // The longer selection-reading budget applies only to the Chinese panel.
+        }
+    }
+}
+
+@Test
+func selectionTranslationNetworkRequestCanBeCancelled() async throws {
+    try await withTranslationSession { session, authStore in
+        let service = AIRewriteService(session: session, authStore: authStore)
+        let partials = AsyncStream<String>.makeStream()
+        let task = Task {
+            try await service.translateToChinese("source") { partial in
+                partials.continuation.yield(partial)
+            }
+        }
+        for await _ in partials.stream { break }
+        task.cancel()
+        do {
+            _ = try await task.value
+            Issue.record("Cancelled translation must not return a completed result")
+        } catch is CancellationError {
+        } catch let error as URLError where error.code == .cancelled {
+        }
+    }
+}
+
+private final class NetworkTimeoutTranslationProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        #expect(request.timeoutInterval == 60)
+        client?.urlProtocol(self, didFailWithError: URLError(.timedOut))
+    }
+    override func stopLoading() {}
+}
+
+@Test
+func selectionTranslationUsesLongerNetworkTimeoutAndChineseFeedback() async throws {
+    try await withTranslationSession(protocolClass: NetworkTimeoutTranslationProtocol.self) { session, authStore in
+        let service = AIRewriteService(session: session, authStore: authStore)
+        do {
+            _ = try await service.translateToChinese("source")
+            Issue.record("The simulated network timeout should be reported")
+        } catch AIRewriteError.translationTimedOut {
+            #expect(!AIRewriteError.translationTimedOut.localizedDescription.contains("AI Rewrite"))
+        }
+    }
+}
+
 @Test
 func chineseTranslationInstructionsPreserveSourceAsData() {
     #expect(AIRewriteService.chineseTranslationPrompt.contains("简体中文"))

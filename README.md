@@ -206,6 +206,8 @@ NoType 只读取本机 Codex access token，不刷新 refresh token；`AI Rewrit
 
 此功能只需要辅助功能权限与现有 Codex 登录态，不需要配置麦克风或 Doubao；录音或其他 AI 处理进行中时不响应此快捷键。
 
+中文浮窗翻译使用独立的 3 分钟总时限，网络连续 60 秒无响应时会超时；等待期间可随时关闭取消。
+
 ## 验证
 
 ```bash

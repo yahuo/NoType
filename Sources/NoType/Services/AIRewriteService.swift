@@ -7,6 +7,7 @@ enum AIRewriteError: LocalizedError {
     case invalidResponse
     case incompleteStream
     case timedOut
+    case translationTimedOut
     case requestFailed(Int, String)
 
     var errorDescription: String? {
@@ -23,6 +24,8 @@ enum AIRewriteError: LocalizedError {
             return "The Codex rewrite stream ended before completion."
         case .timedOut:
             return "AI Rewrite timed out."
+        case .translationTimedOut:
+            return "翻译超时，请稍后重试或缩短选中文字。"
         case .requestFailed(let statusCode, let body):
             if body.isEmpty {
                 return "The Codex rewrite service returned HTTP \(statusCode)."
@@ -40,17 +43,20 @@ actor AIRewriteService {
 
     private let session: URLSession
     private let rewriteTimeout: Duration
+    private let selectionTranslationTimeout: Duration
     private let authStore: CodexAuthStore
     private let modelResolver: CodexModelResolver
 
     init(
         session: URLSession = .shared,
         rewriteTimeout: Duration = .seconds(10),
+        selectionTranslationTimeout: Duration = .seconds(180),
         authStore: CodexAuthStore = CodexAuthStore(),
         modelResolver: CodexModelResolver = CodexModelResolver()
     ) {
         self.session = session
         self.rewriteTimeout = rewriteTimeout
+        self.selectionTranslationTimeout = selectionTranslationTimeout
         self.authStore = authStore
         self.modelResolver = modelResolver
     }
@@ -96,7 +102,13 @@ actor AIRewriteService {
         _ text: String,
         onPartial: @escaping @Sendable (String) -> Void = { _ in }
     ) async throws -> String {
-        try await translate(text, toChinese: true, onPartial: onPartial)
+        do {
+            return try await translate(text, toChinese: true, onPartial: onPartial)
+        } catch AIRewriteError.timedOut {
+            throw AIRewriteError.translationTimedOut
+        } catch let error as URLError where error.code == .timedOut {
+            throw AIRewriteError.translationTimedOut
+        }
     }
 
     private func translate(
@@ -104,7 +116,8 @@ actor AIRewriteService {
         toChinese: Bool,
         onPartial: @escaping @Sendable (String) -> Void
     ) async throws -> String {
-        let rewriteTimeout = self.rewriteTimeout
+        // Reading a long selection can take much longer than refining a short dictation.
+        let timeout = toChinese ? selectionTranslationTimeout : rewriteTimeout
 
         let translated = try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
@@ -113,12 +126,13 @@ actor AIRewriteService {
                     userMessage: Self.translationUserMessage(for: text, toChinese: toChinese),
                     model: Self.translationModel,
                     reasoningEffort: Self.translationReasoningEffort,
+                    requestTimeout: toChinese ? 60 : 30,
                     onPartial: onPartial
                 )
             }
 
             group.addTask {
-                try await Task.sleep(for: rewriteTimeout)
+                try await Task.sleep(for: timeout)
                 throw AIRewriteError.timedOut
             }
 
@@ -150,6 +164,7 @@ actor AIRewriteService {
         userMessage: String,
         model: String? = nil,
         reasoningEffort: String? = nil,
+        requestTimeout: TimeInterval = 30,
         onPartial: @escaping @Sendable (String) -> Void
     ) async throws -> String {
         let credentials = try authStore.loadCredentials()
@@ -162,7 +177,8 @@ actor AIRewriteService {
             model: model ?? modelResolver.resolveModel(),
             reasoningEffort: reasoningEffort,
             instructions: instructions,
-            userMessage: userMessage
+            userMessage: userMessage,
+            timeoutInterval: requestTimeout
         )
 
         let (bytes, response) = try await session.bytes(for: request)
@@ -199,11 +215,12 @@ actor AIRewriteService {
         model: String,
         reasoningEffort: String? = nil,
         instructions: String,
-        userMessage: String
+        userMessage: String,
+        timeoutInterval: TimeInterval = 30
     ) throws -> URLRequest {
         var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/codex/responses")!)
         request.httpMethod = "POST"
-        request.timeoutInterval = 30
+        request.timeoutInterval = timeoutInterval
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("codex_cli_rs", forHTTPHeaderField: "originator")
