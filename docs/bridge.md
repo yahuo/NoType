@@ -66,11 +66,11 @@ The `ping` method returns `pong` in the response `text` field.
 
 `translate_chinese` 使用同一请求/响应结构，把 `text` 翻译为中文；原来的 `translate` 和 `translate_editor` 仍翻译为英文。中文方法复用 `AIRewriteService.translateToChinese` 的登录态、模型与 180 秒总超时，不操作剪贴板或当前选区。
 
-Chrome / Edge 使用 `translate_chinese_batch`，请求包含 `items: [{"id":"p0","text":"Hello"}]`，无需 `text` 字段。每批 1–4 段，段落 ID 唯一，总长度最多 6000 UTF-16 字符；单段可独立请求至 12000 字符。
+Chrome / Edge 使用 `translate_chinese_batch`，请求包含 `items: [{"id":"p0","text":"Hello"}]`，无需 `text` 字段。每批 1–4 段，段落 ID 唯一，总长度最多 6000 UTF-16 字符；若每条均不超过 100 UTF-16 字符，则允许最多 12 条（总计最多 1200 字符）；单段可独立请求至 12000 字符。扩展 0.3.3 使用扩大的短文本批次，需要同步更新 NoType 和浏览器连接程序。
 
 批次复用模型请求方法、现有登录态和 180 秒总时限。响应均有相同 `version`、请求 `id` 和 `ok`；`partial: true` 的进度帧在 `text` 中携带累计 JSON Lines 输出。最终成功帧包含完整的 `items`，按输入 ID 对齐；失败沿用 `error`。客户端不能把进度帧当成最终成功，断开 socket 会取消处理任务。
 
-Native Messaging 连接程序只转发中文单段/批次方法，并设置 `client: "browser"`。它在本机字节序和 socket 大端长度前缀之间转换，逐帧输出、复用浏览器会话的进程；同一个页面翻译会话复用一个 socket，逐批请求，最终响应只结束本批次。关闭翻译或标签页时断开连接并取消当前任务；应用退出时关闭全部连接。桥接器最多保留 16 个同时存活的连接，关闭后释放名额，不限制累计连接次数。发生断线或超时后停止当前批次，不自动重发结果未知的请求。安装与边界见 [浏览器集成说明](../integrations/browser/README.md)。
+Native Messaging 连接程序只转发中文单段/批次方法，并设置 `client: "browser"`。它在本机字节序和 socket 大端长度前缀之间转换，逐帧输出、复用进程和 socket。扩展 0.4.0 的所有标签页共享两个工作槽位，每个槽位复用一条 Native Messaging 连接和一个 socket；连接内仍逐批请求，最终响应只结束本批次。NoType 同时接纳最多两个 `client: "browser"` 的批次，其他桥接翻译操作仍独占通道，因此 0.4.0 需同步更新应用，0.3.3 连接程序可继续复用。关闭翻译或标签页时取消其任务，其他标签页继续；池内全部任务处理完后释放连接，应用退出时关闭全部连接。桥接器最多保留 16 个同时存活的连接，关闭后释放名额，不限制累计连接次数。0.4.1 将模型错误限制在对应批次，连接不可用等通道错误仍停止当前标签页；不自动重发结果未知的请求。安装与边界见 [浏览器集成说明](../integrations/browser/README.md)。
 
 ## Claude Code and Codex CLI integration
 
@@ -140,4 +140,4 @@ Pi, Claude Code, and Codex CLI are supported for local TUI sessions. Remote SSH 
 /usr/bin/log show --last 10m --style compact --info --predicate 'subsystem == "com.opensource.notype" AND category == "BrowserBridge"'
 ```
 
-首个进度帧可能只有 JSON 前缀，不等同于首个可显示中文字。等待模型响应、接收译文和等待滚动分别显示不同页面状态。模型网络等待/总时限仍为 60/180 秒，连接程序和扩展分别以 190/195 秒作为外层等待上限。
+首个进度帧可能只有 JSON 前缀，不等同于首个可显示中文字。页面分别显示等待模型响应、接收译文和完成状态；0.4.0 全部已识别段落提前排队，无需等待滚动。0.4.1 的模型翻译错误只标记对应批次失败，其余继续，主页面可统一重试失败段落；连接不可用、缺少登录态和 busy 仍停止当前标签页。模型网络等待/总时限仍为 60/180 秒，连接程序和扩展分别以 190/195 秒作为外层等待上限。

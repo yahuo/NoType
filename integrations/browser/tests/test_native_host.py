@@ -28,6 +28,19 @@ class NativeHostTests(unittest.TestCase):
     def request(self):
         return {"version": 1, "id": "paragraph-1", "method": "translate_chinese", "text": "Hello 世界"}
 
+    def test_larger_batches_require_short_utf16_texts(self):
+        request = {"version": 1, "id": "short", "method": "translate_chinese_batch"}
+        short = [{"id": f"p{i}", "text": "😀" * 50} for i in range(12)]
+        self.assertEqual(native_host.request_body({**request, "items": short})["items"], short)
+        for invalid in [short + [{"id": "extra", "text": "Short"}],
+                        short[:4] + [{"id": "long", "text": "x" * 101}],
+                        short[:4] + [{"id": "long", "text": "😀" * 51}],
+                        [{"id": f"p{i}", "text": "x" * 1501} for i in range(4)]]:
+            with self.assertRaises(ValueError):
+                native_host.request_body({**request, "items": invalid})
+        regular = [{"id": f"p{i}", "text": "x" * 1500} for i in range(4)]
+        self.assertEqual(native_host.request_body({**request, "items": regular})["items"], regular)
+
     def test_fragmented_native_frame_and_unicode(self):
         payload = native_host.encode_frame(self.request(), "=")
         self.assertEqual(struct.unpack("=I", payload[:4])[0], len(payload) - 4)

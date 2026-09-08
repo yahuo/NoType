@@ -16,17 +16,19 @@ async (page) => {
     window.sent = [];
     window.chrome = {runtime:{connect() {
       const port = {onMessage:{addListener(fn){port.receive=fn;}},onDisconnect:{addListener(){}},disconnect(){},
-        postMessage(message){ window.sent.push(...message.items.map(i=>i.text)); queueMicrotask(()=>port.receive({ok:true,items:message.items.map(i=>({id:i.id,text:"译文"}))})); }};
+        postMessage(message){ if (message.type) return; window.sent.push(...message.items.map(i=>i.text)); queueMicrotask(()=>port.receive({id:message.id,ok:true,items:message.items.map(i=>({id:i.id,text:"译文"}))})); }};
       return port;
     }}};
   });
   await page.addScriptTag({url:scriptURL});
+  await page.evaluate(() => window.__noTypeToggleTranslation());
   await page.waitForFunction(() => document.querySelector('notype-status')?.shadowRoot.textContent.includes('再次点击插件可恢复原文'));
   const sent = await page.evaluate(() => window.sent);
   const expected = ["Article title", "Article introduction.", "Line one Line two", "Before Inside block After",
     "An important word and international.", "Public text."];
   if (JSON.stringify(sent) !== JSON.stringify(expected)) throw new Error(`Wrong paragraph extraction: ${JSON.stringify(sent)}`);
   await page.addScriptTag({url:scriptURL});
+  await page.evaluate(() => window.__noTypeToggleTranslation());
   if (await page.locator('notype-translation,notype-status').count()) throw new Error('Toggle left translated nodes behind');
   return "PASS: article headers, site header exclusion, line/block boundaries, inline words and hidden/control exclusion";
 }

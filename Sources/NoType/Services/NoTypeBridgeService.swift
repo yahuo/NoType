@@ -18,9 +18,26 @@ struct NoTypeTranslationItem: Codable, Equatable, Sendable {
     let text: String
 }
 
+// Owned by the app's MainActor. Browser batches share two slots; editor and
+// other bridge operations retain exclusive access. Tokens outlive cancellation
+// only until that operation's defer runs, and cannot release a newer owner.
+struct NoTypeBridgeAdmission {
+    private var active: [UUID: Bool] = [:]
+
+    mutating func acquire(browser: Bool) -> UUID? {
+        guard active.isEmpty || (browser && active.count < 2 && active.values.allSatisfy({ $0 })) else { return nil }
+        let token = UUID()
+        active[token] = browser
+        return token
+    }
+
+    mutating func release(_ token: UUID) { active.removeValue(forKey: token) }
+}
+
 enum NoTypeBrowserBatch {
     static func validate(_ items: [NoTypeTranslationItem]) throws {
-        guard (1...4).contains(items.count), Set(items.map(\.id)).count == items.count,
+        guard (1...12).contains(items.count), Set(items.map(\.id)).count == items.count,
+              items.count <= 4 || items.allSatisfy({ $0.text.utf16.count <= 100 }),
               items.allSatisfy({
                   !$0.text.trimmed.isEmpty && $0.text.utf16.count <= 12_000 &&
                   $0.id.range(of: "^[A-Za-z0-9_-]{1,64}$", options: .regularExpression) != nil

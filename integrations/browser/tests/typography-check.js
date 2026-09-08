@@ -28,12 +28,13 @@ async (page) => {
     window.chrome = { runtime: { connect() {
       const port = { onMessage: { addListener(fn) { port.receive = fn; } },
         onDisconnect: { addListener() {} }, disconnect() {},
-        postMessage(message) { queueMicrotask(() => port.receive({ok:true,
+        postMessage(message) { if (message.type) return; queueMicrotask(() => port.receive({id:message.id,ok:true,
           items:message.items.map(({id}) => ({id, text:translations[Number(id.slice(1))]}))})); }
       }; return port;
     } } };
   });
   await page.addScriptTag({ url: scriptURL });
+  await page.evaluate(() => window.__noTypeToggleTranslation());
   await page.waitForFunction(() => document.querySelector("notype-status")?.shadowRoot.textContent.includes("已翻译 5 / 5"));
   const checks = await page.evaluate(() => {
     const result = [];

@@ -49,7 +49,7 @@ final class NoTypeAppModel: ObservableObject {
     private var lastRewritePreviewUpdate = 0.0
     private var sessionID = UUID()
     private var currentOutputMode: DictationOutputMode = .dictation
-    private var activeBridgeRequestID: String?
+    private var bridgeAdmission = NoTypeBridgeAdmission()
     private var lastDirectBridgeRequest: (timestamp: TimeInterval, processIdentifier: Int32)?
 
     init(
@@ -677,10 +677,10 @@ final class NoTypeAppModel: ObservableObject {
             )
         }
 
-        guard activeBridgeRequestID == nil,
-              phase != .recording,
+        guard phase != .recording,
               phase != .transcribing,
-              phase != .refining
+              phase != .refining,
+              let bridgeToken = bridgeAdmission.acquire(browser: isBatch && request.client == "browser")
         else {
             return .failure(
                 id: request.id,
@@ -688,6 +688,7 @@ final class NoTypeAppModel: ObservableObject {
                 message: "NoType is already processing another request."
             )
         }
+        defer { bridgeAdmission.release(bridgeToken) }
 
         guard hasCodexOAuthCredentials else {
             return .failure(
@@ -696,9 +697,6 @@ final class NoTypeAppModel: ObservableObject {
                 message: "Translation requires Codex login. Run `codex login` first."
             )
         }
-
-        activeBridgeRequestID = request.id
-        defer { activeBridgeRequestID = nil }
 
         do {
             if isBatch {

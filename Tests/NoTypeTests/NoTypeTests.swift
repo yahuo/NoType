@@ -693,6 +693,25 @@ func browserBatchValidatesLimitsAndMapsOutOfOrderResults() throws {
     #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"\"}\n{\"id\":\"b\",\"text\":\"世界\"}", for: items) }
 }
 
+@Test
+func browserBatchExpandsOnlyShortTexts() throws {
+    let short = (0..<12).map { NoTypeTranslationItem(id: "p\($0)", text: String(repeating: "😀", count: 50)) }
+    try NoTypeBrowserBatch.validate(short)
+    #expect(throws: (any Error).self) {
+        try NoTypeBrowserBatch.validate(short + [.init(id: "extra", text: "Short")])
+    }
+    #expect(throws: (any Error).self) {
+        try NoTypeBrowserBatch.validate(Array(short.prefix(4)) + [.init(id: "long", text: String(repeating: "x", count: 101))])
+    }
+    try NoTypeBrowserBatch.validate((0..<4).map { .init(id: "p\($0)", text: String(repeating: "x", count: 1500)) })
+    #expect(throws: (any Error).self) {
+        try NoTypeBrowserBatch.validate((0..<4).map { .init(id: "p\($0)", text: String(repeating: "x", count: 1501)) })
+    }
+    let output = try short.reversed().map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n")
+    #expect(try NoTypeBrowserBatch.decode(output, for: short) == short)
+    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode(output, for: Array(short.prefix(11))) }
+}
+
 private actor BrowserCancellationFlag {
     var cancelled = false
     func mark() { cancelled = true }

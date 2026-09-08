@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>NoType iframe fixture</title>
+<style>body{font:18px/1.4 sans-serif}iframe{width:90%;height:230px;display:block;margin:12px}#hidden{display:none}</style>
+<p>Main page paragraph.</p>
+<iframe name="same" src="iframe-child.html"></iframe>
+<iframe name="cross" id="cross"></iframe>
+<iframe name="srcdoc" srcdoc="<p>Inline document paragraph.</p>"></iframe>
+<iframe name="blank" id="blank"></iframe>
+<iframe name="hidden" id="hidden" src="iframe-child.html?hidden"></iframe>
+<script>
+const cross = new URL('iframe-child.html?nested', location.href);
+cross.hostname = location.hostname === 'localhost' ? '127.0.0.1' : 'localhost';
+document.querySelector('#cross').src = cross;
+document.querySelector('#blank').contentDocument.body.innerHTML = '<p>Blank frame paragraph.</p>';
+</script>

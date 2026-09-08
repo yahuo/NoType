@@ -63,8 +63,8 @@ def request_body(request):
     body = {"version": 1, "id": request_id, "method": method, "client": "browser"}
     if method == "translate_chinese_batch":
         items = request.get("items")
-        if not isinstance(items, list) or not 1 <= len(items) <= 4:
-            raise ValueError("批次必须包含 1 至 4 段。")
+        if not isinstance(items, list) or not 1 <= len(items) <= 12:
+            raise ValueError("批次必须包含 1 至 12 段。")
         ids = set()
         total = 0
         for item in items:
@@ -74,6 +74,8 @@ def request_body(request):
             length = len(text.encode("utf-16-le")) // 2 if isinstance(text, str) else 0
             if not isinstance(text, str) or not text.strip() or not 0 < length <= 12000 or item["id"] in ids:
                 raise ValueError("段落为空、重复或过长。")
+            if len(items) > 4 and length > 100:
+                raise ValueError("超过 4 段的批次，每段最多 100 个 UTF-16 字符。")
             ids.add(item["id"])
             total += length
         if len(items) > 1 and total > 6000:

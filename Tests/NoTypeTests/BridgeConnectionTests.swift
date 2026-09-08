@@ -3,6 +3,31 @@ import Foundation
 import Testing
 @testable import NoType
 
+@Test
+func browserAdmissionHasTwoSlotsAndKeepsOtherBridgeOperationsExclusive() throws {
+    var admission = NoTypeBridgeAdmission()
+    let firstSlot = admission.acquire(browser: true)
+    let first = try #require(firstSlot)
+    let secondSlot = admission.acquire(browser: true)
+    let second = try #require(secondSlot)
+    #expect(admission.acquire(browser: true) == nil)
+    #expect(admission.acquire(browser: false) == nil)
+    admission.release(second)
+    let replacementSlot = admission.acquire(browser: true)
+    let replacement = try #require(replacementSlot)
+    admission.release(second) // A stale owner must not free its replacement.
+    #expect(admission.acquire(browser: true) == nil)
+    admission.release(first)
+    #expect(admission.acquire(browser: false) == nil)
+    admission.release(replacement)
+    let exclusiveSlot = admission.acquire(browser: false)
+    let exclusive = try #require(exclusiveSlot)
+    #expect(admission.acquire(browser: true) == nil)
+    #expect(admission.acquire(browser: false) == nil)
+    admission.release(exclusive)
+    #expect(admission.acquire(browser: true) != nil)
+}
+
 @Test @MainActor
 func bridgeAcceptsMoreThanSixteenSequentialConnections() async throws {
     let directory = URL(fileURLWithPath: "/tmp/nt-many-\(UUID().uuidString.prefix(8))")
