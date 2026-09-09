@@ -72,6 +72,27 @@ enum SpeechProvider: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+enum NeoVoice: String, Codable, CaseIterable, Identifiable {
+    case juniper, maple, spruce, ember, vale, breeze, arbor, sol, cove
+
+    var id: String { rawValue }
+    var displayName: String { rawValue.capitalized }
+
+    var description: String {
+        switch self {
+        case .juniper: "开朗且乐观"
+        case .maple: "开朗而直率"
+        case .spruce: "平静而肯定"
+        case .ember: "自信且乐观"
+        case .vale: "明快而好奇"
+        case .breeze: "生动而真诚"
+        case .arbor: "随和且百搭"
+        case .sol: "聪慧而从容"
+        case .cove: "沉稳而直接"
+        }
+    }
+}
+
 struct AppSettings: Codable, Equatable {
     var speechProvider: SpeechProvider
     var appID: String
@@ -82,6 +103,7 @@ struct AppSettings: Codable, Equatable {
     var agentTUITranslationEnabled: Bool
     var neoWakeEnabled: Bool = false
     var neoWakePhrase = AppSettings.defaultNeoWakePhrase
+    var neoVoice: NeoVoice = .juniper
 
     static let defaultNeoWakePhrase = "Hey Neo"
 
@@ -118,6 +140,7 @@ struct AppSettings: Codable, Equatable {
         case agentTUITranslationEnabled
         case neoWakeEnabled
         case neoWakePhrase
+        case neoVoice
     }
 
     init(
@@ -144,6 +167,7 @@ struct AppSettings: Codable, Equatable {
         speechProvider = try container.decodeIfPresent(SpeechProvider.self, forKey: .speechProvider) ?? .doubao
         neoWakeEnabled = try container.decodeIfPresent(Bool.self, forKey: .neoWakeEnabled) ?? false
         neoWakePhrase = Self.normalizedNeoWakePhrase(try container.decodeIfPresent(String.self, forKey: .neoWakePhrase) ?? "") ?? Self.defaultNeoWakePhrase
+        neoVoice = NeoVoice(rawValue: try container.decodeIfPresent(String.self, forKey: .neoVoice) ?? "") ?? .juniper
         appID = try container.decodeIfPresent(String.self, forKey: .appID) ?? ""
 
         let decodedResourceID =
@@ -165,6 +189,7 @@ struct AppSettings: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(neoWakeEnabled, forKey: .neoWakeEnabled)
         try container.encode(neoWakePhrase, forKey: .neoWakePhrase)
+        try container.encode(neoVoice, forKey: .neoVoice)
         try container.encode(speechProvider, forKey: .speechProvider)
         try container.encode(appID.trimmed, forKey: .appID)
         try container.encode(resourceID.trimmed, forKey: .resourceID)

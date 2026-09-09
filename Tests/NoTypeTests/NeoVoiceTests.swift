@@ -51,6 +51,52 @@ func neoEndSessionCommandIsRecognized(_ text: String) {
     #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)) == settings)
 }
 
+@MainActor @Test(arguments: NeoVoice.allCases)
+func neoSelectedVoiceIsSentToRealtimeSession(voice: NeoVoice) throws {
+    let credentials = CodexOAuthCredentials(accessToken: "unit-test-token", chatGPTAccountID: nil, expiresAt: Date.distantFuture)
+    let request = try CodexRealtimeService.makeRequest(sdp: "v=0\r\n", credentials: credentials, threadID: "voice-test", voice: voice)
+    let data = try #require(request.httpBody)
+    let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    let session = try #require(body["session"] as? [String: Any])
+    let audio = try #require(session["audio"] as? [String: Any])
+    let output = try #require(audio["output"] as? [String: Any])
+    #expect(output["voice"] as? String == voice.rawValue)
+}
+
+@Test func neoVoiceMigratesWithoutLosingOtherSettings() throws {
+    for json in ["{\"appID\":\"saved\"}", "{\"appID\":\"saved\",\"neoVoice\":\"unknown\"}"] {
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
+        #expect(settings.neoVoice == .juniper)
+        #expect(settings.appID == "saved")
+    }
+    for voice in NeoVoice.allCases {
+        var settings = AppSettings.defaults
+        settings.neoVoice = voice
+        let saved = try JSONEncoder().encode(settings)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: saved).neoVoice == voice)
+    }
+}
+
+@MainActor @Test func neoVoiceSaveDoesNotPersistOtherSettingsDrafts() throws {
+    let suite = "NoTypeTests.neo-voice.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = SettingsStore(userDefaults: defaults)
+    try store.save(.defaults)
+    let model = NoTypeAppModel(settingsStore: store)
+    defer { model.neoVoice.shutdown() }
+    model.settings.appID = "unsaved-draft"
+    model.settings.llmRefinementEnabled = true
+    model.setNeoVoice(.cove)
+    #expect(store.load().neoVoice == .cove)
+    #expect(model.settings.neoVoice == .cove)
+    #expect(model.neoVoice.voice == .cove)
+    #expect(store.load().appID.isEmpty)
+    #expect(!store.load().llmRefinementEnabled)
+    #expect(model.settings.appID == "unsaved-draft")
+    #expect(model.settings.llmRefinementEnabled)
+}
+
 @MainActor private final class FakeWake: WakeWordListening {
     var wakes: [@MainActor () -> Void] = []
     var starts = 0
@@ -151,13 +197,36 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     var stops = 0
     var finishes = 0
     var greetings = 0
-    func start(onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
+    var voices: [NeoVoice] = []
+    func start(voice: NeoVoice, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
         starts += 1
+        voices.append(voice)
         events.append(onEvent)
     }
     func stop() { stops += 1 }
     func finishAfterReply() { finishes += 1 }
     func greet() { greetings += 1 }
+}
+
+@MainActor @Test func neoVoiceChangeAppliesToTheNextConversation() async throws {
+    let call = FakeCall()
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.setVoice(.maple)
+    neo.startConversation()
+    neo.setVoice(.cove)
+    await settle()
+    #expect(call.voices == [.maple])
+    call.events[0](.ready)
+    let stops = call.stops
+    neo.setVoice(.spruce)
+    #expect(neo.state == .listening)
+    #expect(call.stops == stops)
+    #expect(call.starts == 1)
+    neo.endConversation()
+    neo.startConversation()
+    await settle()
+    #expect(call.voices == [.maple, .spruce])
 }
 
 @MainActor @Test func neoGreetsOnceWhenTheCallIsReady() async {

@@ -55,6 +55,7 @@ final class NeoVoiceController {
     var onChange: (() -> Void)?
     var mediaView: WKWebView? { call.mediaView }
     private(set) var wakePhrase = AppSettings.defaultNeoWakePhrase
+    private(set) var voice: NeoVoice = .juniper
     var statusText: String {
         state == .armed ? "说「\(wakePhrase)」开始对话" : state.label
     }
@@ -95,6 +96,10 @@ final class NeoVoiceController {
         arm()
     }
 
+    func setVoice(_ voice: NeoVoice) {
+        self.voice = voice
+    }
+
     func setSuspended(_ value: Bool) {
         guard suspended != value else { return }
         suspended = value
@@ -106,6 +111,7 @@ final class NeoVoiceController {
         guard !suspended, !state.inConversation else { return }
         reset()
         let id = generation
+        let selectedVoice = voice
         state = .connecting
         operation = Task { [weak self] in
             guard let self else { return }
@@ -118,7 +124,7 @@ final class NeoVoiceController {
                     guard let self, self.generation == id, self.state == .connecting else { return }
                     self.fail(NeoVoiceError.timedOut)
                 }
-                try await self.call.start { [weak self] event in
+                try await self.call.start(voice: selectedVoice) { [weak self] event in
                     guard let self, self.generation == id else { return }
                     self.receive(event, id: id)
                 }

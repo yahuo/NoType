@@ -60,6 +60,18 @@ struct SettingsView: View {
                 Text(model.neoVoice.state.message ?? model.neoVoice.statusText)
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Section("声音") {
+                Picker("音色", selection: Binding(
+                    get: { model.settings.neoVoice },
+                    set: { model.setNeoVoice($0) }
+                )) {
+                    ForEach(NeoVoice.allCases) { voice in
+                        Text("\(voice.displayName) · \(voice.description)").tag(voice)
+                    }
+                }
+                Text("自动保存，新音色从下一次对话开始使用。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             Section("对话方式") {
                 Text("说「\(model.settings.neoWakePhrase)」唤醒，连接后 Neo 会回应「我在，请说」。支持连续追问和打断回答。")
                 Text("说「结束会话」、点击悬浮层关闭按钮或按 Option + Esc 结束。没有执行任务时，静默 45 秒也会自动结束。")

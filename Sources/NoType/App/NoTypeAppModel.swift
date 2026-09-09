@@ -278,6 +278,7 @@ final class NoTypeAppModel: ObservableObject {
         registerTripleSpaceTriggerIfPossible()
         startBridgeService()
         neoVoice.setWakePhrase(settings.neoWakePhrase)
+        neoVoice.setVoice(settings.neoVoice)
         neoVoice.setWakeEnabled(settings.neoWakeEnabled)
 
         scheduleHUDLayoutUpdate(animated: false)
@@ -319,6 +320,21 @@ final class NoTypeAppModel: ObservableObject {
             try settingsStore.save(persisted)
             settings.neoWakeEnabled = enabled
             neoVoice.setWakeEnabled(enabled)
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+    }
+
+    func setNeoVoice(_ voice: NeoVoice) {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+        do {
+            var persisted = settingsStore.load()
+            persisted.neoVoice = voice
+            try settingsStore.save(persisted)
+            settings.neoVoice = voice
+            neoVoice.setVoice(voice)
+            llmSettingsStatusMessage = "音色已更新，下次对话生效"
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }
