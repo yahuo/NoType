@@ -32,6 +32,7 @@ final class NoTypeAppModel: ObservableObject {
     private let audioCaptureService: AudioCaptureService
     private let textInsertionService: TextInsertionService
     private let aiRewriteService: AIRewriteService
+    private let codexTranscriptionService: CodexTranscriptionService
     private let hudController: HUDPanelController
     private let selectionTranslationController: SelectionTranslationPanelController
     private let providerFactory: () -> ASRProvider
@@ -44,6 +45,9 @@ final class NoTypeAppModel: ObservableObject {
     private var storedAccessTokenPresence: Bool?
     private var feedbackTask: Task<Void, Never>?
     private var completionTask: Task<Void, Never>?
+    private var transcriptionTask: Task<String, Error>?
+    private var activeSpeechProvider: SpeechProvider = .doubao
+    private var shouldRewriteCurrentDictation = false
     private var pendingRewritePreviewTask: Task<Void, Never>?
     private var pendingRewritePreviewText: String?
     private var lastRewritePreviewUpdate = 0.0
@@ -64,6 +68,7 @@ final class NoTypeAppModel: ObservableObject {
         audioCaptureService: AudioCaptureService = AudioCaptureService(),
         textInsertionService: TextInsertionService = TextInsertionService(),
         aiRewriteService: AIRewriteService = AIRewriteService(),
+        codexTranscriptionService: CodexTranscriptionService = CodexTranscriptionService(),
         hudController: HUDPanelController = HUDPanelController(),
         providerFactory: @escaping () -> ASRProvider = { DoubaoStreamingASRProvider() }
     ) {
@@ -77,6 +82,7 @@ final class NoTypeAppModel: ObservableObject {
         self.audioCaptureService = audioCaptureService
         self.textInsertionService = textInsertionService
         self.aiRewriteService = aiRewriteService
+        self.codexTranscriptionService = codexTranscriptionService
         self.hudController = hudController
         self.selectionTranslationController = SelectionTranslationPanelController(
             model: SelectionTranslationModel(
@@ -134,7 +140,7 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     var aiRewriteEnabled: Bool {
-        settings.llmRefinementEnabled
+        settings.shouldRewriteDictation
     }
 
     var hasCodexOAuthCredentials: Bool {
@@ -145,6 +151,7 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     var hasASRCredentials: Bool {
+        if settings.speechProvider == .codex { return hasCodexOAuthCredentials }
         guard settings.hasValidASRConfiguration else { return false }
         if hasLoadedAccessToken {
             return !accessToken.trimmed.isEmpty
@@ -201,6 +208,12 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         if !hasASRCredentials {
+            if settings.speechProvider == .codex {
+                return localizedText(
+                    zh: "语音输入需要 Codex 登录态。请先运行 codex login。",
+                    en: "Dictation requires Codex login. Run codex login first."
+                )
+            }
             return localizedText(
                 zh: "先在 Settings 中配置豆包 App ID、Resource ID 和 Access Token。",
                 en: "Configure the Doubao App ID, Resource ID, and Access Token in Settings first."
@@ -294,6 +307,7 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     func setAIRewriteEnabled(_ enabled: Bool) {
+        guard settings.speechProvider == .doubao else { return }
         guard settings.llmRefinementEnabled != enabled else { return }
         settings.llmRefinementEnabled = enabled
         persistSettings()
@@ -315,6 +329,8 @@ final class NoTypeAppModel: ObservableObject {
     func prepareSettings() {
         llmSettingsStatusMessage = nil
         llmSettingsErrorMessage = nil
+
+        guard settings.speechProvider == .doubao, !hasEditedAccessToken else { return }
 
         do {
             let doubaoToken = try keychainClient.read(account: doubaoAccessTokenAccount)
@@ -354,12 +370,12 @@ final class NoTypeAppModel: ObservableObject {
 
         do {
             try settingsStore.save(persistedSettings)
-            try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
-
-            let hasToken = !accessToken.trimmed.isEmpty
-            settingsStore.setHasStoredAccessToken(hasToken)
-
-            storedAccessTokenPresence = hasToken
+            if hasEditedAccessToken {
+                try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
+                let hasToken = !accessToken.trimmed.isEmpty
+                settingsStore.setHasStoredAccessToken(hasToken)
+                storedAccessTokenPresence = hasToken
+            }
             hasEditedAccessToken = false
             settings = persistedSettings
 
@@ -397,6 +413,14 @@ final class NoTypeAppModel: ObservableObject {
         defer { isTestingLLMSettings = false }
 
         do {
+            if settings.speechProvider == .codex {
+                try codexTranscriptionService.checkCredentials()
+                llmSettingsStatusMessage = localizedText(
+                    zh: "Codex 登录有效。请录音验证语音转写。",
+                    en: "Codex login is valid. Record audio to verify transcription."
+                )
+                return
+            }
             guard let config = try currentASRSessionConfig() else {
                 llmSettingsErrorMessage = localizedText(
                     zh: "请先填写 App ID、Resource ID 和 Access Token。",
@@ -463,7 +487,14 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         do {
-            guard let config = try currentASRSessionConfig() else {
+            let config: ASRSessionConfig?
+            if settings.speechProvider == .codex {
+                try codexTranscriptionService.checkCredentials()
+                config = nil
+            } else {
+                config = try currentASRSessionConfig()
+            }
+            if settings.speechProvider == .doubao, config == nil {
                 failSession(
                     localizedText(
                         zh: "豆包配置不完整。请先填写 App ID、Resource ID 和 Access Token。",
@@ -475,16 +506,21 @@ final class NoTypeAppModel: ObservableObject {
 
             resetSessionStateForStart()
             currentOutputMode = mode
+            activeSpeechProvider = settings.speechProvider
+            shouldRewriteCurrentDictation = settings.shouldRewriteDictation
             let activeSessionID = sessionID
-            let provider = providerFactory()
-            provider.eventHandler = { [weak self] event in
-                Task { @MainActor in
-                    self?.handleASREvent(event, sessionID: activeSessionID)
+            if let config {
+                let provider = providerFactory()
+                provider.eventHandler = { [weak self] event in
+                    Task { @MainActor in
+                        self?.handleASREvent(event, sessionID: activeSessionID)
+                    }
                 }
-            }
 
-            try await provider.startSession(config: config)
-            asrProvider = provider
+                try await provider.startSession(config: config)
+                guard sessionID == activeSessionID else { provider.cancel(); return }
+                asrProvider = provider
+            }
 
             _ = try audioCaptureService.startCapture(
                 onChunk: { [weak self] frame in
@@ -514,16 +550,35 @@ final class NoTypeAppModel: ObservableObject {
 
     private func stopDictation() async {
         guard phase == .recording else { return }
+        let activeSessionID = sessionID
         transition(to: .transcribing)
         waveformLevel = 0
 
         do {
             let stopResult = try audioCaptureService.stopCaptureForFinalization()
+            defer { audioCaptureService.clearRecording(at: stopResult.recordingURL) }
+            if activeSpeechProvider == .codex {
+                guard let recordingURL = stopResult.recordingURL else {
+                    throw CodexTranscriptionError.noSpeech
+                }
+                // The finalized file includes every captured chunk and the trailing
+                // partial frame, independent of pending main-actor chunk callbacks.
+                let pcm = try Data(contentsOf: recordingURL)
+                let task = Task { try await codexTranscriptionService.transcribe(pcm: pcm) }
+                transcriptionTask = task
+                let transcript = try await task.value
+                guard sessionID == activeSessionID else { return }
+                transcriptionTask = nil
+                handleASREvent(.finalTranscript(transcript), sessionID: activeSessionID)
+                return
+            }
             if let finalFrame = stopResult.flushedRemainder, !finalFrame.isEmpty {
                 try await asrProvider?.sendAudioFrame(finalFrame, isFinal: false)
             }
             try await asrProvider?.finish()
         } catch {
+            guard sessionID == activeSessionID else { return }
+            transcriptionTask = nil
             failSession(error.localizedDescription)
         }
     }
@@ -531,6 +586,8 @@ final class NoTypeAppModel: ObservableObject {
     private func cancelCurrentSession() {
         feedbackTask?.cancel()
         completionTask?.cancel()
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""
@@ -539,7 +596,8 @@ final class NoTypeAppModel: ObservableObject {
         errorMessage = nil
 
         do {
-            try audioCaptureService.stopCapture(flushRemainder: false)
+            let recordingURL = try audioCaptureService.stopCapture(flushRemainder: false)
+            audioCaptureService.clearRecording(at: recordingURL)
         } catch {
             hotkeyWarningMessage = error.localizedDescription
         }
@@ -803,7 +861,9 @@ final class NoTypeAppModel: ObservableObject {
         asrProvider?.cancel()
         asrProvider = nil
 
-        let normalizedTranscript = TranscriptFormatter.normalize(transcript)
+        let normalizedTranscript = activeSpeechProvider == .codex
+            ? transcript.trimmed
+            : TranscriptFormatter.normalize(transcript)
         transcriptPreview = normalizedTranscript
 
         guard !normalizedTranscript.trimmed.isEmpty else {
@@ -853,7 +913,7 @@ final class NoTypeAppModel: ObservableObject {
                 failSession(error.localizedDescription)
                 return
             }
-        } else if settings.llmRefinementEnabled, hasCodexOAuthCredentials {
+        } else if shouldRewriteCurrentDictation, hasCodexOAuthCredentials {
             transition(to: .refining)
             resetRewritePreviewThrottle()
 
@@ -926,12 +986,15 @@ final class NoTypeAppModel: ObservableObject {
     private func failSession(_ message: String) {
         feedbackTask?.cancel()
         completionTask?.cancel()
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
         sessionID = UUID()
         waveformLevel = 0
         resetRewritePreviewThrottle()
 
         do {
-            try audioCaptureService.stopCapture(flushRemainder: false)
+            let recordingURL = try audioCaptureService.stopCapture(flushRemainder: false)
+            audioCaptureService.clearRecording(at: recordingURL)
         } catch {
             hotkeyWarningMessage = error.localizedDescription
         }
@@ -946,6 +1009,8 @@ final class NoTypeAppModel: ObservableObject {
     private func resetSessionStateForStart() {
         feedbackTask?.cancel()
         completionTask?.cancel()
+        transcriptionTask?.cancel()
+        transcriptionTask = nil
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""

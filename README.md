@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  基于 SwiftUI、AppKit、Doubao Streaming ASR、可选 AI Rewrite 和英文翻译构建。
+  基于 SwiftUI、AppKit、Codex / Doubao 语音转写、AI Rewrite 和英文翻译构建。
 </p>
 
 ## NoType 是什么
@@ -23,8 +23,8 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
 
 - 菜单栏常驻，不抢桌面主场景
 - `Option + Space` 启动语音输入，`Option + Shift + Space` 翻译成英文
-- Doubao 流式转写，HUD 会实时显示正在识别的文本
-- 可选 `AI Rewrite`，把口语稿整理成更适合直接发送或交给 AI 执行的文字
+- Codex 转写复用本机登录态，结束录音后直接输入；也可选择 Doubao 流式转写
+- Doubao 模式可选 `AI Rewrite`，把口语稿整理成更适合直接发送或交给 AI 执行的文字
 - 统一走剪贴板 + `Cmd + V` 注入，对非原生编辑器更稳
 - 粘贴前会在 CJK 输入法下临时切到 ASCII，粘贴后恢复输入法和原剪贴板
 - 配置、打包、调试链路都在仓库里，适合继续二开
@@ -34,8 +34,9 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
 - 仅菜单栏运行的 macOS 14+ 应用，带 `Setup`、`Settings` 和底部悬浮 HUD
 - `Option + Space` 全局热键，`Option + Shift + Space` 进入英文翻译；`Option + Esc` 可取消
 - 同一主热键按一次开始录音，再按一次结束
-- Doubao Streaming ASR 主链，支持 `English`、`简体中文`、`繁體中文`、`日本語`、`한국어`
-- `AI Rewrite` 可选开关：
+- Codex 内部听写：复用本机登录态，上传完整录音后返回文字，自动识别语言；直接输入，不额外调用 rewrite
+- Doubao Streaming ASR，支持 `English`、`简体中文`、`繁體中文`、`日本語`、`한국어`
+- Doubao 模式的 `AI Rewrite` 可选开关：
   - 关闭时走 `Literal`，直接使用 ASR 最终文本
   - 打开且 Codex 登录态可用时走 `Writing`，先进行轻量改写再插入
 - 英文翻译：
@@ -43,7 +44,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
   - 没有选中文本时，`Option + Shift + Space` 会先录音，再把语音转写结果翻译成英文
   - 本地 Unix socket bridge 可让 Pi、Claude Code 和 Codex CLI 翻译并替换 TUI draft，不依赖终端 AX 输入框
 - 选词中文翻译：选中文字后按 `Option + Control + Space`，在独立浮窗阅读中文译文，原文保持不变；支持滚动、展开原文和复制译文
-- HUD 在录音和转写阶段显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
+- Codex 模式录音时显示波形，结束后等待完整转写；Doubao 模式显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
 - 文本注入统一走剪贴板 + 模拟 `Cmd + V`
 - 如果没有可编辑焦点，则不会强行注入，而是把结果保留到剪贴板供手动粘贴
 - 在中文、日文、韩文输入法下粘贴前会临时切到 `ABC/US`，完成后恢复
@@ -76,8 +77,8 @@ NoType 目前处于早期可用阶段：
 ## 系统要求
 
 - macOS 14+
-- 已开通的 Doubao 流式语音识别资源
-- 如果启用 `AI Rewrite` 或英文翻译，需要本机已完成 `codex login`
+- Codex 模式需要有效的本机 `codex login` 登录态；Doubao 模式需要已开通的流式语音识别资源
+- 如果启用 `AI Rewrite` 或翻译，也需要本机已完成 `codex login`
 - 允许应用访问：
   - Microphone
   - Accessibility
@@ -157,13 +158,36 @@ open NoType.xcodeproj
 - `Access Token` 存在 macOS Keychain
 - 其他设置存到本地 `UserDefaults`
 
+## 配置 Codex 语音转写
+
+在 `Settings -> Speech -> Speech Provider` 选择 `Codex` 并保存。首次使用默认 Codex；已有设置继续保留 Doubao，需要手动切换。
+
+- 复用本机 Codex 登录态，不需要 OpenAI API Key，也不需要豆包凭证。
+- `Check Codex Login` 只检查本地登录，不会上传录音；真实转写须使用听写快捷键验证。
+- 录音结束后，将 16 kHz 单声道 PCM 封装为 WAV，发送到 `https://chatgpt.com/backend-api/transcribe`。
+- 返回文本直接插入，不调用 AI Rewrite，不把“换行”等普通词语额外替换为控制命令。
+- 语音翻译仍会在转写后调用英文翻译；选词翻译、网页翻译和 TUI 翻译沿用原流程。
+- 取消会终止上传并丢弃旧结果；完成、失败或取消后清理本次临时录音。
+
+这是内部接口，模型由服务端决定。转写成功不代表自动完成去口头词、消除改口或整理任务列表。2026-09-08 的合成语音实测仍保留口头词和改口，因此保留 Doubao 及其 rewrite 供对比验收。
+
+协议参考：[codex-voice 的 Swift 实现](https://github.com/anthnykr/codex-voice/blob/main/CodexVoice/CodexTranscriptionService.swift)、[codex-stt-bridge 的兼容记录](https://github.com/ai-babai/codex-stt-bridge/blob/main/docs/API-COMPATIBILITY.md)。
+
+`swift test` 默认不调用真实服务。使用非敏感的 16 kHz、单声道、16-bit 小端原始 PCM 文件，可单独验证实际 Swift 转写链路（会上传录音并打印结果）：
+
+```bash
+NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexTranscriptionLiveSmoke
+```
+
+接口实测和本地测试不等同于全局快捷键、麦克风及目标应用粘贴验收；切换到测试版后仍需实际听写确认。
+
 ## 配置 AI Rewrite
 
 在 `Settings -> AI Rewrite` 中可以配置：
 
 - `Enable AI Rewrite`
 
-当前语义：
+以下开关只作用于 Doubao 模式；Codex 模式始终直接输入：
 
 - `AI Rewrite Off`：直接插入 Doubao ASR 的最终结果
 - `AI Rewrite On` 且本机存在 Codex 登录态：先调用 Codex 改写，再插入最终文本
@@ -171,7 +195,7 @@ open NoType.xcodeproj
 
 听写改写最多等待 30 秒收到首段文字；开始输出后，连续 15 秒没有新增文字才判定停滞，总时限为 2 分钟。正常流式输出会延长等待，不再在第 10 秒硬性中断。超时或其他改写失败时，仍使用原始转写结果插入；可随时按 `Option + Esc` 取消。
 
-NoType 只读取本机 Codex access token，不刷新 refresh token；`AI Rewrite` 和英文翻译都会复用这份 Codex 登录态。如果登录态过期，请在终端运行 `codex login status` 或重新 `codex login`。
+NoType 只读取本机 Codex access token，不刷新 refresh token；Codex 语音转写、`AI Rewrite` 和翻译都会复用这份 Codex 登录态。如果登录态过期，请打开 Codex 刷新登录，或重新 `codex login`。
 
 `AI Rewrite` 的目标不是重度润色，而是把口语稿整理成更适合发送和更适合 AI 执行的文本：
 
@@ -183,12 +207,12 @@ NoType 只读取本机 Codex access token，不刷新 refresh token；`AI Rewrit
 ## 使用流程
 
 1. 打开菜单栏应用，完成麦克风和辅助功能授权。
-2. 在 `Settings` 中配置 Doubao 凭证。
-3. 如需 `AI Rewrite`，先在终端完成 `codex login`，再打开 `Enable AI Rewrite`。
-4. 选择识别语言。
+2. 在 `Settings` 中选择 Codex 或 Doubao；Codex 使用本机登录态，Doubao 填写对应凭证。
+3. Doubao 模式如需 `AI Rewrite`，先在终端完成 `codex login`，再打开 `Enable AI Rewrite`。
+4. Codex 自动识别语言，Doubao 可选择识别语言。
 5. 在任意输入框聚焦后，按 `Option + Space` 开始录音。
 6. 再按一次 `Option + Space` 结束录音，或按 `Option + Esc` 取消。
-7. Doubao 返回最终转写后：
+7. Codex 返回最终转写后直接插入；Doubao 返回最终转写后：
    - 若 `AI Rewrite` 关闭，直接进入插入
    - 若 `AI Rewrite` 开启且 Codex 登录态可用，HUD 会先显示 `Rewriting…`，等 Codex 返回后再插入
 8. 如果检测到可编辑焦点，文本会通过剪贴板 + `Cmd + V` 注入当前输入框。

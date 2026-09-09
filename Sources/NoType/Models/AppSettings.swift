@@ -58,7 +58,22 @@ enum HotkeyOption: String, Codable, CaseIterable, Identifiable {
 
 }
 
+enum SpeechProvider: String, Codable, CaseIterable, Identifiable {
+    case codex
+    case doubao
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .codex: "Codex"
+        case .doubao: "Doubao"
+        }
+    }
+}
+
 struct AppSettings: Codable, Equatable {
+    var speechProvider: SpeechProvider
     var appID: String
     var resourceID: String
     var hotkey: HotkeyOption
@@ -79,7 +94,12 @@ struct AppSettings: Codable, Equatable {
         !appID.trimmed.isEmpty && !resourceID.trimmed.isEmpty
     }
 
+    var shouldRewriteDictation: Bool {
+        speechProvider == .doubao && llmRefinementEnabled
+    }
+
     private enum CodingKeys: String, CodingKey {
+        case speechProvider
         case appID
         case resourceID
         case cluster
@@ -95,8 +115,10 @@ struct AppSettings: Codable, Equatable {
         hotkey: HotkeyOption,
         language: DictationLanguage,
         llmRefinementEnabled: Bool,
-        agentTUITranslationEnabled: Bool
+        agentTUITranslationEnabled: Bool,
+        speechProvider: SpeechProvider = .codex
     ) {
+        self.speechProvider = speechProvider
         self.appID = appID
         self.resourceID = resourceID
         self.hotkey = hotkey
@@ -107,6 +129,8 @@ struct AppSettings: Codable, Equatable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Existing installations keep their current speech backend until switched explicitly.
+        speechProvider = try container.decodeIfPresent(SpeechProvider.self, forKey: .speechProvider) ?? .doubao
         appID = try container.decodeIfPresent(String.self, forKey: .appID) ?? ""
 
         let decodedResourceID =
@@ -126,6 +150,7 @@ struct AppSettings: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(speechProvider, forKey: .speechProvider)
         try container.encode(appID.trimmed, forKey: .appID)
         try container.encode(resourceID.trimmed, forKey: .resourceID)
         try container.encode(hotkey, forKey: .hotkey)
