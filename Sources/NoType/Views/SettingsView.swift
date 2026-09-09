@@ -62,8 +62,8 @@ struct SettingsView: View {
             }
             Section("对话方式") {
                 Text("说「\(model.settings.neoWakePhrase)」唤醒，连接后 Neo 会回应「我在，请说」。支持连续追问和打断回答。")
-                Text("说「结束对话」、点击悬浮层关闭按钮或按 Option + Esc 结束。静默 45 秒也会自动结束。")
-                Text("对话不会保存为本地聊天记录。当前仅支持语音交流。")
+                Text("说「结束会话」、点击悬浮层关闭按钮或按 Option + Esc 结束。没有执行任务时，静默 45 秒也会自动结束。")
+                Text("复用本机 Codex 的登录、模型和已安装工具，可联网搜索、读取屏幕和操作应用；相关权限沿用 Codex。对话使用临时会话，不保存为本地聊天记录。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

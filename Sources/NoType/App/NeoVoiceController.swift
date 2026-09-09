@@ -4,12 +4,12 @@ import WebKit
 import OSLog
 
 enum NeoVoiceState: Equatable {
-    case off, arming, armed, connecting, listening, speaking, ending
+    case off, arming, armed, connecting, listening, speaking, working, ending
     case unavailable(String), failed(String)
 
     var inConversation: Bool {
         switch self {
-        case .connecting, .listening, .speaking, .ending: true
+        case .connecting, .listening, .speaking, .working, .ending: true
         default: false
         }
     }
@@ -31,6 +31,7 @@ enum NeoVoiceState: Equatable {
         case .connecting: "连接 Neo…"
         case .listening: "Neo 在听"
         case .speaking: "Neo 正在回答"
+        case .working: "Neo 正在处理"
         case .ending: "Neo 正在告别"
         case .unavailable: "语音唤醒暂不可用"
         case .failed: "Neo 连接失败"
@@ -67,6 +68,7 @@ final class NeoVoiceController {
     private var deadline: Task<Void, Never>?
     private var idle: Task<Void, Never>?
     private var lastActivity = ProcessInfo.processInfo.systemUptime
+    private var agentWorking = false
 
     init(
         wake: WakeWordListening = NativeWakeWordService(),
@@ -179,21 +181,26 @@ final class NeoVoiceController {
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .seconds(1)) } catch { return }
                     guard let self, self.generation == id else { return }
-                    if ProcessInfo.processInfo.systemUptime - self.lastActivity >= 45 {
+                    if !self.agentWorking, ProcessInfo.processInfo.systemUptime - self.lastActivity >= 45 {
                         self.endConversation()
                         return
                     }
                 }
             }
         case .level(let value, let speaking):
-            guard state == .listening || state == .speaking || state == .ending else { return }
+            guard state == .listening || state == .speaking || state == .working || state == .ending else { return }
             level = value.isFinite ? min(1, max(0, value)) : 0
             guard state != .ending else { return }
             if value > 0.04 { lastActivity = ProcessInfo.processInfo.systemUptime }
-            let next: NeoVoiceState = speaking ? .speaking : .listening
+            let next: NeoVoiceState = speaking ? .speaking : (agentWorking ? .working : .listening)
             if state != next { state = next }
+        case .working(let working):
+            guard state != .ending else { return }
+            agentWorking = working
+            lastActivity = ProcessInfo.processInfo.systemUptime
+            if state == .listening || state == .working { state = working ? .working : .listening }
         case .endRequested:
-            guard state == .listening || state == .speaking else { return }
+            guard state == .listening || state == .speaking || state == .working else { return }
             idle?.cancel()
             state = .ending
             call.finishAfterReply()
@@ -219,6 +226,7 @@ final class NeoVoiceController {
         idle = nil
         wake.stop()
         call.stop()
+        agentWorking = false
         level = 0
         state = .off
     }

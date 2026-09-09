@@ -28,7 +28,8 @@ func neoEndSessionCommandIsRecognized(_ text: String) {
 
 @MainActor @Test func neoUsesExistingLoginAndRealtimeModelWithoutCreatingHistory() throws {
     let credentials = CodexOAuthCredentials(accessToken: "unit-test-token", chatGPTAccountID: "unit-test-account", expiresAt: Date.distantFuture)
-    let request = try CodexRealtimeService.makeRequest(sdp: "v=0\r\n", credentials: credentials)
+    let request = try CodexRealtimeService.makeRequest(sdp: "v=0\r\n", credentials: credentials, threadID: "ephemeral-test-thread")
+    #expect(request.value(forHTTPHeaderField: "Thread-Id") == "ephemeral-test-thread")
     #expect(request.url?.host == "chatgpt.com")
     #expect(request.url?.path == "/backend-api/wham/realtime/calls")
     #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer unit-test-token")
@@ -329,4 +330,27 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     call.events[0](.failed(NeoVoiceError.connectionLost))
     #expect(neo.state == .listening)
     neo.shutdown()
+}
+
+@MainActor @Test func neoWorkingStateSurvivesSilenceAndCanEndByVoice() async {
+    let call = FakeCall()
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.startConversation()
+    await settle()
+    call.events[0](.ready)
+    call.events[0](.working(true))
+    call.events[0](.level(0, speaking: false))
+    #expect(neo.state == .working)
+    #expect(neo.state.hudVisible)
+    call.events[0](.level(0.5, speaking: true))
+    #expect(neo.state == .speaking)
+    call.events[0](.level(0, speaking: false))
+    #expect(neo.state == .working)
+    call.events[0](.endRequested)
+    call.events[0](.working(false))
+    #expect(neo.state == .ending)
+    #expect(call.finishes == 1)
+    call.events[0](.playbackEnded)
+    #expect(neo.state == .off)
 }

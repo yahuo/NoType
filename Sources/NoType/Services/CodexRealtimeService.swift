@@ -4,6 +4,7 @@ import Foundation
 enum NeoRealtimeEvent {
     case mediaViewReady
     case ready
+    case working(Bool)
     case level(Double, speaking: Bool)
     case endRequested
     case playbackEnded
@@ -28,10 +29,20 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
     private var session: URLSession?
     private var onEvent: ((NeoRealtimeEvent) -> Void)?
     private var generation = UUID()
+    private let agent: NeoAgentSession
+    private var mediaReady = false
+    private var agentReady = false
+    private var finishing = false
+    private var replyTask: Task<Void, Never>?
+
+    init(agent: NeoAgentSession = CodexAgentService()) {
+        self.agent = agent
+        super.init()
+    }
 
     var mediaView: WKWebView? { webView }
 
-    static func makeRequest(sdp: String, credentials: CodexOAuthCredentials) throws -> URLRequest {
+    static func makeRequest(sdp: String, credentials: CodexOAuthCredentials, threadID: String) throws -> URLRequest {
         guard !credentials.isExpired else { throw AIRewriteError.codexAuthExpired }
         var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/realtime/calls?intent=quicksilver&architecture=avas")!)
         request.httpMethod = "POST"
@@ -43,13 +54,18 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         request.setValue("Codex Desktop", forHTTPHeaderField: "originator")
         request.setValue("26.901.51231", forHTTPHeaderField: "X-OpenAI-Codex-Client-Version")
         request.setValue("Codex Desktop/26.901.51231 (Mac OS; arm64)", forHTTPHeaderField: "User-Agent")
-        // This is a transport correlation ID; no Codex task is created.
-        request.setValue(UUID().uuidString, forHTTPHeaderField: "Thread-Id")
+        request.setValue(threadID, forHTTPHeaderField: "Thread-Id")
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "sdp": sdp,
             "session": [
                 "model": "gpt-live-1-codex",
-                "instructions": "你是 Neo，一个简洁自然的中文语音助手。直接与用户连续对话，用户插话时听从新的要求。你只能聊天，没有访问屏幕、文件、应用或执行任务的能力，不要假装已经执行操作，也不要请求调用工具。用户说结束对话时简短告别。",
+                "instructions": """
+                You are Neo, a concise Chinese voice assistant connected to a capable Codex backend.
+                Immediately delegate every task, action, current-information question, web search, screen reading, or app-control request to the backend. Only answer directly for simple conversation.
+                You cannot see the screen or execute actions yourself. After delegating, you may briefly acknowledge the request, then wait silently for the backend result. Never guess screen content, numbers, search results, or whether an action succeeded. A progress update such as 'I will check' is not a result.
+                Backend messages are marked [BACKEND] and may contain [COMMENTARY] progress or [FINAL] results. Report only facts actually returned by the backend, in concise Chinese. Do not add unsupported details or read out these internal tags.
+                Immediately delegate user corrections and new instructions to steer ongoing work. When the user says 结束会话 or 结束对话, say a short Chinese goodbye directly without delegation.
+                """,
                 "audio": ["output": ["voice": "juniper"]],
                 "delegation": ["type": "client"],
             ],
@@ -86,18 +102,48 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         let offer = try await web.callAsyncJavaScript("return await neo.offer();", arguments: [:], in: nil, contentWorld: .page)
         try checkActive(id)
         guard let sdp = offer as? String, sdp.hasPrefix("v=0") else { throw NeoVoiceError.invalidResponse }
+        let threadID = try await agent.start { [weak self] event in
+            guard let self, self.generation == id else { return }
+            switch event {
+            case .ready:
+                self.agentReady = true
+                self.emitReadyIfConnected()
+            case .working(let working):
+                if self.finishing { if working { self.agent.interrupt() } }
+                else {
+                    if working {
+                        self.replyTask?.cancel()
+                        self.webView?.evaluateJavaScript("neo.blockReply();", completionHandler: nil)
+                    }
+                    self.onEvent?(.working(working))
+                }
+            case .reply(let text):
+                self.speakReply(text, id: id)
+            case .failed(let error): self.onEvent?(.failed(error))
+            }
+        }
+        try checkActive(id)
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForResource = 20
         config.httpShouldSetCookies = false
         let session = URLSession(configuration: config, delegate: RealtimeRedirectDelegate(), delegateQueue: nil)
         self.session = session
-        let (data, response) = try await session.data(for: Self.makeRequest(sdp: sdp, credentials: credentials))
+        let (data, response) = try await session.data(for: Self.makeRequest(sdp: sdp, credentials: credentials, threadID: threadID))
         try checkActive(id)
         guard let response = response as? HTTPURLResponse else { throw NeoVoiceError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else { throw NeoVoiceError.connectionFailed(response.statusCode) }
         guard let answer = String(data: data, encoding: .utf8), answer.hasPrefix("v=0") else { throw NeoVoiceError.invalidResponse }
+        guard let location = response.value(forHTTPHeaderField: "Location"),
+              let callID = URL(string: location)?.lastPathComponent,
+              callID.range(of: #"^rtc_[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { throw NeoVoiceError.invalidResponse }
         _ = try await web.callAsyncJavaScript("await neo.answer(sdp);", arguments: ["sdp": answer], in: nil, contentWorld: .page)
         try checkActive(id)
+        try await agent.attach(callID: callID)
+        try checkActive(id)
+    }
+
+    private func emitReadyIfConnected() {
+        if mediaReady && agentReady && !finishing { onEvent?(.ready) }
     }
 
     private func checkActive(_ id: UUID) throws {
@@ -105,7 +151,29 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         guard generation == id else { throw CancellationError() }
     }
 
+    private func speakReply(_ text: String, id: UUID) {
+        guard !finishing, let web = webView else { return }
+        replyTask?.cancel()
+        replyTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try self.checkActive(id)
+                guard !self.finishing else { return }
+                // Drain any speculative speech while muted, then explicitly speak the actual result.
+                let ready = try await web.callAsyncJavaScript("return await neo.prepareReply();", arguments: [:], in: nil, contentWorld: .page)
+                try self.checkActive(id)
+                guard !self.finishing, ready as? Bool == true else { return }
+                try await self.agent.speak(text)
+            } catch {
+                if self.generation == id, !Task.isCancelled, !self.finishing { self.onEvent?(.failed(error)) }
+            }
+        }
+    }
+
     func finishAfterReply() {
+        finishing = true
+        replyTask?.cancel()
+        agent.interrupt()
         guard let web = webView else { return }
         web.evaluateJavaScript("neo.finishAfterReply();") { [weak self, weak web] _, error in
             guard let self, let web, self.webView === web, error != nil else { return }
@@ -124,6 +192,12 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
     func stop() {
         generation = UUID()
         onEvent = nil
+        mediaReady = false
+        agentReady = false
+        finishing = false
+        replyTask?.cancel()
+        replyTask = nil
+        agent.stop()
         loaded?.resume(throwing: CancellationError())
         loaded = nil
         session?.invalidateAndCancel()
@@ -164,7 +238,9 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         guard message.webView === webView, message.frameInfo.isMainFrame,
               let body = message.body as? [String: Any], let kind = body["type"] as? String else { return }
         switch kind {
-        case "ready": onEvent?(.ready)
+        case "ready":
+            mediaReady = true
+            emitReadyIfConnected()
         case "level": onEvent?(.level(body["level"] as? Double ?? 0, speaking: body["speaking"] as? Bool ?? false))
         case "userTurn":
             if let text = body["text"] as? String, Self.isEndCommand(text) { onEvent?(.endRequested) }
@@ -191,8 +267,35 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         dc.send(JSON.stringify({type: 'session.context.append', channel: 'speakable',
           content: [{type: 'input_text', text: '我在，请说。'}]}));
       }
+      let blocked = false, blockedAt = -Infinity, pendingReply;
+      function blockReply() {
+        if (closed || ending) return;
+        pendingReply?.resolve(false); pendingReply = null;
+        if (!blocked) blockedAt = performance.now();
+        blocked = true;
+        if (remote) remote.muted = true;
+      }
+      function prepareReply() {
+        if (closed || ending) return Promise.resolve(false);
+        pendingReply?.resolve(false);
+        return new Promise((resolve, reject) => { pendingReply = {resolve, reject, startedAt: performance.now()}; });
+      }
+      function checkReplyReady(now) {
+        if (!pendingReply) return;
+        const speechDone = lastOutputAt < blockedAt || assistantTurn?.at >= blockedAt;
+        if (speechDone && now - lastOutputAt >= 800) {
+          blocked = false;
+          if (remote) remote.muted = false;
+          pendingReply.resolve(true); pendingReply = null;
+        } else if (now - pendingReply.startedAt >= 10000) {
+          pendingReply.reject(new Error('reply playback stalled')); pendingReply = null;
+        }
+      }
       function finishAfterReply() {
         if (closed || ending) return;
+        pendingReply?.resolve(false); pendingReply = null;
+        blocked = false;
+        if (remote) remote.muted = false;
         ending = {startedAt: performance.now(), userTurn, completed: false};
       }
       function checkPlaybackEnd(now, output) {
@@ -230,7 +333,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
           if (closed) return;
           const stream = event.streams[0] || new MediaStream([event.track]);
           outputMeter = meter(stream);
-          remote = new Audio(); remote.srcObject = stream; remote.autoplay = true;
+          remote = new Audio(); remote.srcObject = stream; remote.autoplay = true; remote.muted = blocked;
           try { await remote.play(); } catch { fail(); }
         };
         dc = pc.createDataChannel('oai-events');
@@ -240,6 +343,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
           if (closed) return;
           let value; try { value = JSON.parse(event.data); } catch { return; }
           if (value.type === 'error') fail();
+          if (value.type === 'delegation.created') blockReply();
           if (value.type === 'turn.done') {
             const turn = {end: value.turn?.end_ms, at: performance.now()};
             if (value.turn?.role === 'assistant') assistantTurn = turn;
@@ -248,15 +352,14 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
               post('userTurn', {text: value.turn.transcript || ''});
             }
           }
-          if (value.type === 'delegation.created' && value.item?.id) {
-            dc.send(JSON.stringify({type: 'delegation.context.append', delegation_item_id: value.item.id,
-              content: [{type: 'input_text', text: '当前客户端只有语音聊天能力，无法执行任务或访问外部信息。请直接向用户说明。'}]}));
-          }
+          // Codex's sideband handles delegation and returns actual tool results to this call.
         };
         timer = setInterval(() => {
           const input = level(inputMeter), output = level(outputMeter);
-          post('level', {level: Math.min(1, Math.max(input, output) * 4), speaking: output > 0.015});
           checkPlaybackEnd(performance.now(), output);
+          checkReplyReady(performance.now());
+          const audible = blocked ? 0 : output;
+          post('level', {level: Math.min(1, Math.max(input, audible) * 4), speaking: audible > 0.015});
         }, 100);
         await pc.setLocalDescription(await pc.createOffer());
         if (pc.iceGatheringState !== 'complete') await new Promise(resolve => {
@@ -269,12 +372,13 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
       async function answer(sdp) { if (!closed) await pc.setRemoteDescription({type: 'answer', sdp}); }
       function stop() {
         closed = true; clearInterval(timer);
+        pendingReply?.resolve(false); pendingReply = null;
         mic?.getTracks().forEach(t => t.stop());
         if (remote) { remote.pause(); remote.srcObject = null; }
         dc?.close(); pc?.close(); context?.close();
         inputMeter = outputMeter = mic = remote = null;
       }
-      return {offer, answer, greet, finishAfterReply, stop};
+      return {offer, answer, greet, blockReply, prepareReply, finishAfterReply, stop};
     })();
     </script>
     """#
