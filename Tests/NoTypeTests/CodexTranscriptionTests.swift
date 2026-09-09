@@ -3,6 +3,30 @@ import Testing
 @testable import NoType
 
 @Test
+func codexTranscriptionDiagnosticsKeepOnlySafeResponseMetadata() throws {
+    let response = try #require(HTTPURLResponse(
+        url: URL(string: "https://chatgpt.com/backend-api/transcribe")!,
+        statusCode: 403, httpVersion: "HTTP/2", headerFields: [
+            "Content-Type": "text/html; charset=utf-8",
+            "X-Request-Id": "req-123",
+            "CF-Ray": "123abc-SJC",
+            "CF-Mitigated": "challenge",
+            "Set-Cookie": "secret-cookie",
+            "Authorization": "secret-token"
+        ]
+    ))
+    let summary = CodexTranscriptionDiagnostics.responseSummary(response, byteCount: 66021)
+    #expect(summary.contains("status=403"))
+    #expect(summary.contains("format=html"))
+    #expect(summary.contains("request_id=req-123"))
+    #expect(summary.contains("challenge=true"))
+    #expect(!summary.contains("secret"))
+    #expect(CodexTranscriptionDiagnostics.safeIdentifier("id\ninjected=true") == "invalid")
+    #expect(CodexTranscriptionDiagnostics.safeIdentifier(String(repeating: "x", count: 200)) == "invalid")
+    #expect(CodexTranscriptionError.requestFailed(403).errorDescription?.contains("账号无法") == false)
+}
+
+@Test
 func codexDictationSkipsRewriteAndPreservesTheDoubaoPreference() throws {
     var settings = AppSettings.defaults
     #expect(settings.speechProvider == .codex)
