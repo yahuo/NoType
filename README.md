@@ -166,6 +166,7 @@ open NoType.xcodeproj
 - `Check Codex Login` 只检查本地登录，不会上传录音；真实转写须使用听写快捷键验证。
 - 录音开始即连接 `wss://chatgpt.com/backend-api/dictation/stream`，按顺序发送 16 kHz 单声道 PCM，显示实时文本。
 - 流式连接失败、队列溢出、音频长度不符、最终文本不完整或结束后 8 秒未完成时，使用完整录音回退到 `https://chatgpt.com/backend-api/transcribe`，无需重新说一遍。
+- 完整录音优先使用系统编码器压缩为 FLAC，保持原始采样数据不变；编码失败或文件未变小时使用 WAV。流式发送仍使用 PCM，只有回退上传时才压缩。
 - 返回文本直接插入，不调用 AI Rewrite，不把“换行”等普通词语额外替换为控制命令。
 - 语音翻译仍会在转写后调用英文翻译；选词翻译、网页翻译和 TUI 翻译沿用原流程。
 - 取消会终止上传并丢弃旧结果；完成、失败或取消后清理本次临时录音。
@@ -180,6 +181,7 @@ open NoType.xcodeproj
 NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexTranscriptionLiveSmoke
 NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexDictationStreamLiveSmoke
 NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexDictationStreamFallbackLiveSmoke
+NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexTranscriptionCompressionLiveComparison
 ```
 
 接口实测和本地测试不等同于全局快捷键、麦克风及目标应用粘贴验收；切换到测试版后仍需实际听写确认。

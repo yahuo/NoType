@@ -1,6 +1,32 @@
 import Foundation
+import AVFoundation
 import Testing
 @testable import NoType
+
+@Test
+func codexFlacCompressionPreservesEverySampleAndUsesTheRightMultipartType() throws {
+    var pcm = Data()
+    for index in 0..<16000 {
+        var sample = Int16(sin(Double(index) * 0.04) * 12000).littleEndian
+        withUnsafeBytes(of: &sample) { pcm.append(contentsOf: $0) }
+    }
+    let compressed = try CodexTranscriptionService.compressPCM(pcm)
+    #expect(compressed.count < pcm.count)
+    #expect(String(decoding: compressed.prefix(4), as: UTF8.self) == "fLaC")
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent("notype-test-\(UUID()).flac")
+    defer { try? FileManager.default.removeItem(at: url) }
+    try compressed.write(to: url)
+    let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatInt16, interleaved: true)
+    let buffer = try #require(AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(file.length)))
+    try file.read(into: buffer)
+    let bytes = try #require(buffer.audioBufferList.pointee.mBuffers.mData)
+    #expect(Data(bytes: bytes, count: Int(buffer.frameLength) * 2) == pcm)
+    let credentials = CodexOAuthCredentials(accessToken: "test-token", chatGPTAccountID: nil, expiresAt: nil)
+    let request = try CodexTranscriptionService.makeRequest(pcm: pcm, credentials: credentials, compress: true)
+    let body = try #require(request.httpBody)
+    #expect(String(decoding: body.prefix(200), as: UTF8.self).contains("filename=\"dictation.flac\""))
+    #expect(String(decoding: body.prefix(200), as: UTF8.self).contains("Content-Type: audio/flac"))
+}
 
 @Test
 func codexTranscriptionDiagnosticsKeepOnlySafeResponseMetadata() throws {
@@ -204,4 +230,25 @@ func codexTranscriptionLiveSmoke() async throws {
     let text = try await CodexTranscriptionService().transcribe(pcm: pcm)
     #expect(!text.isEmpty)
     print("Codex live transcription (\(Date().timeIntervalSince(started))s): \(text)")
+}
+
+@Test(.enabled(if: ProcessInfo.processInfo.environment["NOTYPE_CODEX_SMOKE_PCM"] != nil))
+func codexTranscriptionCompressionLiveComparison() async throws {
+    let path = try #require(ProcessInfo.processInfo.environment["NOTYPE_CODEX_SMOKE_PCM"])
+    let pcm = try Data(contentsOf: URL(fileURLWithPath: path))
+    let credentials = try CodexTranscriptionService().currentCredentials()
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    // Warm up this same connection, then alternate formats to expose network variation.
+    for (index, compress) in [false, true, false, true, false].enumerated() {
+        let started = ProcessInfo.processInfo.systemUptime
+        let request = try CodexTranscriptionService.makeRequest(pcm: pcm, credentials: credentials, compress: compress)
+        let prepared = ProcessInfo.processInfo.systemUptime
+        let (data, response) = try await session.data(for: request, delegate: CodexTranscriptionTaskDelegate(id: "comparison-\(index)"))
+        #expect((response as? HTTPURLResponse)?.statusCode == 200)
+        let result = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let text = try #require(result["text"] as? String)
+        #expect(!text.isEmpty)
+        print("compression_comparison index=\(index) compressed=\(compress) prepare_ms=\(Int((prepared-started)*1000)) body_bytes=\(request.httpBody?.count ?? 0) total_ms=\(Int((ProcessInfo.processInfo.systemUptime-started)*1000)) characters=\(text.count)")
+    }
 }

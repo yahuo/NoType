@@ -1,5 +1,6 @@
 import Foundation
 import OSLog
+import AVFoundation
 
 enum CodexTranscriptionError: LocalizedError, Equatable {
     case noSpeech
@@ -68,7 +69,10 @@ actor CodexTranscriptionService {
             fields: "pcm_bytes=\(pcm.count) audio_ms=\(pcm.count * 1000 / 32000)")
         do {
             try Task.checkCancellation()
-            let request = try Self.makeRequest(pcm: pcm, credentials: currentCredentials())
+            let request = try Self.makeRequest(pcm: pcm, credentials: currentCredentials(), compress: true)
+            try Task.checkCancellation()
+            CodexTranscriptionDiagnostics.record("audio_prepared", id: id,
+                fields: "body_bytes=\(request.httpBody?.count ?? 0) elapsed_ms=\(CodexTranscriptionDiagnostics.elapsed(since: started))")
             let (data, response) = try await session.data(
                 for: request, delegate: CodexTranscriptionTaskDelegate(id: id)
             )
@@ -99,7 +103,8 @@ actor CodexTranscriptionService {
     static func makeRequest(
         pcm: Data,
         credentials: CodexOAuthCredentials,
-        boundary: String = "----notype-\(UUID().uuidString)"
+        boundary: String = "----notype-\(UUID().uuidString)",
+        compress: Bool = false
     ) throws -> URLRequest {
         guard !pcm.isEmpty else { throw CodexTranscriptionError.noSpeech }
         guard pcm.count.isMultiple(of: 2), pcm.count <= Int(UInt32.max) - 36 else {
@@ -125,10 +130,16 @@ actor CodexTranscriptionService {
         append(UInt32(pcm.count))
         wav.append(pcm)
 
+        var audio = wav
+        var format = "wav"
+        if compress, let flac = try? compressPCM(pcm), flac.count < wav.count {
+            audio = flac
+            format = "flac"
+        }
         var body = Data(("--\(boundary)\r\n"
-            + "Content-Disposition: form-data; name=\"file\"; filename=\"dictation.wav\"\r\n"
-            + "Content-Type: audio/wav\r\n\r\n").utf8)
-        body.append(wav)
+            + "Content-Disposition: form-data; name=\"file\"; filename=\"dictation.\(format)\"\r\n"
+            + "Content-Type: audio/\(format)\r\n\r\n").utf8)
+        body.append(audio)
         body.append(Data("\r\n--\(boundary)--\r\n".utf8))
 
         var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/transcribe")!)
@@ -142,6 +153,31 @@ actor CodexTranscriptionService {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = body
         return request
+    }
+
+    static func compressPCM(_ pcm: Data) throws -> Data {
+        guard !pcm.isEmpty, pcm.count.isMultiple(of: 2), pcm.count <= Int(UInt32.max) - 36 else {
+            throw CodexTranscriptionError.invalidAudio
+        }
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("notype-\(UUID()).flac")
+        defer { try? FileManager.default.removeItem(at: url) }
+        func writeFile() throws {
+            let file = try AVAudioFile(forWriting: url, settings: [
+                AVFormatIDKey: kAudioFormatFLAC,
+                AVSampleRateKey: PCMUtilities.sampleRate,
+                AVNumberOfChannelsKey: PCMUtilities.channelCount,
+                AVEncoderBitDepthHintKey: PCMUtilities.bitsPerSample
+            ], commonFormat: .pcmFormatInt16, interleaved: true)
+            guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: AVAudioFrameCount(pcm.count / 2)),
+                  let destination = buffer.mutableAudioBufferList.pointee.mBuffers.mData else {
+                throw CodexTranscriptionError.invalidAudio
+            }
+            buffer.frameLength = buffer.frameCapacity
+            pcm.withUnsafeBytes { destination.copyMemory(from: $0.baseAddress!, byteCount: pcm.count) }
+            try file.write(from: buffer)
+        }
+        try writeFile() // Closing the writer finalizes the FLAC header before reading it.
+        return try Data(contentsOf: url)
     }
 }
 
