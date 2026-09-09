@@ -1,7 +1,76 @@
 import Foundation
 import AVFoundation
+import AppKit
+import Network
 import Testing
 @testable import NoType
+
+@Test @MainActor
+func changingSpeechProviderRequiresSaveAndDoesNotLeakThroughOtherSettings() throws {
+    _ = NSApplication.shared
+    let suite = "notype-provider-draft-\(UUID())"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = SettingsStore(userDefaults: defaults)
+    var settings = AppSettings.defaults
+    settings.speechProvider = .doubao
+    try store.save(settings)
+    let model = NoTypeAppModel(settingsStore: store, keychainClient: KeychainClient(service: suite))
+    // Keep this fixture entirely in memory; no real Keychain reads or writes.
+    model.accessToken = "test-only-token"
+    model.prepareSettings()
+    model.selectSpeechProviderForSettings(.codex)
+    #expect(model.speechProviderDraft == .codex)
+    #expect(model.settings.speechProvider == .doubao)
+    model.selectLanguage(.enUS)
+    model.setAgentTUITranslationEnabled(!settings.agentTUITranslationEnabled)
+    #expect(store.load().speechProvider == .doubao)
+    #expect(model.settings.speechProvider == .doubao)
+    // The retained settings window is prepared again whenever it is reopened.
+    model.prepareSettings()
+    #expect(model.speechProviderDraft == .doubao)
+}
+
+@Test(.timeLimit(.minutes(1)))
+func codexTranscriptionDelegateRejectsActualHTTPRedirects() async throws {
+    let parameters = NWParameters.tcp
+    parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: .any)
+    let listener = try NWListener(using: parameters)
+    let ready = AsyncThrowingStream<NWEndpoint.Port, Error>.makeStream()
+    listener.stateUpdateHandler = { state in
+        switch state {
+        case .ready:
+            if let port = listener.port { ready.continuation.yield(port) }
+            ready.continuation.finish()
+        case .failed(let error): ready.continuation.finish(throwing: error)
+        default: break
+        }
+    }
+    listener.newConnectionHandler = { connection in
+        connection.start(queue: .global())
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { _, _, _, _ in
+            guard let port = listener.port?.rawValue else { connection.cancel(); return }
+            let response = "HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:\(port)/redirected\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            connection.send(content: Data(response.utf8), completion: .contentProcessed { _ in connection.cancel() })
+        }
+    }
+    listener.start(queue: .global())
+    defer {
+        listener.stateUpdateHandler = nil
+        listener.newConnectionHandler = nil
+        listener.cancel()
+    }
+    var iterator = ready.stream.makeAsyncIterator()
+    let port = try #require(await iterator.next())
+    let session = URLSession(configuration: .ephemeral)
+    defer { session.invalidateAndCancel() }
+    var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port.rawValue)/original")!)
+    request.timeoutInterval = 5
+    request.setValue("Bearer test-only-token", forHTTPHeaderField: "Authorization")
+    let (_, response) = try await session.data(for: request, delegate: CodexTranscriptionTaskDelegate(id: "redirect-test"))
+    #expect((response as? HTTPURLResponse)?.statusCode == 302)
+    #expect(response.url == request.url)
+}
 
 @Test
 func codexFlacCompressionPreservesEverySampleAndUsesTheRightMultipartType() throws {

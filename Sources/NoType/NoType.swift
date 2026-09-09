@@ -57,13 +57,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let model: NoTypeAppModel
     private var window: NSWindow?
     private var previousActivationPolicy: NSApplication.ActivationPolicy?
+    private var needsSettingsPreparation = true
 
     init(model: NoTypeAppModel) {
         self.model = model
     }
 
     func show() {
-        model.prepareSettings()
+        if needsSettingsPreparation {
+            model.prepareSettings()
+            needsSettingsPreparation = false
+        }
         elevateAppForWindowPresentationIfNeeded()
         NSApp.unhide(nil)
         NSApp.activate(ignoringOtherApps: true)
@@ -94,6 +98,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
+        needsSettingsPreparation = true
         sender.orderOut(nil)
         restoreActivationPolicyIfNeeded()
         return false

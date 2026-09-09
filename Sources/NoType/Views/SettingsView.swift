@@ -30,15 +30,9 @@ struct SettingsView: View {
 
             bottomBar
         }
-        .task {
-            model.prepareSettings()
-        }
         .onChange(of: selectedTab) {
             model.llmSettingsStatusMessage = nil
             model.llmSettingsErrorMessage = nil
-        }
-        .onChange(of: model.settings.speechProvider) {
-            model.prepareSettings()
         }
     }
 
@@ -47,14 +41,20 @@ struct SettingsView: View {
     private var speechTab: some View {
         Form {
             Section {
-                Picker("Speech Provider", selection: $model.settings.speechProvider) {
+                Picker("Speech Provider", selection: Binding(
+                    get: { model.speechProviderDraft },
+                    set: { model.selectSpeechProviderForSettings($0) }
+                )) {
                     ForEach(SpeechProvider.allCases) { provider in
                         Text(provider.displayName).tag(provider)
                     }
                 }
+                Text("点击 Save 后切换语音服务。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            if model.settings.speechProvider == .codex {
+            if model.speechProviderDraft == .codex {
                 Section {
                     LabeledContent("Status") {
                         Text(model.hasCodexOAuthCredentials ? "Logged in" : "Run `codex login` first")
@@ -91,7 +91,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Picker(model.settings.speechProvider == .codex ? "Interface Language" : "Language", selection: $model.settings.language) {
+                Picker(model.speechProviderDraft == .codex ? "Interface Language" : "Language", selection: $model.settings.language) {
                     ForEach(DictationLanguage.allCases) { language in
                         Text(language.displayName).tag(language)
                     }
@@ -192,7 +192,7 @@ struct SettingsView: View {
 
     private var testButtonLabel: String {
         switch selectedTab {
-        case .speech: model.settings.speechProvider == .codex ? "Check Codex Login" : "Test Speech"
+        case .speech: model.speechProviderDraft == .codex ? "Check Codex Login" : "Test Speech"
         case .aiRewrite: "Test AI Rewrite"
         }
     }

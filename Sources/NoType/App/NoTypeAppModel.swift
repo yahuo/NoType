@@ -4,6 +4,7 @@ import Foundation
 @MainActor
 final class NoTypeAppModel: ObservableObject {
     @Published var settings: AppSettings
+    @Published private(set) var speechProviderDraft: SpeechProvider
     @Published var accessToken = "" {
         didSet {
             guard !isInternallyUpdatingAccessToken else { return }
@@ -103,6 +104,7 @@ final class NoTypeAppModel: ObservableObject {
 
         let settings = settingsStore.load()
         self.settings = settings
+        speechProviderDraft = settings.speechProvider
         storedAccessTokenPresence = settingsStore.storedAccessTokenPresence()
         permissionSnapshot = PermissionSnapshot(
             microphoneAuthorized: false,
@@ -327,10 +329,20 @@ final class NoTypeAppModel: ObservableObject {
     }
 
     func prepareSettings() {
+        speechProviderDraft = settings.speechProvider
+        prepareSpeechProviderSettings()
+    }
+
+    func selectSpeechProviderForSettings(_ provider: SpeechProvider) {
+        speechProviderDraft = provider
+        prepareSpeechProviderSettings()
+    }
+
+    private func prepareSpeechProviderSettings() {
         llmSettingsStatusMessage = nil
         llmSettingsErrorMessage = nil
 
-        guard settings.speechProvider == .doubao, !hasEditedAccessToken else { return }
+        guard speechProviderDraft == .doubao, !hasEditedAccessToken else { return }
 
         do {
             let doubaoToken = try keychainClient.read(account: doubaoAccessTokenAccount)
@@ -351,6 +363,7 @@ final class NoTypeAppModel: ObservableObject {
         settings.resourceID = settings.resourceID.trimmed
 
         var persistedSettings = settings
+        persistedSettings.speechProvider = speechProviderDraft
         var warnings: [String] = []
 
         do {
@@ -369,13 +382,13 @@ final class NoTypeAppModel: ObservableObject {
         }
 
         do {
-            try settingsStore.save(persistedSettings)
             if hasEditedAccessToken {
                 try keychainClient.save(accessToken, for: doubaoAccessTokenAccount)
                 let hasToken = !accessToken.trimmed.isEmpty
                 settingsStore.setHasStoredAccessToken(hasToken)
                 storedAccessTokenPresence = hasToken
             }
+            try settingsStore.save(persistedSettings)
             hasEditedAccessToken = false
             settings = persistedSettings
 
@@ -413,7 +426,7 @@ final class NoTypeAppModel: ObservableObject {
         defer { isTestingLLMSettings = false }
 
         do {
-            if settings.speechProvider == .codex {
+            if speechProviderDraft == .codex {
                 try codexTranscriptionService.checkCredentials()
                 llmSettingsStatusMessage = localizedText(
                     zh: "Codex 登录有效。请录音验证语音转写。",
