@@ -1,4 +1,8 @@
 import Foundation
+@testable import NoType
+
+// Experimental comparison only. This client is excluded from the application
+// until real speech quality has been compared with whole-recording transcription.
 
 struct CodexStreamTranscript: Sendable {
     struct Event: Decodable, Sendable {

@@ -53,16 +53,7 @@ actor CodexTranscriptionService {
         return credentials
     }
 
-    func transcribe(pcm: Data, stream: CodexDictationStream? = nil, remainder: Data? = nil) async throws -> String {
-        if let stream {
-            do {
-                return try await stream.finish(remainder: remainder, expectedBytes: pcm.count)
-            } catch {
-                try Task.checkCancellation()
-                CodexTranscriptionDiagnostics.record("batch_fallback", id: stream.id,
-                    fields: "reason=\(CodexTranscriptionDiagnostics.failureCategory(error))")
-            }
-        }
+    func transcribe(pcm: Data) async throws -> String {
         let id = UUID().uuidString
         let started = ProcessInfo.processInfo.systemUptime
         CodexTranscriptionDiagnostics.record("request_start", id: id,

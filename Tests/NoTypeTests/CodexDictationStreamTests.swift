@@ -73,23 +73,3 @@ func codexDictationStreamLiveSmoke() async throws {
     #expect(!text.isEmpty)
     print("Codex live stream stop-to-final (\(ProcessInfo.processInfo.systemUptime - stopped)s): \(text)")
 }
-
-@Test(.enabled(if: ProcessInfo.processInfo.environment["NOTYPE_CODEX_SMOKE_PCM"] != nil))
-func codexDictationStreamFallbackLiveSmoke() async throws {
-    let path = try #require(ProcessInfo.processInfo.environment["NOTYPE_CODEX_SMOKE_PCM"])
-    let pcm = try Data(contentsOf: URL(fileURLWithPath: path))
-    let service = CodexTranscriptionService()
-    let stream = CodexDictationStream(credentials: try service.currentCredentials()) { _ in }
-    stream.cancel() // Simulate an unavailable stream; the complete recording must survive.
-    let text = try await service.transcribe(pcm: pcm, stream: stream)
-    #expect(!text.isEmpty)
-    print("Codex cancelled-stream fallback characters=\(text.count)")
-
-    let cancelled = Task { try await service.transcribe(pcm: pcm, stream: stream) }
-    cancelled.cancel()
-    do {
-        _ = try await cancelled.value
-        Issue.record("User cancellation must not upload a fallback")
-    } catch is CancellationError {
-    }
-}
