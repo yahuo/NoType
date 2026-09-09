@@ -136,7 +136,11 @@ func neoSelectedVoiceIsSentToRealtimeSession(voice: NeoVoice) throws {
 }
 
 @Test func neoExecutionSettingsMigrateAndLimitReasoningToHigh() throws {
-    for json in ["{\"appID\":\"saved\"}", "{\"appID\":\"saved\",\"neoExecutionModel\":\"unknown\",\"neoReasoningEffort\":\"xhigh\"}"] {
+    for json in [
+        "{\"appID\":\"saved\"}",
+        "{\"appID\":\"saved\",\"neoExecutionModel\":\"unknown\",\"neoReasoningEffort\":\"xhigh\"}",
+        "{\"appID\":\"saved\",\"neoExecutionModel\":\"gpt-5.5\"}",
+    ] {
         let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
         #expect(settings.appID == "saved")
         #expect(settings.neoExecutionModel == .luna)

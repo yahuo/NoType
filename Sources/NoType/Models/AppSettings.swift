@@ -98,7 +98,6 @@ enum NeoExecutionModel: String, Codable, CaseIterable, Identifiable {
     case terra = "gpt-5.6-terra"
     case sol = "gpt-5.6-sol"
     case astra = "gpt-6-astra"
-    case gpt55 = "gpt-5.5"
 
     var id: String { rawValue }
 }
