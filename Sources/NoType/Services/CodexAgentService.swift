@@ -56,7 +56,8 @@ final class CodexAgentService: NeoAgentSession {
 
     static let launchArguments = [
         "app-server", "--stdio", "--enable", "realtime_conversation",
-        "-c", "features.hooks=false", "-c", "features.memories=false", "-c", "features.chronicle=false",
+        "-c", "features.hooks=false", "-c", "features.chronicle=false",
+        "-c", "features.memories=true", "-c", "memories.use_memories=true", "-c", "memories.generate_memories=false",
     ]
 
     private static func makeProcess() throws -> Process {
@@ -93,6 +94,7 @@ final class CodexAgentService: NeoAgentSession {
             ]],
             "developerInstructions": """
             你是 NoType Neo 语音助手的 Codex 执行代理。使用现有联网搜索、文件、浏览器、Computer Use 和已安装插件完成用户的语音请求，简短中文回复实际结果。用户提到屏幕或当前应用时先用 Computer Use 读取实际状态；应用控制遵循该工具文档，不猜测屏幕，也不假装操作完成。涉及发送消息、发布、付款或删除等行为，必须有用户针对该行为的明确授权。需要补充信息时提出一个简短问题。本次是临时语音会话，不创建聊天记录或新记忆；只在用户要求生成文件时保存相应产物。结束语音时停止尚未完成的工作。
+            可以读取本机 Codex 已有的长期记忆。涉及用户偏好、项目、以前的讨论或决定时，按记忆指引先检索相关内容，再基于找到的证据讨论；没有记忆就明确说明，不猜测。记忆里的项目状态可能已过时，回答当前状态前应核实。只读取已有记忆，不把本次临时对话写入或更新记忆文件。
             """,
         ]
     }
