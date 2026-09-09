@@ -1,5 +1,6 @@
 import AppKit
 import Foundation
+import OSLog
 
 enum NeoAgentEvent {
     case ready, working(Bool), reply(String), failed(Error)
@@ -29,9 +30,10 @@ enum CodexAgentError: LocalizedError {
 }
 
 /// Owns one in-memory Codex thread and its stdio transport for a single voice call.
-/// Codex loads the user's existing login, model, permissions and installed tools.
+/// Codex loads the user's existing login, permissions and installed tools.
 @MainActor
 final class CodexAgentService: NeoAgentSession {
+    private static let logger = Logger(subsystem: "com.opensource.notype", category: "NeoLatency")
     private let processFactory: () throws -> Process
     private let workspace: URL
     private var process: Process?
@@ -44,7 +46,8 @@ final class CodexAgentService: NeoAgentSession {
     private var deadlines: [Int: Task<Void, Never>] = [:]
     private var threadID: String?
     private var turnID: String?
-    private var finalReply = ""
+    private var turnStartedAt: Double?
+    private var receivedOutput = false
     private var onEvent: ((NeoAgentEvent) -> Void)?
     private var alerts: [(alert: NSAlert, parent: NSWindow)] = []
 
@@ -85,8 +88,9 @@ final class CodexAgentService: NeoAgentSession {
     static func threadParameters(workspace: URL) -> [String: Any] {
         [
             "ephemeral": true, "cwd": workspace.path, "modelProvider": "openai",
+            "model": "gpt-5.6-luna",
             "threadSource": "notype_voice",
-            "config": ["web_search": "live"],
+            "config": ["web_search": "live", "model_reasoning_effort": "medium"],
             "dynamicTools": [[
                 "type": "function", "name": "neo_frontmost_app",
                 "description": "读取此刻真正位于前台的 macOS 应用名称与 bundle ID。用户提到当前屏幕或这个应用时先调用，再使用 cua_repl 的 cua.getApp(bundle ID) 读取窗口或截图；不要凭应用列表顺序猜测。",
@@ -141,6 +145,7 @@ final class CodexAgentService: NeoAgentSession {
             guard thread["ephemeral"] as? Bool == true, thread["path"] == nil || thread["path"] is NSNull else {
                 throw CodexAgentError.persistentThread
             }
+            Self.logger.notice("backend_ready model=\(result["model"] as? String ?? "unknown", privacy: .public) effort=\(result["reasoningEffort"] as? String ?? "unknown", privacy: .public)")
             try Task.checkCancellation()
             guard generation == id else { throw CancellationError() }
             self.threadID = threadID
@@ -156,7 +161,9 @@ final class CodexAgentService: NeoAgentSession {
         _ = try await request("thread/realtime/start", [
             "threadId": threadID, "version": "v3", "outputModality": "audio",
             "includeStartupContext": false, "flushTranscriptTailOnSessionEnd": false,
-            "clientManagedHandoffs": true,
+            // Let Codex stream grounded progress and results directly to the live conversation.
+            "codexResponseHandoffMode": "bemTags",
+            "realtimeStartInstructions": "执行过程中及时提供简短、有依据的进展或阻碍，不必等所有步骤完成才回复。每条进展以 [COMMENTARY] 开头，最终结果、提问或阻碍以 [FINAL] 开头。计划和进展不代表操作成功，结果必须以实际工具返回为依据。",
             "transport": ["type": "existingCall", "callId": callID],
         ])
     }
@@ -220,22 +227,27 @@ final class CodexAgentService: NeoAgentSession {
                     case "thread/realtime/error", "thread/realtime/closed": fail(CodexAgentError.disconnected)
                     case "turn/started":
                         turnID = (params["turn"] as? [String: Any])?["id"] as? String
-                        finalReply = ""
+                        turnStartedAt = ProcessInfo.processInfo.systemUptime
+                        receivedOutput = false
+                        Self.logger.notice("backend_started")
                         onEvent?(.working(true))
-                    case "item/completed":
-                        if let item = params["item"] as? [String: Any], item["type"] as? String == "agentMessage",
-                           item["phase"] as? String == "final_answer", let text = item["text"] as? String {
-                            finalReply += text
+                    case "item/agentMessage/delta":
+                        if !receivedOutput, let startedAt = turnStartedAt {
+                            receivedOutput = true
+                            let elapsed = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+                            Self.logger.notice("backend_output_started elapsed_ms=\(elapsed)")
                         }
                     case "turn/completed":
                         turnID = nil
                         let turn = params["turn"] as? [String: Any]
+                        if let startedAt = turnStartedAt {
+                            let elapsed = Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1000)
+                            Self.logger.notice("backend_completed elapsed_ms=\(elapsed) status=\(turn?["status"] as? String ?? "unknown", privacy: .public)")
+                        }
+                        turnStartedAt = nil
                         if turn?["status"] as? String == "failed" {
                             onEvent?(.reply("这次操作失败了，请重试。"))
-                        } else if turn?["status"] as? String != "interrupted" {
-                            onEvent?(.reply(finalReply.isEmpty ? "这次没有收到可播报的结果，请重试。" : finalReply))
                         }
-                        finalReply = ""
                         onEvent?(.working(false))
                     default: break
                     }
@@ -318,7 +330,8 @@ final class CodexAgentService: NeoAgentSession {
         }
         threadID = nil
         turnID = nil
-        finalReply = ""
+        turnStartedAt = nil
+        receivedOutput = false
         for id in Array(pending.keys) { resolve(id, result: .failure(CancellationError())) }
         for item in alerts { item.parent.endSheet(item.alert.window, returnCode: .cancel) }
         alerts.removeAll()

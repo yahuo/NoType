@@ -57,11 +57,11 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         request.setValue(threadID, forHTTPHeaderField: "Thread-Id")
         var instructions = """
         You are Neo, a concise Chinese voice assistant connected to a capable Codex backend.
-        Immediately delegate every task, action, current-information question, web search, screen reading, or app-control request to the backend. Only answer directly for simple conversation.
+        Immediately delegate every action, current-information question, web search, screen reading, or app-control request to the backend. Answer self-contained conversation, explanations, and simple calculations from confirmed facts directly.
         The backend can access the user's existing local Codex memories. Always delegate questions or discussions about the user's preferences, projects, past conversations, decisions, or remembered context. Never invent personal memories or claim they are unavailable before checking with the backend.
-        You cannot see the screen or execute actions yourself. After delegating, you may briefly acknowledge the request, then wait silently for the backend result. Never guess screen content, numbers, search results, or whether an action succeeded. A progress update such as 'I will check' is not a result.
-        Backend messages are marked [BACKEND] and may contain [COMMENTARY] progress or [FINAL] results. Report only facts actually returned by the backend, in concise Chinese. Do not add unsupported details or read out these internal tags.
-        Immediately delegate user corrections and new instructions to steer ongoing work. When the user says 结束会话 or 结束对话, say a short Chinese goodbye directly without delegation.
+        You cannot see the screen or execute actions yourself. After delegating, you may briefly acknowledge the request, then stay available for conversation while the backend works. When backend progress reports a new checked fact or a blocker, promptly speak one short Chinese sentence about it while work continues; do not wait for the final result. Skip repetitive plans and acknowledgements. Present the final result when it arrives. Never guess screen content, numbers, search results, or whether an action succeeded. A progress update such as 'I will check' is not a result.
+        Backend messages may contain [BACKEND], [COMMENTARY] progress or [FINAL] results. Report only facts actually returned by the backend, in concise Chinese. Do not add unsupported details or read out these internal tags.
+        Immediately delegate user corrections and new instructions that steer ongoing backend work. When the user says 结束会话 or 结束对话, say a short Chinese goodbye directly without delegation.
         """
         if !speechGuidance.trimmed.isEmpty {
             instructions += "\n\nSpeech delivery preferences (pace, pauses, tone; apply to all spoken replies):\n\(speechGuidance.trimmed)"
@@ -118,7 +118,6 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
                 else {
                     if working {
                         self.replyTask?.cancel()
-                        self.webView?.evaluateJavaScript("neo.blockReply();", completionHandler: nil)
                     }
                     self.onEvent?(.working(working))
                 }
@@ -157,17 +156,13 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
     }
 
     private func speakReply(_ text: String, id: UUID) {
-        guard !finishing, let web = webView else { return }
+        guard !finishing else { return }
         replyTask?.cancel()
         replyTask = Task { [weak self] in
             guard let self else { return }
             do {
                 try self.checkActive(id)
                 guard !self.finishing else { return }
-                // Drain any speculative speech while muted, then explicitly speak the actual result.
-                let ready = try await web.callAsyncJavaScript("return await neo.prepareReply();", arguments: [:], in: nil, contentWorld: .page)
-                try self.checkActive(id)
-                guard !self.finishing, ready as? Bool == true else { return }
                 try await self.agent.speak(text)
             } catch {
                 if self.generation == id, !Task.isCancelled, !self.finishing { self.onEvent?(.failed(error)) }
@@ -272,35 +267,8 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         dc.send(JSON.stringify({type: 'session.context.append', channel: 'speakable',
           content: [{type: 'input_text', text: '我在，请说。'}]}));
       }
-      let blocked = false, blockedAt = -Infinity, pendingReply;
-      function blockReply() {
-        if (closed || ending) return;
-        pendingReply?.resolve(false); pendingReply = null;
-        if (!blocked) blockedAt = performance.now();
-        blocked = true;
-        if (remote) remote.muted = true;
-      }
-      function prepareReply() {
-        if (closed || ending) return Promise.resolve(false);
-        pendingReply?.resolve(false);
-        return new Promise((resolve, reject) => { pendingReply = {resolve, reject, startedAt: performance.now()}; });
-      }
-      function checkReplyReady(now) {
-        if (!pendingReply) return;
-        const speechDone = lastOutputAt < blockedAt || assistantTurn?.at >= blockedAt;
-        if (speechDone && now - lastOutputAt >= 800) {
-          blocked = false;
-          if (remote) remote.muted = false;
-          pendingReply.resolve(true); pendingReply = null;
-        } else if (now - pendingReply.startedAt >= 10000) {
-          pendingReply.reject(new Error('reply playback stalled')); pendingReply = null;
-        }
-      }
       function finishAfterReply() {
         if (closed || ending) return;
-        pendingReply?.resolve(false); pendingReply = null;
-        blocked = false;
-        if (remote) remote.muted = false;
         ending = {startedAt: performance.now(), userTurn, completed: false};
       }
       function checkPlaybackEnd(now, output) {
@@ -338,7 +306,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
           if (closed) return;
           const stream = event.streams[0] || new MediaStream([event.track]);
           outputMeter = meter(stream);
-          remote = new Audio(); remote.srcObject = stream; remote.autoplay = true; remote.muted = blocked;
+          remote = new Audio(); remote.srcObject = stream; remote.autoplay = true;
           try { await remote.play(); } catch { fail(); }
         };
         dc = pc.createDataChannel('oai-events');
@@ -348,7 +316,6 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
           if (closed) return;
           let value; try { value = JSON.parse(event.data); } catch { return; }
           if (value.type === 'error') fail();
-          if (value.type === 'delegation.created') blockReply();
           if (value.type === 'turn.done') {
             const turn = {end: value.turn?.end_ms, at: performance.now()};
             if (value.turn?.role === 'assistant') assistantTurn = turn;
@@ -362,9 +329,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         timer = setInterval(() => {
           const input = level(inputMeter), output = level(outputMeter);
           checkPlaybackEnd(performance.now(), output);
-          checkReplyReady(performance.now());
-          const audible = blocked ? 0 : output;
-          post('level', {level: Math.min(1, Math.max(input, audible) * 4), speaking: audible > 0.015});
+          post('level', {level: Math.min(1, Math.max(input, output) * 4), speaking: output > 0.015});
         }, 100);
         await pc.setLocalDescription(await pc.createOffer());
         if (pc.iceGatheringState !== 'complete') await new Promise(resolve => {
@@ -377,13 +342,12 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
       async function answer(sdp) { if (!closed) await pc.setRemoteDescription({type: 'answer', sdp}); }
       function stop() {
         closed = true; clearInterval(timer);
-        pendingReply?.resolve(false); pendingReply = null;
         mic?.getTracks().forEach(t => t.stop());
         if (remote) { remote.pause(); remote.srcObject = null; }
         dc?.close(); pc?.close(); context?.close();
         inputMeter = outputMeter = mic = remote = null;
       }
-      return {offer, answer, greet, blockReply, prepareReply, finishAfterReply, stop};
+      return {offer, answer, greet, finishAfterReply, stop};
     })();
     </script>
     """#

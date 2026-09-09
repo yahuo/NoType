@@ -9,6 +9,7 @@ private final class AgentFixture {
     var persistent = false
     var holdInitialize = false
     var finishTurn = false
+    var turnStatus = "completed"
 
     func makeProcess() throws -> Process {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -29,7 +30,7 @@ private final class AgentFixture {
                 if value.get('id')=='frontmost' and sys.argv[3]=='finish':
                     for phase,text in [('commentary','我来看看'),('final_answer','结果是35')]:
                         send({'method':'item/completed','params':{'threadId':'neo-test-thread','item':{'type':'agentMessage','phase':phase,'text':text}}})
-                    send({'method':'turn/completed','params':{'threadId':'neo-test-thread','turn':{'id':'turn-1','status':'completed'}}})
+                    send({'method':'turn/completed','params':{'threadId':'neo-test-thread','turn':{'id':'turn-1','status':sys.argv[4]}}})
                 continue
             if 'id' not in value:continue
             if method=='initialize' and sys.argv[2]=='hold':continue
@@ -44,7 +45,7 @@ private final class AgentFixture {
                 send({'id':'frontmost','method':'item/tool/call','params':{'threadId':'neo-test-thread','tool':'neo_frontmost_app','arguments':{},'turnId':'turn-1','callId':'call-1'}})
             if method=='thread/realtime/stop':
                 send({'method':'turn/completed','params':{'threadId':'neo-test-thread'}})
-        """#, persistent ? "persistent" : "temporary", holdInitialize ? "hold" : "reply", finishTurn ? "finish" : "hold"]
+        """#, persistent ? "persistent" : "temporary", holdInitialize ? "hold" : "reply", finishTurn ? "finish" : "hold", turnStatus]
         self.process = process
         return process
     }
@@ -88,8 +89,14 @@ private final class AgentFixture {
     #expect(parameters["selectedCapabilityRoots"] == nil)
     #expect(parameters["environments"] == nil)
     #expect(parameters["sandbox"] == nil) // Keep the user's Codex permission policy.
+    #expect(parameters["model"] as? String == "gpt-5.6-luna")
+    let config = try #require(parameters["config"] as? [String: String])
+    #expect(config["model_reasoning_effort"] == "medium")
+    #expect(config["web_search"] == "live")
     let attach = try #require(fixture.requests().first { $0["method"] as? String == "thread/realtime/start" })
-    #expect((attach["params"] as? [String: Any])?["clientManagedHandoffs"] as? Bool == true)
+    let realtime = try #require(attach["params"] as? [String: Any])
+    #expect(realtime["clientManagedHandoffs"] as? Bool != true)
+    #expect(realtime["codexResponseHandoffMode"] as? String == "bemTags")
     try await fixture.waitUntil { fixture.requests().contains { $0["id"] as? String == "frontmost" } }
     let frontmostReply = try #require(fixture.requests().first { $0["id"] as? String == "frontmost" })
     let result = try #require(frontmostReply["result"] as? [String: Any])
@@ -107,20 +114,46 @@ private final class AgentFixture {
     #expect(events == ["ready", "working=true"], "A stopped process must not deliver late callbacks")
 }
 
-@MainActor @Test func neoAgentSpeaksOnlyCompletedResults() async throws {
+@MainActor @Test func neoAgentLeavesProgressAndResultsToAutomaticHandoffs() async throws {
     let fixture = AgentFixture()
     fixture.finishTurn = true
     let agent = CodexAgentService(workspace: fixture.directory, processFactory: fixture.makeProcess)
     defer { agent.stop(); fixture.clean() }
     var replies: [String] = []
-    _ = try await agent.start { if case .reply(let text) = $0 { replies.append(text) } }
+    var completed = false
+    _ = try await agent.start {
+        if case .reply(let text) = $0 { replies.append(text) }
+        if case .working(false) = $0 { completed = true }
+    }
     try await agent.attach(callID: "rtc_test")
-    try await fixture.waitUntil { !replies.isEmpty }
-    #expect(replies == ["结果是35"])
+    try await fixture.waitUntil { completed }
+    #expect(replies.isEmpty, "Automatic handoffs must not replay the final answer a second time")
     #expect(!fixture.requests().contains { $0["method"] as? String == "thread/realtime/appendSpeech" })
-    try await agent.speak(replies[0])
-    let speech = try #require(fixture.requests().first { $0["method"] as? String == "thread/realtime/appendSpeech" })
-    #expect((speech["params"] as? [String: Any])?["text"] as? String == "结果是35")
+    agent.stop()
+    try await fixture.waitUntil { fixture.process?.isRunning == false }
+}
+
+@MainActor @Test(arguments: ["failed", "interrupted"])
+func neoAgentReportsFailureWithoutReplayingAnInterruptedResult(status: String) async throws {
+    let fixture = AgentFixture()
+    fixture.finishTurn = true
+    fixture.turnStatus = status
+    let agent = CodexAgentService(workspace: fixture.directory, processFactory: fixture.makeProcess)
+    defer { agent.stop(); fixture.clean() }
+    var replies: [String] = []
+    var completed = false
+    _ = try await agent.start {
+        if case .reply(let text) = $0 { replies.append(text) }
+        if case .working(false) = $0 { completed = true }
+    }
+    try await agent.attach(callID: "rtc_test")
+    try await fixture.waitUntil { completed }
+    #expect(replies == (status == "failed" ? ["这次操作失败了，请重试。"] : []))
+    if let reply = replies.first {
+        try await agent.speak(reply)
+        let speech = try #require(fixture.requests().first { $0["method"] as? String == "thread/realtime/appendSpeech" })
+        #expect((speech["params"] as? [String: Any])?["text"] as? String == reply)
+    }
     agent.stop()
     try await fixture.waitUntil { fixture.process?.isRunning == false }
 }

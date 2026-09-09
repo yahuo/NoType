@@ -120,7 +120,7 @@ func neoSpeechGuidanceExtendsExistingSessionInstructions(guidance: String) throw
         return try #require(session["instructions"] as? String)
     }
     let baseline = try instructions("")
-    #expect(baseline.contains("Immediately delegate every task"))
+    #expect(baseline.contains("Immediately delegate every action"))
     #expect(baseline.contains("existing local Codex memories"))
     #expect(baseline.contains("结束会话"))
     let configured = try instructions(guidance)

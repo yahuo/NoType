@@ -33,7 +33,7 @@ function harness(pendingPermission = false) {
     createMediaStreamSource() { return {connect() {}}; }
     close() { state.audioCloses++; }
   }
-  class Audio { constructor() { state.audio = this; } async play() {} pause() {} }
+  class Audio { muted = false; constructor() { state.audio = this; } async play() {} pause() {} }
   const context = vm.createContext({
     window: {webkit: {messageHandlers: {neo: {postMessage: message => state.messages.push(message)}}}},
     navigator: {mediaDevices: {getUserMedia: () => permission}},
@@ -49,8 +49,6 @@ function harness(pendingPermission = false) {
     stop: () => vm.runInContext(shutdown, context),
     finish: () => vm.runInContext('neo.finishAfterReply()', context),
     greet: () => vm.runInContext('neo.greet()', context),
-    block: () => vm.runInContext('neo.blockReply()', context),
-    reply: () => vm.runInContext('neo.prepareReply()', context),
     receive(role, end_ms) { state.channel.onmessage({data: JSON.stringify({type: 'turn.done', turn: {role, end_ms}})}); },
     advance(ms, output = 0) { state.now += ms; state.output = output; state.tick?.(); },
     ended: () => state.messages.filter(message => message.type === 'playbackEnded').length,
@@ -183,45 +181,27 @@ function harness(pendingPermission = false) {
   await test.offer();
   test.state.channel.onmessage({data: JSON.stringify({type: 'delegation.created'})});
   await test.state.peer.ontrack({streams: [{}]});
-  assert.equal(test.state.audio.muted, true, 'Delegation must silence speculative speech even when the audio track arrives later');
+  assert.equal(test.state.audio.muted, false, 'A late audio track must still play grounded progress during delegation');
   test.advance(100, 0.1);
-  assert.equal(test.state.messages.at(-1).speaking, false, 'Muted speculation must not be shown as an audible answer');
-  const reply = test.reply();
-  let ready = false; reply.then(value => { ready = value; });
-  test.advance(900);
-  await Promise.resolve();
-  assert.equal(ready, false, 'An unfinished speculative turn must not overlap the actual result');
-  test.receive('assistant', 4000);
-  test.advance(100, 0.1);
-  test.advance(799);
-  assert.equal(test.state.audio.muted, true, 'Buffered speculation must drain before speaking the actual result');
-  test.advance(1);
-  assert.equal(await reply, true);
-  assert.equal(test.state.audio.muted, false);
-  assert.equal(test.track.enabled, true, 'The user must still be able to interrupt while work is pending');
+  assert.equal(test.state.messages.at(-1).speaking, true, 'Progress audio must remain audible and visible while the backend is working');
+  assert.equal(test.track.enabled, true, 'The user must be able to keep talking and interrupt during delegation');
   test.stop();
 }
 {
   const test = harness();
   await test.offer();
   await test.state.peer.ontrack({streams: [{}]});
-  test.block();
-  const stale = test.reply();
-  test.block();
-  assert.equal(await stale, false, 'A new task must cancel pending speech from the previous task');
-  const farewell = test.reply();
+  test.state.channel.onmessage({data: JSON.stringify({type: 'delegation.created'})});
+  test.receive('user', 2000);
   test.finish();
-  assert.equal(await farewell, false, 'Ending must cancel the queued tool result');
-  assert.equal(test.state.audio.muted, false, 'Ending must allow the farewell to play');
+  test.state.channel.onmessage({data: JSON.stringify({type: 'delegation.created'})});
+  test.advance(100, 0.1);
+  assert.equal(test.state.audio.muted, false, 'An in-flight delegation must not silence the farewell');
+  assert.equal(test.ended(), 0);
+  test.receive('assistant', 4000);
+  test.advance(800);
+  assert.equal(test.ended(), 1);
   test.stop();
-}
-{
-  const test = harness();
-  await test.offer();
-  test.block();
-  const reply = test.reply();
-  test.stop();
-  assert.equal(await reply, false, 'Closing must release the pending playback callback');
 }
 
 {
@@ -241,4 +221,4 @@ function harness(pendingPermission = false) {
   test.greet();
   assert.equal(test.state.sent.length, 1, 'A closed call must never speak a delayed greeting');
 }
-console.log('Neo media lifecycle: 14 scenarios passed');
+console.log('Neo media lifecycle: 13 scenarios passed');
