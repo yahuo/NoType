@@ -8,7 +8,7 @@ enum NeoAgentEvent {
 
 @MainActor
 protocol NeoAgentSession: AnyObject {
-    func start(onEvent: @escaping (NeoAgentEvent) -> Void) async throws -> String
+    func start(model: NeoExecutionModel, reasoningEffort: NeoReasoningEffort, onEvent: @escaping (NeoAgentEvent) -> Void) async throws -> String
     func attach(callID: String) async throws
     func speak(_ text: String) async throws
     func interrupt()
@@ -85,12 +85,12 @@ final class CodexAgentService: NeoAgentSession {
         return process
     }
 
-    static func threadParameters(workspace: URL) -> [String: Any] {
+    static func threadParameters(workspace: URL, model: NeoExecutionModel, reasoningEffort: NeoReasoningEffort) -> [String: Any] {
         [
             "ephemeral": true, "cwd": workspace.path, "modelProvider": "openai",
-            "model": "gpt-5.6-luna",
+            "model": model.rawValue,
             "threadSource": "notype_voice",
-            "config": ["web_search": "live", "model_reasoning_effort": "medium"],
+            "config": ["web_search": "live", "model_reasoning_effort": reasoningEffort.rawValue],
             "dynamicTools": [[
                 "type": "function", "name": "neo_frontmost_app",
                 "description": "读取此刻真正位于前台的 macOS 应用名称与 bundle ID。用户提到当前屏幕或这个应用时先调用，再使用 cua_repl 的 cua.getApp(bundle ID) 读取窗口或截图；不要凭应用列表顺序猜测。",
@@ -103,7 +103,7 @@ final class CodexAgentService: NeoAgentSession {
         ]
     }
 
-    func start(onEvent: @escaping (NeoAgentEvent) -> Void) async throws -> String {
+    func start(model: NeoExecutionModel = .luna, reasoningEffort: NeoReasoningEffort = .medium, onEvent: @escaping (NeoAgentEvent) -> Void) async throws -> String {
         stop()
         let id = generation
         self.onEvent = onEvent
@@ -138,7 +138,7 @@ final class CodexAgentService: NeoAgentSession {
                 "capabilities": ["experimentalApi": true],
             ])
             try send(["method": "initialized", "params": [:]])
-            let result = try await request("thread/start", Self.threadParameters(workspace: workspace))
+            let result = try await request("thread/start", Self.threadParameters(workspace: workspace, model: model, reasoningEffort: reasoningEffort))
             guard let thread = result["thread"] as? [String: Any], let threadID = thread["id"] as? String else {
                 throw CodexAgentError.invalidResponse
             }

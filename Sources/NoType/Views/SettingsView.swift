@@ -9,7 +9,6 @@ private enum SettingsTab: Hashable {
 struct SettingsView: View {
     @ObservedObject var model: NoTypeAppModel
     @State private var selectedTab: SettingsTab = .speech
-    @State private var wakePhraseDraft = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,36 +44,36 @@ struct SettingsView: View {
     private var neoTab: some View {
         Form {
             Section("语音助手") {
-                Toggle("语音唤醒", isOn: Binding(
-                    get: { model.settings.neoWakeEnabled },
-                    set: { model.setNeoWakeEnabled($0) }
-                ))
-                HStack {
-                    TextField("唤醒词", text: $wakePhraseDraft, prompt: Text("Hey Neo 或 你好小新"))
-                        .onSubmit { model.setNeoWakePhrase(wakePhraseDraft) }
-                    Button("应用") { model.setNeoWakePhrase(wakePhraseDraft) }
-                        .disabled(AppSettings.normalizedNeoWakePhrase(wakePhraseDraft) == nil || AppSettings.normalizedNeoWakePhrase(wakePhraseDraft) == model.settings.neoWakePhrase)
-                }
-                Text("支持中文或英文短语。应用后生效；正在对话时，下次唤醒使用新词。待机音频只在本地检测，不上传、不保存。")
+                Toggle("语音唤醒", isOn: $model.neoWakeEnabledDraft)
+                TextField("唤醒词", text: $model.neoWakePhraseDraft, prompt: Text("Hey Neo 或 你好小新"))
+                Text("支持中文或英文，保存后生效。待机音频仅在本地检测。")
                     .font(.caption).foregroundStyle(.secondary)
                 Text(model.neoVoice.state.message ?? model.neoVoice.statusText)
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("声音") {
-                Picker("音色", selection: Binding(
-                    get: { model.settings.neoVoice },
-                    set: { model.setNeoVoice($0) }
-                )) {
+                Picker("音色", selection: $model.neoVoiceDraft) {
                     ForEach(NeoVoice.allCases) { voice in
                         Text("\(voice.displayName) · \(voice.description)").tag(voice)
                     }
                 }
-                TextField("语音指引", text: Binding(
-                    get: { model.settings.neoSpeechGuidance },
-                    set: { model.setNeoSpeechGuidance($0) }
-                ), prompt: Text("例如：语速慢一些，句间稍作停顿，语气自然。"), axis: .vertical)
+                TextField("语音指引", text: $model.neoSpeechGuidanceDraft, prompt: Text("例如：语速慢一些，句间稍作停顿，语气自然。"), axis: .vertical)
                     .lineLimit(3...5)
-                Text("音色和指引自动保存，下次对话生效。指引可调整语速、停顿和语气；留空使用默认说话方式。")
+                Text("保存后，下次对话生效。指引留空使用默认说话方式。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("执行") {
+                Picker("执行模型", selection: $model.neoExecutionModelDraft) {
+                    ForEach(NeoExecutionModel.allCases) { model in
+                        Text(model.rawValue).tag(model)
+                    }
+                }
+                Picker("思考强度", selection: $model.neoReasoningEffortDraft) {
+                    ForEach(NeoReasoningEffort.allCases) { effort in
+                        Text(effort.rawValue).tag(effort)
+                    }
+                }
+                Text("保存后，下次对话生效。强度越高，通常耗时越长。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("对话方式") {
@@ -87,8 +86,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear { wakePhraseDraft = model.settings.neoWakePhrase }
-        .onChange(of: model.settings.neoWakePhrase) { wakePhraseDraft = model.settings.neoWakePhrase }
     }
 
     // MARK: - Speech Recognition Tab
@@ -294,14 +291,13 @@ struct SettingsView: View {
 
             Spacer()
 
-            if selectedTab != .neo {
-                Button("Save") {
-                    model.saveSettings()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .keyboardShortcut("s", modifiers: .command)
+            Button("Save") {
+                if selectedTab == .neo { model.saveNeoSettings() }
+                else { model.saveSettings() }
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .keyboardShortcut("s", modifiers: .command)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)

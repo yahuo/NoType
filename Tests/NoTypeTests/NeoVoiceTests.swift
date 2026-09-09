@@ -77,24 +77,80 @@ func neoSelectedVoiceIsSentToRealtimeSession(voice: NeoVoice) throws {
     }
 }
 
-@MainActor @Test func neoVoiceSaveDoesNotPersistOtherSettingsDrafts() throws {
-    let suite = "NoTypeTests.neo-voice.\(UUID().uuidString)"
+@MainActor @Test func neoSettingsRequireExplicitSaveAndPreserveOtherDrafts() throws {
+    let suite = "NoTypeTests.neo-save.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = SettingsStore(userDefaults: defaults)
     try store.save(.defaults)
     let model = NoTypeAppModel(settingsStore: store)
-    defer { model.neoVoice.shutdown() }
+    model.neoVoice.shutdown() // No microphone access is needed to verify settings.
     model.settings.appID = "unsaved-draft"
     model.settings.llmRefinementEnabled = true
-    model.setNeoVoice(.cove)
-    #expect(store.load().neoVoice == .cove)
+    model.neoWakeEnabledDraft = true
+    model.neoWakePhraseDraft = "  你好  小新  "
+    model.neoVoiceDraft = .cove
+    model.neoSpeechGuidanceDraft = "语速慢一些。\n "
+    model.neoExecutionModelDraft = .terra
+    model.neoReasoningEffortDraft = .high
+    #expect(store.load() == .defaults)
+    #expect(model.settings.neoVoice == .juniper)
+    #expect(model.neoVoice.voice == .juniper)
+    #expect(model.neoVoice.speechGuidance.isEmpty)
+    #expect(model.neoVoice.wakePhrase == "Hey Neo")
+    #expect(model.neoVoice.executionModel == .luna)
+    #expect(model.neoVoice.reasoningEffort == .medium)
+
+    model.saveNeoSettings()
+    var expected = AppSettings.defaults
+    expected.neoWakeEnabled = true
+    expected.neoWakePhrase = "你好 小新"
+    expected.neoVoice = .cove
+    expected.neoSpeechGuidance = "语速慢一些。\n "
+    expected.neoExecutionModel = .terra
+    expected.neoReasoningEffort = .high
+    #expect(store.load() == expected)
+    #expect(model.settings.neoWakeEnabled)
     #expect(model.settings.neoVoice == .cove)
+    #expect(model.neoWakePhraseDraft == "你好 小新")
     #expect(model.neoVoice.voice == .cove)
-    #expect(store.load().appID.isEmpty)
-    #expect(!store.load().llmRefinementEnabled)
+    #expect(model.neoVoice.speechGuidance == expected.neoSpeechGuidance)
+    #expect(model.neoVoice.wakePhrase == expected.neoWakePhrase)
+    #expect(model.settings.neoExecutionModel == .terra)
+    #expect(model.settings.neoReasoningEffort == .high)
+    #expect(model.neoVoice.executionModel == .terra)
+    #expect(model.neoVoice.reasoningEffort == .high)
     #expect(model.settings.appID == "unsaved-draft")
     #expect(model.settings.llmRefinementEnabled)
+    #expect(model.llmSettingsErrorMessage == nil)
+    #expect(model.llmSettingsStatusMessage != nil)
+
+    let reopened = NoTypeAppModel(settingsStore: store)
+    defer { reopened.neoVoice.shutdown() }
+    #expect(reopened.neoWakeEnabledDraft)
+    #expect(reopened.neoWakePhraseDraft == expected.neoWakePhrase)
+    #expect(reopened.neoVoiceDraft == .cove)
+    #expect(reopened.neoSpeechGuidanceDraft == expected.neoSpeechGuidance)
+    #expect(reopened.neoExecutionModelDraft == .terra)
+    #expect(reopened.neoReasoningEffortDraft == .high)
+}
+
+@Test func neoExecutionSettingsMigrateAndLimitReasoningToHigh() throws {
+    for json in ["{\"appID\":\"saved\"}", "{\"appID\":\"saved\",\"neoExecutionModel\":\"unknown\",\"neoReasoningEffort\":\"xhigh\"}"] {
+        let settings = try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8))
+        #expect(settings.appID == "saved")
+        #expect(settings.neoExecutionModel == .luna)
+        #expect(settings.neoReasoningEffort == .medium)
+    }
+    #expect(NeoReasoningEffort.allCases.map(\.rawValue) == ["low", "medium", "high"])
+    for model in NeoExecutionModel.allCases {
+        for effort in NeoReasoningEffort.allCases {
+            var settings = AppSettings.defaults
+            settings.neoExecutionModel = model
+            settings.neoReasoningEffort = effort
+            #expect(try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings)) == settings)
+        }
+    }
 }
 
 @Test func neoSpeechGuidanceMigratesAndPreservesEditableWhitespace() throws {
@@ -145,7 +201,8 @@ func neoSpeechGuidanceExtendsExistingSessionInstructions(guidance: String) throw
     model.settings.appID = "unsaved-draft"
     model.settings.llmRefinementEnabled = true
     for guidance in ["语速慢一些。\n ", ""] {
-        model.setNeoSpeechGuidance(guidance)
+        model.neoSpeechGuidanceDraft = guidance
+        model.saveNeoSettings()
         #expect(store.load().neoSpeechGuidance == guidance)
         #expect(model.settings.neoSpeechGuidance == guidance)
         #expect(model.neoVoice.speechGuidance == guidance)
@@ -203,23 +260,59 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     #expect(try JSONDecoder().decode(AppSettings.self, from: saved).neoWakePhrase == "你好小新")
 }
 
-@MainActor @Test func neoWakePhraseSaveDoesNotPersistOtherSettingsDrafts() throws {
-    let suite = "NoTypeTests.neo-wake.\(UUID().uuidString)"
+@MainActor @Test func neoInvalidWakePhraseDoesNotPartiallySaveOrApplyDrafts() throws {
+    let suite = "NoTypeTests.neo-invalid-save.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let store = SettingsStore(userDefaults: defaults)
     try store.save(.defaults)
     let model = NoTypeAppModel(settingsStore: store)
-    defer { model.neoVoice.shutdown() }
-    model.settings.llmRefinementEnabled = true
-    model.setNeoWakePhrase("  你好  小新  ")
-    #expect(store.load().neoWakePhrase == "你好 小新")
-    #expect(model.neoVoice.wakePhrase == "你好 小新")
-    #expect(!store.load().llmRefinementEnabled)
-    #expect(model.settings.llmRefinementEnabled)
-    model.setNeoWakePhrase("...")
+    model.neoVoice.shutdown()
+    model.neoWakeEnabledDraft = true
+    model.neoWakePhraseDraft = "..."
+    model.neoVoiceDraft = .cove
+    model.neoSpeechGuidanceDraft = "慢一些"
+    model.neoExecutionModelDraft = .terra
+    model.neoReasoningEffortDraft = .high
+    model.saveNeoSettings()
     #expect(model.llmSettingsErrorMessage != nil)
-    #expect(store.load().neoWakePhrase == "你好 小新")
+    #expect(model.llmSettingsStatusMessage == nil)
+    #expect(store.load() == .defaults)
+    #expect(model.settings == .defaults)
+    #expect(model.neoVoice.voice == .juniper)
+    #expect(model.neoVoice.speechGuidance.isEmpty)
+    #expect(model.neoVoice.executionModel == .luna)
+    #expect(model.neoVoice.reasoningEffort == .medium)
+    #expect(model.neoWakePhraseDraft == "...")
+    #expect(model.neoVoiceDraft == .cove)
+}
+
+@MainActor @Test func neoDraftsAreNotSavedByMenuActions() throws {
+    let suite = "NoTypeTests.neo-draft-isolation.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = SettingsStore(userDefaults: defaults)
+    try store.save(.defaults)
+    let model = NoTypeAppModel(settingsStore: store)
+    model.neoVoice.shutdown()
+    model.neoWakePhraseDraft = "新唤醒词"
+    model.neoVoiceDraft = .cove
+    model.neoSpeechGuidanceDraft = "慢一些"
+    model.neoExecutionModelDraft = .terra
+    model.neoReasoningEffortDraft = .high
+    model.setAgentTUITranslationEnabled(!AppSettings.defaults.agentTUITranslationEnabled)
+    model.setNeoWakeEnabled(true)
+    #expect(store.load().neoWakeEnabled)
+    #expect(model.neoWakeEnabledDraft)
+    #expect(store.load().neoWakePhrase == AppSettings.defaults.neoWakePhrase)
+    #expect(store.load().neoVoice == .juniper)
+    #expect(store.load().neoSpeechGuidance.isEmpty)
+    #expect(store.load().neoExecutionModel == .luna)
+    #expect(store.load().neoReasoningEffort == .medium)
+    #expect(model.neoVoiceDraft == .cove)
+    #expect(model.neoSpeechGuidanceDraft == "慢一些")
+    #expect(model.neoExecutionModelDraft == .terra)
+    #expect(model.neoReasoningEffortDraft == .high)
 }
 
 @MainActor @Test func neoWakePhraseChangeRearmsWithoutInterruptingConversation() async throws {
@@ -259,15 +352,42 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     var greetings = 0
     var voices: [NeoVoice] = []
     var speechGuidances: [String] = []
-    func start(voice: NeoVoice, speechGuidance: String, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
+    var executionModels: [NeoExecutionModel] = []
+    var reasoningEfforts: [NeoReasoningEffort] = []
+    func start(voice: NeoVoice, speechGuidance: String, executionModel: NeoExecutionModel, reasoningEffort: NeoReasoningEffort, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
         starts += 1
         voices.append(voice)
         speechGuidances.append(speechGuidance)
+        executionModels.append(executionModel)
+        reasoningEfforts.append(reasoningEffort)
         events.append(onEvent)
     }
     func stop() { stops += 1 }
     func finishAfterReply() { finishes += 1 }
     func greet() { greetings += 1 }
+}
+
+@MainActor @Test func neoExecutionChangeAppliesToTheNextConversation() async {
+    let call = FakeCall()
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.setExecution(model: .terra, reasoningEffort: .high)
+    neo.startConversation()
+    neo.setExecution(model: .sol, reasoningEffort: .low)
+    await settle()
+    #expect(call.executionModels == [.terra])
+    #expect(call.reasoningEfforts == [.high])
+    call.events[0](.ready)
+    let stops = call.stops
+    neo.setExecution(model: .astra, reasoningEffort: .medium)
+    #expect(neo.state == .listening)
+    #expect(call.stops == stops)
+    #expect(call.starts == 1)
+    neo.endConversation()
+    neo.startConversation()
+    await settle()
+    #expect(call.executionModels == [.terra, .astra])
+    #expect(call.reasoningEfforts == [.high, .medium])
 }
 
 @MainActor @Test func neoVoiceChangeAppliesToTheNextConversation() async throws {

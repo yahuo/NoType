@@ -66,12 +66,17 @@ private final class AgentFixture {
     func clean() { try? FileManager.default.removeItem(at: directory) }
 }
 
-@MainActor @Test func neoAgentUsesTemporaryThreadAndStopsExecutingWork() async throws {
+@MainActor @Test(arguments: [
+    (NeoExecutionModel.luna, NeoReasoningEffort.medium),
+    (.terra, .high),
+    (.sol, .low),
+])
+func neoAgentUsesTemporaryThreadAndStopsExecutingWork(model: NeoExecutionModel, effort: NeoReasoningEffort) async throws {
     let fixture = AgentFixture()
     let agent = CodexAgentService(workspace: fixture.directory, processFactory: fixture.makeProcess)
     defer { agent.stop(); fixture.clean() }
     var events: [String] = []
-    let thread = try await agent.start {
+    let thread = try await agent.start(model: model, reasoningEffort: effort) {
         switch $0 {
         case .ready: events.append("ready")
         case .working(let working): events.append("working=\(working)")
@@ -89,9 +94,9 @@ private final class AgentFixture {
     #expect(parameters["selectedCapabilityRoots"] == nil)
     #expect(parameters["environments"] == nil)
     #expect(parameters["sandbox"] == nil) // Keep the user's Codex permission policy.
-    #expect(parameters["model"] as? String == "gpt-5.6-luna")
+    #expect(parameters["model"] as? String == model.rawValue)
     let config = try #require(parameters["config"] as? [String: String])
-    #expect(config["model_reasoning_effort"] == "medium")
+    #expect(config["model_reasoning_effort"] == effort.rawValue)
     #expect(config["web_search"] == "live")
     let attach = try #require(fixture.requests().first { $0["method"] as? String == "thread/realtime/start" })
     let realtime = try #require(attach["params"] as? [String: Any])

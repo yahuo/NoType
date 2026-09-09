@@ -5,6 +5,12 @@ import Foundation
 final class NoTypeAppModel: ObservableObject {
     @Published var settings: AppSettings
     @Published private(set) var speechProviderDraft: SpeechProvider
+    @Published var neoWakeEnabledDraft: Bool
+    @Published var neoWakePhraseDraft: String
+    @Published var neoVoiceDraft: NeoVoice
+    @Published var neoSpeechGuidanceDraft: String
+    @Published var neoExecutionModelDraft: NeoExecutionModel
+    @Published var neoReasoningEffortDraft: NeoReasoningEffort
     @Published var accessToken = "" {
         didSet {
             guard !isInternallyUpdatingAccessToken else { return }
@@ -107,6 +113,12 @@ final class NoTypeAppModel: ObservableObject {
         let settings = settingsStore.load()
         self.settings = settings
         speechProviderDraft = settings.speechProvider
+        neoWakeEnabledDraft = settings.neoWakeEnabled
+        neoWakePhraseDraft = settings.neoWakePhrase
+        neoVoiceDraft = settings.neoVoice
+        neoSpeechGuidanceDraft = settings.neoSpeechGuidance
+        neoExecutionModelDraft = settings.neoExecutionModel
+        neoReasoningEffortDraft = settings.neoReasoningEffort
         storedAccessTokenPresence = settingsStore.storedAccessTokenPresence()
         permissionSnapshot = PermissionSnapshot(
             microphoneAuthorized: false,
@@ -280,6 +292,7 @@ final class NoTypeAppModel: ObservableObject {
         neoVoice.setWakePhrase(settings.neoWakePhrase)
         neoVoice.setVoice(settings.neoVoice)
         neoVoice.setSpeechGuidance(settings.neoSpeechGuidance)
+        neoVoice.setExecution(model: settings.neoExecutionModel, reasoningEffort: settings.neoReasoningEffort)
         neoVoice.setWakeEnabled(settings.neoWakeEnabled)
 
         scheduleHUDLayoutUpdate(animated: false)
@@ -320,22 +333,8 @@ final class NoTypeAppModel: ObservableObject {
             persisted.neoWakeEnabled = enabled
             try settingsStore.save(persisted)
             settings.neoWakeEnabled = enabled
+            neoWakeEnabledDraft = enabled
             neoVoice.setWakeEnabled(enabled)
-        } catch {
-            llmSettingsErrorMessage = error.localizedDescription
-        }
-    }
-
-    func setNeoVoice(_ voice: NeoVoice) {
-        llmSettingsStatusMessage = nil
-        llmSettingsErrorMessage = nil
-        do {
-            var persisted = settingsStore.load()
-            persisted.neoVoice = voice
-            try settingsStore.save(persisted)
-            settings.neoVoice = voice
-            neoVoice.setVoice(voice)
-            llmSettingsStatusMessage = "音色已更新，下次对话生效"
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }
@@ -346,35 +345,36 @@ final class NoTypeAppModel: ObservableObject {
         neoVoice.startConversation()
     }
 
-    func setNeoSpeechGuidance(_ guidance: String) {
+    func saveNeoSettings() {
         llmSettingsStatusMessage = nil
         llmSettingsErrorMessage = nil
-        do {
-            var persisted = settingsStore.load()
-            persisted.neoSpeechGuidance = guidance
-            try settingsStore.save(persisted)
-            settings.neoSpeechGuidance = guidance
-            neoVoice.setSpeechGuidance(guidance)
-            llmSettingsStatusMessage = "语音指引已保存，下次对话生效"
-        } catch {
-            llmSettingsErrorMessage = error.localizedDescription
-        }
-    }
-
-    func setNeoWakePhrase(_ value: String) {
-        llmSettingsStatusMessage = nil
-        llmSettingsErrorMessage = nil
-        guard let phrase = AppSettings.normalizedNeoWakePhrase(value) else {
+        guard let phrase = AppSettings.normalizedNeoWakePhrase(neoWakePhraseDraft) else {
             llmSettingsErrorMessage = "请输入包含中文或英文字母的唤醒词。"
             return
         }
         do {
             var persisted = settingsStore.load()
+            persisted.neoWakeEnabled = neoWakeEnabledDraft
             persisted.neoWakePhrase = phrase
+            persisted.neoVoice = neoVoiceDraft
+            persisted.neoSpeechGuidance = neoSpeechGuidanceDraft
+            persisted.neoExecutionModel = neoExecutionModelDraft
+            persisted.neoReasoningEffort = neoReasoningEffortDraft
             try settingsStore.save(persisted)
+            // Commit only Neo fields; other tabs may still contain unsaved drafts.
+            settings.neoWakeEnabled = persisted.neoWakeEnabled
             settings.neoWakePhrase = phrase
+            settings.neoVoice = persisted.neoVoice
+            settings.neoSpeechGuidance = persisted.neoSpeechGuidance
+            settings.neoExecutionModel = persisted.neoExecutionModel
+            settings.neoReasoningEffort = persisted.neoReasoningEffort
+            neoWakePhraseDraft = phrase
+            neoVoice.setVoice(settings.neoVoice)
+            neoVoice.setSpeechGuidance(settings.neoSpeechGuidance)
+            neoVoice.setExecution(model: settings.neoExecutionModel, reasoningEffort: settings.neoReasoningEffort)
             neoVoice.setWakePhrase(phrase)
-            llmSettingsStatusMessage = "唤醒词已更新"
+            neoVoice.setWakeEnabled(settings.neoWakeEnabled)
+            llmSettingsStatusMessage = "Neo 设置已保存"
         } catch {
             llmSettingsErrorMessage = error.localizedDescription
         }

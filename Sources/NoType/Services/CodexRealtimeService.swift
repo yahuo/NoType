@@ -14,7 +14,7 @@ enum NeoRealtimeEvent {
 @MainActor
 protocol NeoRealtimeCalling: AnyObject {
     var mediaView: WKWebView? { get }
-    func start(voice: NeoVoice, speechGuidance: String, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws
+    func start(voice: NeoVoice, speechGuidance: String, executionModel: NeoExecutionModel, reasoningEffort: NeoReasoningEffort, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws
     func greet()
     func finishAfterReply()
     func stop()
@@ -83,7 +83,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         return ["结束会话", "结束对话", "结束聊天", "goodbyeneo", "再见neo"].contains(normalized)
     }
 
-    func start(voice: NeoVoice, speechGuidance: String, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
+    func start(voice: NeoVoice, speechGuidance: String, executionModel: NeoExecutionModel, reasoningEffort: NeoReasoningEffort, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
         stop()
         let id = generation
         self.onEvent = onEvent
@@ -107,7 +107,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         let offer = try await web.callAsyncJavaScript("return await neo.offer();", arguments: [:], in: nil, contentWorld: .page)
         try checkActive(id)
         guard let sdp = offer as? String, sdp.hasPrefix("v=0") else { throw NeoVoiceError.invalidResponse }
-        let threadID = try await agent.start { [weak self] event in
+        let threadID = try await agent.start(model: executionModel, reasoningEffort: reasoningEffort) { [weak self] event in
             guard let self, self.generation == id else { return }
             switch event {
             case .ready:

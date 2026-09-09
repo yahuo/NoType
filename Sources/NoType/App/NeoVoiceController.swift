@@ -57,6 +57,8 @@ final class NeoVoiceController {
     private(set) var wakePhrase = AppSettings.defaultNeoWakePhrase
     private(set) var voice: NeoVoice = .juniper
     private(set) var speechGuidance = ""
+    private(set) var executionModel: NeoExecutionModel = .luna
+    private(set) var reasoningEffort: NeoReasoningEffort = .medium
     var statusText: String {
         state == .armed ? "说「\(wakePhrase)」开始对话" : state.label
     }
@@ -105,6 +107,11 @@ final class NeoVoiceController {
         speechGuidance = guidance
     }
 
+    func setExecution(model: NeoExecutionModel, reasoningEffort: NeoReasoningEffort) {
+        executionModel = model
+        self.reasoningEffort = reasoningEffort
+    }
+
     func setSuspended(_ value: Bool) {
         guard suspended != value else { return }
         suspended = value
@@ -118,6 +125,8 @@ final class NeoVoiceController {
         let id = generation
         let selectedVoice = voice
         let selectedSpeechGuidance = speechGuidance
+        let selectedExecutionModel = executionModel
+        let selectedReasoningEffort = reasoningEffort
         state = .connecting
         operation = Task { [weak self] in
             guard let self else { return }
@@ -130,7 +139,10 @@ final class NeoVoiceController {
                     guard let self, self.generation == id, self.state == .connecting else { return }
                     self.fail(NeoVoiceError.timedOut)
                 }
-                try await self.call.start(voice: selectedVoice, speechGuidance: selectedSpeechGuidance) { [weak self] event in
+                try await self.call.start(
+                    voice: selectedVoice, speechGuidance: selectedSpeechGuidance,
+                    executionModel: selectedExecutionModel, reasoningEffort: selectedReasoningEffort
+                ) { [weak self] event in
                     guard let self, self.generation == id else { return }
                     self.receive(event, id: id)
                 }
