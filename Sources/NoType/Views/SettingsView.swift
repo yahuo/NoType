@@ -69,7 +69,12 @@ struct SettingsView: View {
                         Text("\(voice.displayName) · \(voice.description)").tag(voice)
                     }
                 }
-                Text("自动保存，新音色从下一次对话开始使用。")
+                TextField("语音指引", text: Binding(
+                    get: { model.settings.neoSpeechGuidance },
+                    set: { model.setNeoSpeechGuidance($0) }
+                ), prompt: Text("例如：语速慢一些，句间稍作停顿，语气自然。"), axis: .vertical)
+                    .lineLimit(3...5)
+                Text("音色和指引自动保存，下次对话生效。指引可调整语速、停顿和语气；留空使用默认说话方式。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("对话方式") {

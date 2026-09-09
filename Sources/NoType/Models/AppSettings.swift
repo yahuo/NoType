@@ -104,6 +104,7 @@ struct AppSettings: Codable, Equatable {
     var neoWakeEnabled: Bool = false
     var neoWakePhrase = AppSettings.defaultNeoWakePhrase
     var neoVoice: NeoVoice = .juniper
+    var neoSpeechGuidance = ""
 
     static let defaultNeoWakePhrase = "Hey Neo"
 
@@ -141,6 +142,7 @@ struct AppSettings: Codable, Equatable {
         case neoWakeEnabled
         case neoWakePhrase
         case neoVoice
+        case neoSpeechGuidance
     }
 
     init(
@@ -168,6 +170,7 @@ struct AppSettings: Codable, Equatable {
         neoWakeEnabled = try container.decodeIfPresent(Bool.self, forKey: .neoWakeEnabled) ?? false
         neoWakePhrase = Self.normalizedNeoWakePhrase(try container.decodeIfPresent(String.self, forKey: .neoWakePhrase) ?? "") ?? Self.defaultNeoWakePhrase
         neoVoice = NeoVoice(rawValue: try container.decodeIfPresent(String.self, forKey: .neoVoice) ?? "") ?? .juniper
+        neoSpeechGuidance = try container.decodeIfPresent(String.self, forKey: .neoSpeechGuidance) ?? ""
         appID = try container.decodeIfPresent(String.self, forKey: .appID) ?? ""
 
         let decodedResourceID =
@@ -190,6 +193,7 @@ struct AppSettings: Codable, Equatable {
         try container.encode(neoWakeEnabled, forKey: .neoWakeEnabled)
         try container.encode(neoWakePhrase, forKey: .neoWakePhrase)
         try container.encode(neoVoice, forKey: .neoVoice)
+        try container.encode(neoSpeechGuidance, forKey: .neoSpeechGuidance)
         try container.encode(speechProvider, forKey: .speechProvider)
         try container.encode(appID.trimmed, forKey: .appID)
         try container.encode(resourceID.trimmed, forKey: .resourceID)

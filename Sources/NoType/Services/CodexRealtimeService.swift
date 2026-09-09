@@ -14,7 +14,7 @@ enum NeoRealtimeEvent {
 @MainActor
 protocol NeoRealtimeCalling: AnyObject {
     var mediaView: WKWebView? { get }
-    func start(voice: NeoVoice, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws
+    func start(voice: NeoVoice, speechGuidance: String, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws
     func greet()
     func finishAfterReply()
     func stop()
@@ -42,7 +42,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
 
     var mediaView: WKWebView? { webView }
 
-    static func makeRequest(sdp: String, credentials: CodexOAuthCredentials, threadID: String, voice: NeoVoice = .juniper) throws -> URLRequest {
+    static func makeRequest(sdp: String, credentials: CodexOAuthCredentials, threadID: String, voice: NeoVoice = .juniper, speechGuidance: String = "") throws -> URLRequest {
         guard !credentials.isExpired else { throw AIRewriteError.codexAuthExpired }
         var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/wham/realtime/calls?intent=quicksilver&architecture=avas")!)
         request.httpMethod = "POST"
@@ -55,18 +55,22 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         request.setValue("26.901.51231", forHTTPHeaderField: "X-OpenAI-Codex-Client-Version")
         request.setValue("Codex Desktop/26.901.51231 (Mac OS; arm64)", forHTTPHeaderField: "User-Agent")
         request.setValue(threadID, forHTTPHeaderField: "Thread-Id")
+        var instructions = """
+        You are Neo, a concise Chinese voice assistant connected to a capable Codex backend.
+        Immediately delegate every task, action, current-information question, web search, screen reading, or app-control request to the backend. Only answer directly for simple conversation.
+        The backend can access the user's existing local Codex memories. Always delegate questions or discussions about the user's preferences, projects, past conversations, decisions, or remembered context. Never invent personal memories or claim they are unavailable before checking with the backend.
+        You cannot see the screen or execute actions yourself. After delegating, you may briefly acknowledge the request, then wait silently for the backend result. Never guess screen content, numbers, search results, or whether an action succeeded. A progress update such as 'I will check' is not a result.
+        Backend messages are marked [BACKEND] and may contain [COMMENTARY] progress or [FINAL] results. Report only facts actually returned by the backend, in concise Chinese. Do not add unsupported details or read out these internal tags.
+        Immediately delegate user corrections and new instructions to steer ongoing work. When the user says 结束会话 or 结束对话, say a short Chinese goodbye directly without delegation.
+        """
+        if !speechGuidance.trimmed.isEmpty {
+            instructions += "\n\nSpeech delivery preferences (pace, pauses, tone; apply to all spoken replies):\n\(speechGuidance.trimmed)"
+        }
         request.httpBody = try JSONSerialization.data(withJSONObject: [
             "sdp": sdp,
             "session": [
                 "model": "gpt-live-1-codex",
-                "instructions": """
-                You are Neo, a concise Chinese voice assistant connected to a capable Codex backend.
-                Immediately delegate every task, action, current-information question, web search, screen reading, or app-control request to the backend. Only answer directly for simple conversation.
-                The backend can access the user's existing local Codex memories. Always delegate questions or discussions about the user's preferences, projects, past conversations, decisions, or remembered context. Never invent personal memories or claim they are unavailable before checking with the backend.
-                You cannot see the screen or execute actions yourself. After delegating, you may briefly acknowledge the request, then wait silently for the backend result. Never guess screen content, numbers, search results, or whether an action succeeded. A progress update such as 'I will check' is not a result.
-                Backend messages are marked [BACKEND] and may contain [COMMENTARY] progress or [FINAL] results. Report only facts actually returned by the backend, in concise Chinese. Do not add unsupported details or read out these internal tags.
-                Immediately delegate user corrections and new instructions to steer ongoing work. When the user says 结束会话 or 结束对话, say a short Chinese goodbye directly without delegation.
-                """,
+                "instructions": instructions,
                 "audio": ["output": ["voice": voice.rawValue]],
                 "delegation": ["type": "client"],
             ],
@@ -79,7 +83,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         return ["结束会话", "结束对话", "结束聊天", "goodbyeneo", "再见neo"].contains(normalized)
     }
 
-    func start(voice: NeoVoice, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
+    func start(voice: NeoVoice, speechGuidance: String, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
         stop()
         let id = generation
         self.onEvent = onEvent
@@ -129,7 +133,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         config.httpShouldSetCookies = false
         let session = URLSession(configuration: config, delegate: RealtimeRedirectDelegate(), delegateQueue: nil)
         self.session = session
-        let (data, response) = try await session.data(for: Self.makeRequest(sdp: sdp, credentials: credentials, threadID: threadID, voice: voice))
+        let (data, response) = try await session.data(for: Self.makeRequest(sdp: sdp, credentials: credentials, threadID: threadID, voice: voice, speechGuidance: speechGuidance))
         try checkActive(id)
         guard let response = response as? HTTPURLResponse else { throw NeoVoiceError.invalidResponse }
         guard (200..<300).contains(response.statusCode) else { throw NeoVoiceError.connectionFailed(response.statusCode) }

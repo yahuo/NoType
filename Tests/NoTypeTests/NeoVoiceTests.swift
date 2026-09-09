@@ -97,6 +97,66 @@ func neoSelectedVoiceIsSentToRealtimeSession(voice: NeoVoice) throws {
     #expect(model.settings.llmRefinementEnabled)
 }
 
+@Test func neoSpeechGuidanceMigratesAndPreservesEditableWhitespace() throws {
+    let settings = try JSONDecoder().decode(AppSettings.self, from: Data("{\"appID\":\"saved\"}".utf8))
+    #expect(settings.neoSpeechGuidance.isEmpty)
+    #expect(settings.appID == "saved")
+    for guidance in ["语速慢一些，句间稍作停顿。\n ", "", " \n "] {
+        var edited = settings
+        edited.neoSpeechGuidance = guidance
+        let saved = try JSONEncoder().encode(edited)
+        #expect(try JSONDecoder().decode(AppSettings.self, from: saved) == edited)
+    }
+}
+
+@MainActor @Test(arguments: ["语速慢一些，句间稍作停顿。\n ", "", " \n "])
+func neoSpeechGuidanceExtendsExistingSessionInstructions(guidance: String) throws {
+    let credentials = CodexOAuthCredentials(accessToken: "unit-test-token", chatGPTAccountID: nil, expiresAt: Date.distantFuture)
+    func instructions(_ guidance: String) throws -> String {
+        let request = try CodexRealtimeService.makeRequest(sdp: "v=0\r\n", credentials: credentials, threadID: "guidance-test", speechGuidance: guidance)
+        let data = try #require(request.httpBody)
+        let body = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let session = try #require(body["session"] as? [String: Any])
+        return try #require(session["instructions"] as? String)
+    }
+    let baseline = try instructions("")
+    #expect(baseline.contains("Immediately delegate every task"))
+    #expect(baseline.contains("existing local Codex memories"))
+    #expect(baseline.contains("结束会话"))
+    let configured = try instructions(guidance)
+    if guidance.trimmed.isEmpty {
+        #expect(configured == baseline)
+    } else {
+        #expect(configured.hasPrefix(baseline + "\n\n"))
+        #expect(configured.hasSuffix(guidance.trimmed))
+    }
+}
+
+@MainActor @Test func neoSpeechGuidanceSaveDoesNotPersistOtherSettingsDrafts() throws {
+    let suite = "NoTypeTests.neo-guidance.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = SettingsStore(userDefaults: defaults)
+    var saved = AppSettings.defaults
+    saved.neoVoice = .cove
+    try store.save(saved)
+    let model = NoTypeAppModel(settingsStore: store)
+    defer { model.neoVoice.shutdown() }
+    model.settings.appID = "unsaved-draft"
+    model.settings.llmRefinementEnabled = true
+    for guidance in ["语速慢一些。\n ", ""] {
+        model.setNeoSpeechGuidance(guidance)
+        #expect(store.load().neoSpeechGuidance == guidance)
+        #expect(model.settings.neoSpeechGuidance == guidance)
+        #expect(model.neoVoice.speechGuidance == guidance)
+        #expect(store.load().neoVoice == .cove)
+        #expect(store.load().appID.isEmpty)
+        #expect(!store.load().llmRefinementEnabled)
+        #expect(model.settings.appID == "unsaved-draft")
+        #expect(model.settings.llmRefinementEnabled)
+    }
+}
+
 @MainActor private final class FakeWake: WakeWordListening {
     var wakes: [@MainActor () -> Void] = []
     var starts = 0
@@ -198,9 +258,11 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     var finishes = 0
     var greetings = 0
     var voices: [NeoVoice] = []
-    func start(voice: NeoVoice, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
+    var speechGuidances: [String] = []
+    func start(voice: NeoVoice, speechGuidance: String, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
         starts += 1
         voices.append(voice)
+        speechGuidances.append(speechGuidance)
         events.append(onEvent)
     }
     func stop() { stops += 1 }
@@ -227,6 +289,32 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     neo.startConversation()
     await settle()
     #expect(call.voices == [.maple, .spruce])
+}
+
+@MainActor @Test func neoSpeechGuidanceChangeAppliesToTheNextConversation() async {
+    let call = FakeCall()
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.setSpeechGuidance("语速慢一些")
+    neo.startConversation()
+    neo.setSpeechGuidance("语速快一些")
+    await settle()
+    #expect(call.speechGuidances == ["语速慢一些"])
+    call.events[0](.ready)
+    let stops = call.stops
+    neo.setSpeechGuidance("句间稍作停顿")
+    #expect(neo.state == .listening)
+    #expect(call.stops == stops)
+    #expect(call.starts == 1)
+    neo.endConversation()
+    neo.startConversation()
+    await settle()
+    #expect(call.speechGuidances == ["语速慢一些", "句间稍作停顿"])
+    neo.setSpeechGuidance("")
+    neo.endConversation()
+    neo.startConversation()
+    await settle()
+    #expect(call.speechGuidances.last == "")
 }
 
 @MainActor @Test func neoGreetsOnceWhenTheCallIsReady() async {

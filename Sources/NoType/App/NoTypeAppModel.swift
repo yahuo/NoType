@@ -279,6 +279,7 @@ final class NoTypeAppModel: ObservableObject {
         startBridgeService()
         neoVoice.setWakePhrase(settings.neoWakePhrase)
         neoVoice.setVoice(settings.neoVoice)
+        neoVoice.setSpeechGuidance(settings.neoSpeechGuidance)
         neoVoice.setWakeEnabled(settings.neoWakeEnabled)
 
         scheduleHUDLayoutUpdate(animated: false)
@@ -343,6 +344,21 @@ final class NoTypeAppModel: ObservableObject {
     func startNeoConversation() {
         guard phase != .recording, phase != .transcribing, phase != .refining else { return }
         neoVoice.startConversation()
+    }
+
+    func setNeoSpeechGuidance(_ guidance: String) {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+        do {
+            var persisted = settingsStore.load()
+            persisted.neoSpeechGuidance = guidance
+            try settingsStore.save(persisted)
+            settings.neoSpeechGuidance = guidance
+            neoVoice.setSpeechGuidance(guidance)
+            llmSettingsStatusMessage = "语音指引已保存，下次对话生效"
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
     }
 
     func setNeoWakePhrase(_ value: String) {
