@@ -26,7 +26,9 @@
     <string>14.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>NoType uses on-device speech recognition to detect Hey Neo. Standby audio stays on this Mac.</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>NoType needs microphone access to capture dictation audio.</string>
+    <string>NoType uses the microphone for dictation, Hey Neo wake detection, and live voice conversations.</string>
 </dict>
 </plist>

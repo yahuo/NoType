@@ -111,6 +111,21 @@ struct MenuBarContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
+            Divider()
+            Toggle("语音唤醒", isOn: Binding(
+                get: { model.settings.neoWakeEnabled },
+                set: { model.setNeoWakeEnabled($0) }
+            ))
+            .toggleStyle(.switch)
+            Text(model.neoVoice.state.message ?? model.neoVoice.statusText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button(model.neoVoice.state.inConversation ? "结束 Neo 对话" : "与 Neo 对话") {
+                if model.neoVoice.state.inConversation { model.neoVoice.endConversation() }
+                else { model.startNeoConversation() }
+            }
+            .disabled(model.phase == .recording || model.phase == .transcribing || model.phase == .refining)
             settingsTiles
         }
         .padding(12)

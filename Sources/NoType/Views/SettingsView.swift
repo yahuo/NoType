@@ -3,11 +3,13 @@ import SwiftUI
 private enum SettingsTab: Hashable {
     case speech
     case aiRewrite
+    case neo
 }
 
 struct SettingsView: View {
     @ObservedObject var model: NoTypeAppModel
     @State private var selectedTab: SettingsTab = .speech
+    @State private var wakePhraseDraft = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -17,6 +19,10 @@ struct SettingsView: View {
                     .tabItem {
                         Label("Speech", systemImage: "mic.fill")
                     }
+
+                neoTab
+                    .tag(SettingsTab.neo)
+                    .tabItem { Label("Neo", systemImage: "waveform") }
 
                 aiRewriteTab
                     .tag(SettingsTab.aiRewrite)
@@ -34,6 +40,36 @@ struct SettingsView: View {
             model.llmSettingsStatusMessage = nil
             model.llmSettingsErrorMessage = nil
         }
+    }
+
+    private var neoTab: some View {
+        Form {
+            Section("语音助手") {
+                Toggle("语音唤醒", isOn: Binding(
+                    get: { model.settings.neoWakeEnabled },
+                    set: { model.setNeoWakeEnabled($0) }
+                ))
+                HStack {
+                    TextField("唤醒词", text: $wakePhraseDraft, prompt: Text("Hey Neo 或 你好小新"))
+                        .onSubmit { model.setNeoWakePhrase(wakePhraseDraft) }
+                    Button("应用") { model.setNeoWakePhrase(wakePhraseDraft) }
+                        .disabled(AppSettings.normalizedNeoWakePhrase(wakePhraseDraft) == nil || AppSettings.normalizedNeoWakePhrase(wakePhraseDraft) == model.settings.neoWakePhrase)
+                }
+                Text("支持中文或英文短语。应用后生效；正在对话时，下次唤醒使用新词。待机音频只在本地检测，不上传、不保存。")
+                    .font(.caption).foregroundStyle(.secondary)
+                Text(model.neoVoice.state.message ?? model.neoVoice.statusText)
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("对话方式") {
+                Text("说「\(model.settings.neoWakePhrase)」唤醒，连接后 Neo 会回应「我在，请说」。支持连续追问和打断回答。")
+                Text("说「结束对话」、点击悬浮层关闭按钮或按 Option + Esc 结束。静默 45 秒也会自动结束。")
+                Text("对话不会保存为本地聊天记录。当前仅支持语音交流。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .onAppear { wakePhraseDraft = model.settings.neoWakePhrase }
+        .onChange(of: model.settings.neoWakePhrase) { wakePhraseDraft = model.settings.neoWakePhrase }
     }
 
     // MARK: - Speech Recognition Tab
@@ -194,6 +230,7 @@ struct SettingsView: View {
         switch selectedTab {
         case .speech: model.speechProviderDraft == .codex ? "Check Codex Login" : "Test Speech"
         case .aiRewrite: "Test AI Rewrite"
+        case .neo: model.neoVoice.state.inConversation ? "结束对话" : "开始对话"
         }
     }
 
@@ -202,6 +239,9 @@ struct SettingsView: View {
             Button {
                 Task {
                     switch selectedTab {
+                    case .neo:
+                        if model.neoVoice.state.inConversation { model.neoVoice.endConversation() }
+                        else { model.startNeoConversation() }
                     case .speech:
                         await model.testASRConnection()
                     case .aiRewrite:
@@ -217,7 +257,7 @@ struct SettingsView: View {
                     Text(model.isTestingLLMSettings ? "Testing…" : testButtonLabel)
                 }
             }
-            .disabled(model.isTestingLLMSettings)
+            .disabled(model.isTestingLLMSettings || (selectedTab == .neo && (model.phase == .recording || model.phase == .transcribing || model.phase == .refining)))
 
             if let status = model.llmSettingsStatusMessage {
                 Label(status, systemImage: "checkmark.circle.fill")
@@ -235,12 +275,14 @@ struct SettingsView: View {
 
             Spacer()
 
-            Button("Save") {
-                model.saveSettings()
+            if selectedTab != .neo {
+                Button("Save") {
+                    model.saveSettings()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut("s", modifiers: .command)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-            .keyboardShortcut("s", modifiers: .command)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)

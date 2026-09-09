@@ -80,6 +80,15 @@ struct AppSettings: Codable, Equatable {
     var language: DictationLanguage
     var llmRefinementEnabled: Bool
     var agentTUITranslationEnabled: Bool
+    var neoWakeEnabled: Bool = false
+    var neoWakePhrase = AppSettings.defaultNeoWakePhrase
+
+    static let defaultNeoWakePhrase = "Hey Neo"
+
+    static func normalizedNeoWakePhrase(_ value: String) -> String? {
+        let phrase = value.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        return phrase.contains(where: { $0.isLetter }) ? phrase : nil
+    }
 
     static let defaults = AppSettings(
         appID: "",
@@ -107,6 +116,8 @@ struct AppSettings: Codable, Equatable {
         case language
         case llmRefinementEnabled
         case agentTUITranslationEnabled
+        case neoWakeEnabled
+        case neoWakePhrase
     }
 
     init(
@@ -131,6 +142,8 @@ struct AppSettings: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         // Existing installations keep their current speech backend until switched explicitly.
         speechProvider = try container.decodeIfPresent(SpeechProvider.self, forKey: .speechProvider) ?? .doubao
+        neoWakeEnabled = try container.decodeIfPresent(Bool.self, forKey: .neoWakeEnabled) ?? false
+        neoWakePhrase = Self.normalizedNeoWakePhrase(try container.decodeIfPresent(String.self, forKey: .neoWakePhrase) ?? "") ?? Self.defaultNeoWakePhrase
         appID = try container.decodeIfPresent(String.self, forKey: .appID) ?? ""
 
         let decodedResourceID =
@@ -150,6 +163,8 @@ struct AppSettings: Codable, Equatable {
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(neoWakeEnabled, forKey: .neoWakeEnabled)
+        try container.encode(neoWakePhrase, forKey: .neoWakePhrase)
         try container.encode(speechProvider, forKey: .speechProvider)
         try container.encode(appID.trimmed, forKey: .appID)
         try container.encode(resourceID.trimmed, forKey: .resourceID)

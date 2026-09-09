@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 struct HUDPanelView: View {
     @ObservedObject var model: NoTypeAppModel
@@ -6,18 +7,53 @@ struct HUDPanelView: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            controlBar
+            if model.neoVoice.state.hudVisible {
+                neoControlBar
+            } else {
+                controlBar
+            }
 
-            if model.phase == .failed, let errorMessage = model.errorMessage {
+            if let message = model.neoVoice.state.message, model.neoVoice.state.hudVisible {
+                failureCard(message)
+            } else if model.phase == .failed, let errorMessage = model.errorMessage {
                 failureCard(errorMessage)
             }
         }
         .frame(width: 356, alignment: .center)
         .padding(.horizontal, 4)
         .padding(.vertical, 6)
+        .background {
+            if let web = model.neoVoice.mediaView {
+                NeoMediaView(web: web).frame(width: 1, height: 1).clipped()
+            }
+        }
         .onAppear {
             isAnimatingBars = true
         }
+    }
+
+    private var neoControlBar: some View {
+        HStack(spacing: 12) {
+            if model.neoVoice.state == .connecting {
+                ProgressView().controlSize(.small).tint(.white)
+            } else {
+                WaveformBarsView(level: model.neoVoice.level, isAnimating: isAnimatingBars)
+                    .frame(height: 20)
+            }
+            Text(model.neoVoice.state.label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(.white)
+            Button { model.neoVoice.endConversation() } label: {
+                Image(systemName: "xmark.circle.fill").foregroundStyle(.white.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .help("结束对话 · Option + Esc")
+            .accessibilityLabel("结束 Neo 对话")
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .background(Capsule().fill(Color.black.opacity(0.96)))
+        .shadow(color: .black.opacity(0.22), radius: 24, y: 12)
     }
 
     @ViewBuilder
@@ -85,7 +121,7 @@ struct HUDPanelView: View {
     @ViewBuilder
     private func failureCard(_ errorMessage: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(isChinese ? "听写失败" : "Dictation failed")
+            Text(model.neoVoice.state.hudVisible ? "Neo" : (isChinese ? "听写失败" : "Dictation failed"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.white)
             Text(errorMessage)
@@ -109,6 +145,21 @@ struct HUDPanelView: View {
 
     private var isChinese: Bool {
         model.settings.language.usesChineseCopy
+    }
+}
+
+// Keeping the media page attached to the existing HUD allows WebKit audio to run
+// while NoType stays in the background. The page has no visible conversation UI.
+private struct NeoMediaView: NSViewRepresentable {
+    let web: WKWebView
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ container: NSView, context: Context) {
+        guard web.superview !== container else { return }
+        container.subviews.forEach { $0.removeFromSuperview() }
+        web.removeFromSuperview()
+        web.frame = container.bounds
+        web.autoresizingMask = [.width, .height]
+        container.addSubview(web)
     }
 }
 

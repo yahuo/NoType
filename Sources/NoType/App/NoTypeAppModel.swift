@@ -23,6 +23,8 @@ final class NoTypeAppModel: ObservableObject {
     @Published var llmSettingsErrorMessage: String?
     @Published var isTestingLLMSettings = false
 
+    let neoVoice = NeoVoiceController()
+
     private let settingsStore: SettingsStore
     private let keychainClient: KeychainClient
     private let permissionService: PermissionService
@@ -123,11 +125,17 @@ final class NoTypeAppModel: ObservableObject {
             }
         }
 
+        neoVoice.onChange = { [weak self] in
+            guard let self else { return }
+            self.objectWillChange.send()
+            self.scheduleHUDLayoutUpdate()
+        }
         hudController.attach(to: self)
     }
 
     var menuBarIcon: NSImage {
-        switch phase {
+        if neoVoice.state.inConversation { return MenuBarIconProvider.recording }
+        return switch phase {
         case .recording:
             MenuBarIconProvider.recording
         case .transcribing, .refining:
@@ -269,11 +277,14 @@ final class NoTypeAppModel: ObservableObject {
 
         registerTripleSpaceTriggerIfPossible()
         startBridgeService()
+        neoVoice.setWakePhrase(settings.neoWakePhrase)
+        neoVoice.setWakeEnabled(settings.neoWakeEnabled)
 
         scheduleHUDLayoutUpdate(animated: false)
     }
 
     func shutdown() {
+        neoVoice.shutdown()
         selectionTranslationController.close()
         agentEditorIntegrationService.shutdown()
         bridgeService.stop()
@@ -299,6 +310,42 @@ final class NoTypeAppModel: ObservableObject {
 
     func openMicrophoneSettings() {
         permissionService.openMicrophoneSettings()
+    }
+
+    func setNeoWakeEnabled(_ enabled: Bool) {
+        do {
+            var persisted = settingsStore.load()
+            persisted.neoWakeEnabled = enabled
+            try settingsStore.save(persisted)
+            settings.neoWakeEnabled = enabled
+            neoVoice.setWakeEnabled(enabled)
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
+    }
+
+    func startNeoConversation() {
+        guard phase != .recording, phase != .transcribing, phase != .refining else { return }
+        neoVoice.startConversation()
+    }
+
+    func setNeoWakePhrase(_ value: String) {
+        llmSettingsStatusMessage = nil
+        llmSettingsErrorMessage = nil
+        guard let phrase = AppSettings.normalizedNeoWakePhrase(value) else {
+            llmSettingsErrorMessage = "请输入包含中文或英文字母的唤醒词。"
+            return
+        }
+        do {
+            var persisted = settingsStore.load()
+            persisted.neoWakePhrase = phrase
+            try settingsStore.save(persisted)
+            settings.neoWakePhrase = phrase
+            neoVoice.setWakePhrase(phrase)
+            llmSettingsStatusMessage = "唤醒词已更新"
+        } catch {
+            llmSettingsErrorMessage = error.localizedDescription
+        }
     }
 
     func selectLanguage(_ language: DictationLanguage) {
@@ -483,6 +530,10 @@ final class NoTypeAppModel: ObservableObject {
                 await stopDictation()
             }
         case .cancelDictation:
+            if neoVoice.state.hudVisible {
+                neoVoice.endConversation()
+                return
+            }
             selectionTranslationController.close()
             cancelCurrentSession()
         }
@@ -517,6 +568,7 @@ final class NoTypeAppModel: ObservableObject {
                 return
             }
 
+            neoVoice.setSuspended(true)
             resetSessionStateForStart()
             currentOutputMode = mode
             activeSpeechProvider = settings.speechProvider
@@ -1173,6 +1225,11 @@ final class NoTypeAppModel: ObservableObject {
     private func transition(to newPhase: DictationPhase) {
         phase = newPhase
         hotkeyService.update(phase: newPhase)
+        if newPhase == .idle || newPhase == .onboarding {
+            neoVoice.setSuspended(false)
+        } else if newPhase == .recording || newPhase == .transcribing || newPhase == .refining {
+            neoVoice.setSuspended(true)
+        }
         scheduleHUDLayoutUpdate()
     }
 

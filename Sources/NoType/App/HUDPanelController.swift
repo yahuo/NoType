@@ -37,9 +37,8 @@ final class HUDPanelController {
 
     func update(for model: NoTypeAppModel, animated: Bool) {
         guard let panel else { return }
-        panel.contentView = NSHostingView(rootView: HUDPanelView(model: model))
-        if model.phase.hudVisible {
-            let size = model.phase == .failed ? extendedSize : baseSize
+        if model.phase.hudVisible || model.neoVoice.state.hudVisible {
+            let size = model.phase == .failed || model.neoVoice.state.message != nil ? extendedSize : baseSize
             panel.setContentSize(size)
             panel.setFrame(frame(for: size), display: true)
             panel.orderFrontRegardless()
