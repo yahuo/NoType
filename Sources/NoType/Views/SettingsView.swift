@@ -61,7 +61,7 @@ struct SettingsView: View {
                             .foregroundStyle(model.hasCodexOAuthCredentials ? .green : .secondary)
                     }
 
-                    Text("复用本机 Codex 登录。结束录音后自动识别语言，转写结果直接输入，不再额外调用 AI Rewrite。")
+                    Text("复用本机 Codex 登录，边录边识别。结束录音后直接输入，不额外调用 AI Rewrite；连接中断时会使用完整录音重试转写。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 } header: {

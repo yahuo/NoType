@@ -46,13 +46,22 @@ actor CodexTranscriptionService {
         _ = try currentCredentials()
     }
 
-    private nonisolated func currentCredentials() throws -> CodexOAuthCredentials {
+    nonisolated func currentCredentials() throws -> CodexOAuthCredentials {
         let credentials = try authStore.loadCredentials()
         guard !credentials.isExpired else { throw AIRewriteError.codexAuthExpired }
         return credentials
     }
 
-    func transcribe(pcm: Data) async throws -> String {
+    func transcribe(pcm: Data, stream: CodexDictationStream? = nil, remainder: Data? = nil) async throws -> String {
+        if let stream {
+            do {
+                return try await stream.finish(remainder: remainder, expectedBytes: pcm.count)
+            } catch {
+                try Task.checkCancellation()
+                CodexTranscriptionDiagnostics.record("batch_fallback", id: stream.id,
+                    fields: "reason=\(CodexTranscriptionDiagnostics.failureCategory(error))")
+            }
+        }
         let id = UUID().uuidString
         let started = ProcessInfo.processInfo.systemUptime
         CodexTranscriptionDiagnostics.record("request_start", id: id,
@@ -182,7 +191,7 @@ enum CodexTranscriptionDiagnostics {
     }
 }
 
-private final class CodexTranscriptionTaskDelegate: NSObject, URLSessionTaskDelegate {
+final class CodexTranscriptionTaskDelegate: NSObject, URLSessionTaskDelegate {
     private let id: String
 
     init(id: String) { self.id = id }

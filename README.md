@@ -23,7 +23,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
 
 - 菜单栏常驻，不抢桌面主场景
 - `Option + Space` 启动语音输入，`Option + Shift + Space` 翻译成英文
-- Codex 转写复用本机登录态，结束录音后直接输入；也可选择 Doubao 流式转写
+- Codex 流式转写复用本机登录态，边录边识别，结束录音后直接输入；也可选择 Doubao
 - Doubao 模式可选 `AI Rewrite`，把口语稿整理成更适合直接发送或交给 AI 执行的文字
 - 统一走剪贴板 + `Cmd + V` 注入，对非原生编辑器更稳
 - 粘贴前会在 CJK 输入法下临时切到 ASCII，粘贴后恢复输入法和原剪贴板
@@ -34,7 +34,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
 - 仅菜单栏运行的 macOS 14+ 应用，带 `Setup`、`Settings` 和底部悬浮 HUD
 - `Option + Space` 全局热键，`Option + Shift + Space` 进入英文翻译；`Option + Esc` 可取消
 - 同一主热键按一次开始录音，再按一次结束
-- Codex 内部听写：复用本机登录态，上传完整录音后返回文字，自动识别语言；直接输入，不额外调用 rewrite
+- Codex 内部听写：复用本机登录态，自动识别语言，流式失败时回退完整录音转写；直接输入，不额外调用 rewrite
 - Doubao Streaming ASR，支持 `English`、`简体中文`、`繁體中文`、`日本語`、`한국어`
 - Doubao 模式的 `AI Rewrite` 可选开关：
   - 关闭时走 `Literal`，直接使用 ASR 最终文本
@@ -44,7 +44,7 @@ NoType 想解决的是一件很具体的事：当你已经在写代码、回消�
   - 没有选中文本时，`Option + Shift + Space` 会先录音，再把语音转写结果翻译成英文
   - 本地 Unix socket bridge 可让 Pi、Claude Code 和 Codex CLI 翻译并替换 TUI draft，不依赖终端 AX 输入框
 - 选词中文翻译：选中文字后按 `Option + Control + Space`，在独立浮窗阅读中文译文，原文保持不变；支持滚动、展开原文和复制译文
-- Codex 模式录音时显示波形，结束后等待完整转写；Doubao 模式显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
+- Codex 和 Doubao 模式录音时显示波形及实时文本；Doubao 的 `AI Rewrite` 阶段显示流式改写结果
 - 文本注入统一走剪贴板 + 模拟 `Cmd + V`
 - 如果没有可编辑焦点，则不会强行注入，而是把结果保留到剪贴板供手动粘贴
 - 在中文、日文、韩文输入法下粘贴前会临时切到 `ABC/US`，完成后恢复
@@ -164,22 +164,31 @@ open NoType.xcodeproj
 
 - 复用本机 Codex 登录态，不需要 OpenAI API Key，也不需要豆包凭证。
 - `Check Codex Login` 只检查本地登录，不会上传录音；真实转写须使用听写快捷键验证。
-- 录音结束后，将 16 kHz 单声道 PCM 封装为 WAV，发送到 `https://chatgpt.com/backend-api/transcribe`。
+- 录音开始即连接 `wss://chatgpt.com/backend-api/dictation/stream`，按顺序发送 16 kHz 单声道 PCM，显示实时文本。
+- 流式连接失败、队列溢出、音频长度不符、最终文本不完整或结束后 8 秒未完成时，使用完整录音回退到 `https://chatgpt.com/backend-api/transcribe`，无需重新说一遍。
 - 返回文本直接插入，不调用 AI Rewrite，不把“换行”等普通词语额外替换为控制命令。
 - 语音翻译仍会在转写后调用英文翻译；选词翻译、网页翻译和 TUI 翻译沿用原流程。
 - 取消会终止上传并丢弃旧结果；完成、失败或取消后清理本次临时录音。
 
-这是内部接口，模型由服务端决定。转写成功不代表自动完成去口头词、消除改口或整理任务列表。2026-09-08 的合成语音实测仍保留口头词和改口，因此保留 Doubao 及其 rewrite 供对比验收。
+这是内部接口，模型和文字整理效果由服务端决定。真人测试中观察到部分语气词被过滤，合成语音也有保留口头词和改口的情况；NoType 本身不额外改写 Codex 转写文本。
 
-协议参考：[codex-voice 的 Swift 实现](https://github.com/anthnykr/codex-voice/blob/main/CodexVoice/CodexTranscriptionService.swift)、[codex-stt-bridge 的兼容记录](https://github.com/ai-babai/codex-stt-bridge/blob/main/docs/API-COMPATIBILITY.md)。
+协议参考：[codex-voice 的 Swift 实现](https://github.com/anthnykr/codex-voice/blob/main/CodexVoice/CodexTranscriptionService.swift)、[codex-stt-bridge 的兼容记录](https://github.com/ai-babai/codex-stt-bridge/blob/main/docs/API-COMPATIBILITY.md)、[haskell-agent 的内部流式协议](https://github.com/digitallyinduced/haskell-agent/blob/master/packages/agent-openai/src/Agent/OpenAI/Transcription.hs)。
 
 `swift test` 默认不调用真实服务。使用非敏感的 16 kHz、单声道、16-bit 小端原始 PCM 文件，可单独验证实际 Swift 转写链路（会上传录音并打印结果）：
 
 ```bash
 NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexTranscriptionLiveSmoke
+NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexDictationStreamLiveSmoke
+NOTYPE_CODEX_SMOKE_PCM=/absolute/path/sample.pcm swift test --filter codexDictationStreamFallbackLiveSmoke
 ```
 
 接口实测和本地测试不等同于全局快捷键、麦克风及目标应用粘贴验收；切换到测试版后仍需实际听写确认。
+
+诊断日志只记录状态码、经过校验的请求标识、音频字节数、上传/等待耗时和回退原因，不记录凭据、录音或转写正文。403 表示本次请求被拒绝，不直接判定账号永久不可用，也不会盲目自动重试。查看最近的记录：
+
+```bash
+/usr/bin/log show --last 30m --style compact --predicate 'subsystem == "com.opensource.notype" AND category == "CodexDictation"'
+```
 
 ## 配置 AI Rewrite
 

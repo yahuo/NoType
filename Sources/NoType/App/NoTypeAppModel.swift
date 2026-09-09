@@ -46,6 +46,7 @@ final class NoTypeAppModel: ObservableObject {
     private var feedbackTask: Task<Void, Never>?
     private var completionTask: Task<Void, Never>?
     private var transcriptionTask: Task<String, Error>?
+    private var codexDictationStream: CodexDictationStream?
     private var activeSpeechProvider: SpeechProvider = .doubao
     private var shouldRewriteCurrentDictation = false
     private var pendingRewritePreviewTask: Task<Void, Never>?
@@ -488,10 +489,12 @@ final class NoTypeAppModel: ObservableObject {
 
         do {
             let config: ASRSessionConfig?
+            let codexCredentials: CodexOAuthCredentials?
             if settings.speechProvider == .codex {
-                try codexTranscriptionService.checkCredentials()
+                codexCredentials = try codexTranscriptionService.currentCredentials()
                 config = nil
             } else {
+                codexCredentials = nil
                 config = try currentASRSessionConfig()
             }
             if settings.speechProvider == .doubao, config == nil {
@@ -509,6 +512,14 @@ final class NoTypeAppModel: ObservableObject {
             activeSpeechProvider = settings.speechProvider
             shouldRewriteCurrentDictation = settings.shouldRewriteDictation
             let activeSessionID = sessionID
+            if let codexCredentials {
+                codexDictationStream = CodexDictationStream(credentials: codexCredentials) { [weak self] text in
+                    Task { @MainActor in
+                        guard let self, self.codexDictationStream != nil else { return }
+                        self.handleASREvent(.partialTranscript(text), sessionID: activeSessionID)
+                    }
+                }
+            }
             if let config {
                 let provider = providerFactory()
                 provider.eventHandler = { [weak self] event in
@@ -522,8 +533,15 @@ final class NoTypeAppModel: ObservableObject {
                 asrProvider = provider
             }
 
+            let codexAudioInput = codexDictationStream?.audioInput
             _ = try audioCaptureService.startCapture(
                 onChunk: { [weak self] frame in
+                    if let codexAudioInput {
+                        if case .dropped = codexAudioInput.yield(frame) {
+                            codexAudioInput.finish(throwing: CodexTranscriptionError.invalidAudio)
+                        }
+                        return
+                    }
                     guard let self else { return }
                     Task { @MainActor in
                         guard self.sessionID == activeSessionID else { return }
@@ -564,11 +582,16 @@ final class NoTypeAppModel: ObservableObject {
                 // The finalized file includes every captured chunk and the trailing
                 // partial frame, independent of pending main-actor chunk callbacks.
                 let pcm = try Data(contentsOf: recordingURL)
-                let task = Task { try await codexTranscriptionService.transcribe(pcm: pcm) }
+                let stream = codexDictationStream
+                let task = Task {
+                    try await codexTranscriptionService.transcribe(pcm: pcm, stream: stream, remainder: stopResult.flushedRemainder)
+                }
                 transcriptionTask = task
                 let transcript = try await task.value
                 guard sessionID == activeSessionID else { return }
                 transcriptionTask = nil
+                codexDictationStream?.cancel()
+                codexDictationStream = nil
                 handleASREvent(.finalTranscript(transcript), sessionID: activeSessionID)
                 return
             }
@@ -588,6 +611,8 @@ final class NoTypeAppModel: ObservableObject {
         completionTask?.cancel()
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        codexDictationStream?.cancel()
+        codexDictationStream = nil
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""
@@ -986,6 +1011,8 @@ final class NoTypeAppModel: ObservableObject {
         completionTask?.cancel()
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        codexDictationStream?.cancel()
+        codexDictationStream = nil
         sessionID = UUID()
         waveformLevel = 0
         resetRewritePreviewThrottle()
@@ -1009,6 +1036,8 @@ final class NoTypeAppModel: ObservableObject {
         completionTask?.cancel()
         transcriptionTask?.cancel()
         transcriptionTask = nil
+        codexDictationStream?.cancel()
+        codexDictationStream = nil
         sessionID = UUID()
         waveformLevel = 0
         transcriptPreview = ""
