@@ -78,11 +78,11 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
             Section("对话方式") {
-                Text("说「\(model.settings.neoWakePhrase)」唤醒，连接后 Neo 会回应「我在，请说」。支持连续追问和打断回答。")
-                Text("说「结束会话」、点击悬浮层关闭按钮或按 Option + Esc 结束。没有执行任务时，静默 45 秒也会自动结束。")
-                Text("复用本机 Codex 的登录、模型和已安装工具，可联网搜索、读取屏幕和操作应用；相关权限沿用 Codex。对话使用临时会话，不保存为本地聊天记录。")
+                Text("说「\(model.settings.neoWakePhrase)」唤醒，可连续对话和打断。")
+                Text("说「结束会话」、点 × 或按 ⌥ Esc 退出；空闲 45 秒自动结束。")
+                Text("支持联网、读屏和应用操作，沿用 Codex 权限。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("可参考本机 Codex 已有的记忆，讨论你的偏好和过往项目。临时对话不会生成或更新长期记忆。")
+                Text("只读已有 Codex 记忆，不保存对话。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
