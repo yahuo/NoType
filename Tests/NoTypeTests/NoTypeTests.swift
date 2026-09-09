@@ -191,34 +191,35 @@ func agentEditorAcceptsOnlyClaudeAndCodexTemporaryMarkdownPaths() {
     #expect(!NoTypeEditorBufferPath.supports(unsupported))
 }
 
-@Test
-func agentEditorParsesRawCodexDraftAndPreservesItsFinalNewline() throws {
+@Test(arguments: ["\n", "\r\n"])
+func agentEditorParsesRawCodexDraftAndPreservesItsFinalNewline(lineEnding: String) throws {
     let buffer = try #require(
-        NoTypeEditorBuffer.parseTriggeredBuffer("第一行\n第二行   \n")
+        NoTypeEditorBuffer.parseTriggeredBuffer("第一行\n第二行   " + lineEnding)
     )
 
     #expect(buffer.preservedPrefix.isEmpty)
     #expect(buffer.sourceText == "第一行\n第二行")
-    #expect(buffer.trailingLineEndings == "\n")
-    #expect(buffer.replacingSource(with: "First line\nSecond line") == "First line\nSecond line\n")
+    #expect(buffer.trailingLineEndings == lineEnding)
+    #expect(buffer.replacingSource(with: "First line\nSecond line") == "First line\nSecond line" + lineEnding)
 }
 
-@Test
-func agentEditorPreservesClaudeResponseContextAndReplacesOnlyTheReply() throws {
+@Test(arguments: ["\n", "\r\n"])
+func agentEditorPreservesClaudeResponseContextAndReplacesOnlyTheReply(lineEnding: String) throws {
     let contextPrefix = """
     # ─── Claude's last response (for reference; removed on save) ───
     # I updated the parser and added its tests.
     # ─── Write your reply below this line ──────────────────────────
     """
-    let context = contextPrefix + "\n\n" + "请继续检查边界情况" + "   "
+    let preservedPrefix = contextPrefix.replacingOccurrences(of: "\n", with: lineEnding)
+        + lineEnding + lineEnding
+    let context = preservedPrefix + "请继续检查边界情况" + "   "
     let buffer = try #require(NoTypeEditorBuffer.parseTriggeredBuffer(context))
 
     #expect(buffer.sourceText == "请继续检查边界情况")
-    #expect(buffer.preservedPrefix.contains("# I updated the parser"))
-    #expect(buffer.preservedPrefix.hasSuffix("\n\n"))
+    #expect(buffer.preservedPrefix == preservedPrefix)
     #expect(
         buffer.replacingSource(with: "Please continue checking edge cases.")
-            .hasSuffix("Please continue checking edge cases.")
+            == preservedPrefix + "Please continue checking edge cases."
     )
 }
 

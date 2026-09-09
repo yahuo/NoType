@@ -44,7 +44,7 @@ public struct NoTypeEditorBuffer: Equatable {
         while bodyEnd > draft.startIndex {
             let previous = draft.index(before: bodyEnd)
             let character = draft[previous]
-            guard character == "\n" || character == "\r" else { break }
+            guard character.isNewline else { break }
             bodyEnd = previous
         }
 
@@ -70,17 +70,17 @@ public struct NoTypeEditorBuffer: Equatable {
     private static func editableDraftRange(in content: String) -> Range<String.Index> {
         guard let markerRange = content.range(of: claudeReplyMarkerPrefix),
               markerRange.lowerBound == content.startIndex
-                || content[content.index(before: markerRange.lowerBound)] == "\n"
+                || content[content.index(before: markerRange.lowerBound)].isNewline
         else {
             return content.startIndex..<content.endIndex
         }
 
-        guard let markerLineEnd = content[markerRange.upperBound...].firstIndex(of: "\n") else {
+        guard let markerLineEnd = content[markerRange.upperBound...].firstIndex(where: \.isNewline) else {
             return content.endIndex..<content.endIndex
         }
 
         var draftStart = content.index(after: markerLineEnd)
-        if draftStart < content.endIndex, content[draftStart] == "\n" {
+        if draftStart < content.endIndex, content[draftStart].isNewline {
             draftStart = content.index(after: draftStart)
         }
         return draftStart..<content.endIndex
