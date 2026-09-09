@@ -51,7 +51,7 @@ struct MenuBarContentView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                         .font(.caption)
-                    Text("Missing Doubao credentials")
+                    Text(model.settings.speechProvider == .codex ? "Codex login required" : "Missing Doubao credentials")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                 }
@@ -148,41 +148,60 @@ struct MenuBarContentView: View {
             }
             .buttonStyle(.plain)
 
-            Menu {
+            if model.settings.speechProvider == .codex {
                 Button {
-                    model.setAIRewriteEnabled(!model.aiRewriteEnabled)
-                } label: {
-                    Label(
-                        model.aiRewriteEnabled ? "Enabled" : "Disabled",
-                        systemImage: model.aiRewriteEnabled ? "checkmark.circle.fill" : "circle"
-                    )
-                }
-
-                Button("Settings…") {
                     openSettingsWindow()
-                }
-            } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("AI REWRITE")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(model.aiRewriteEnabled ? Color.green : Color.secondary)
-                            .frame(width: 6, height: 6)
-                        Text("\(model.aiRewriteEnabled ? "On" : "Off") ▾")
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("CODEX")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        Text("直接输入")
                             .font(.caption)
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary))
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.quaternary)
-                )
+                .buttonStyle(.plain)
+            } else {
+                Menu {
+                    Button {
+                        model.setAIRewriteEnabled(!model.aiRewriteEnabled)
+                    } label: {
+                        Label(
+                            model.aiRewriteEnabled ? "Enabled" : "Disabled",
+                            systemImage: model.aiRewriteEnabled ? "checkmark.circle.fill" : "circle"
+                        )
+                    }
+
+                    Button("Settings…") {
+                        openSettingsWindow()
+                    }
+                } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("AI REWRITE")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(.secondary)
+                        HStack(spacing: 4) {
+                            Circle()
+                                .fill(model.aiRewriteEnabled ? Color.green : Color.secondary)
+                                .frame(width: 6, height: 6)
+                            Text("\(model.aiRewriteEnabled ? "On" : "Off") ▾")
+                                .font(.caption)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(.quaternary)
+                    )
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
         }
     }
 

@@ -37,6 +37,9 @@ struct SettingsView: View {
             model.llmSettingsStatusMessage = nil
             model.llmSettingsErrorMessage = nil
         }
+        .onChange(of: model.settings.speechProvider) {
+            model.prepareSettings()
+        }
     }
 
     // MARK: - Speech Recognition Tab
@@ -44,20 +47,28 @@ struct SettingsView: View {
     private var speechTab: some View {
         Form {
             Section {
-                TextField("App ID", text: $model.settings.appID)
-                    .textFieldStyle(.roundedBorder)
+                Picker("Speech Provider", selection: $model.settings.speechProvider) {
+                    ForEach(SpeechProvider.allCases) { provider in
+                        Text(provider.displayName).tag(provider)
+                    }
+                }
+            }
 
-                TextField("Resource ID", text: $model.settings.resourceID)
-                    .textFieldStyle(.roundedBorder)
+            if model.settings.speechProvider == .codex {
+                Section {
+                    LabeledContent("Status") {
+                        Text(model.hasCodexOAuthCredentials ? "Logged in" : "Run `codex login` first")
+                            .foregroundStyle(model.hasCodexOAuthCredentials ? .green : .secondary)
+                    }
 
-                SecureField("Access Token", text: $model.accessToken)
-                    .textFieldStyle(.roundedBorder)
-
-                Text("Access Token is stored securely in Keychain.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            } header: {
-                Label("Doubao Credentials", systemImage: "key.fill")
+                    Text("复用本机 Codex 登录。结束录音后自动识别语言，转写结果直接输入，不再额外调用 AI Rewrite。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } header: {
+                    Label("Codex Dictation", systemImage: "mic.fill")
+                }
+            } else {
+                doubaoCredentials
             }
 
             Section {
@@ -80,7 +91,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
-                Picker("Language", selection: $model.settings.language) {
+                Picker(model.settings.speechProvider == .codex ? "Interface Language" : "Language", selection: $model.settings.language) {
                     ForEach(DictationLanguage.allCases) { language in
                         Text(language.displayName).tag(language)
                     }
@@ -93,18 +104,43 @@ struct SettingsView: View {
         .scrollIndicators(.hidden)
     }
 
+    private var doubaoCredentials: some View {
+        Section {
+            TextField("App ID", text: $model.settings.appID)
+                .textFieldStyle(.roundedBorder)
+
+            TextField("Resource ID", text: $model.settings.resourceID)
+                .textFieldStyle(.roundedBorder)
+
+            SecureField("Access Token", text: $model.accessToken)
+                .textFieldStyle(.roundedBorder)
+
+            Text("Access Token is stored securely in Keychain.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        } header: {
+            Label("Doubao Credentials", systemImage: "key.fill")
+        }
+    }
+
     // MARK: - AI Rewrite Tab
 
     private var aiRewriteTab: some View {
         Form {
             Section {
-                Toggle(
-                    "Enable AI Rewrite",
-                    isOn: Binding(
-                        get: { model.settings.llmRefinementEnabled },
-                        set: { model.setAIRewriteEnabled($0) }
+                if model.settings.speechProvider == .doubao {
+                    Toggle(
+                        "Enable AI Rewrite",
+                        isOn: Binding(
+                            get: { model.settings.llmRefinementEnabled },
+                            set: { model.setAIRewriteEnabled($0) }
+                        )
                     )
-                )
+                } else {
+                    Text("Codex 语音转写直接输入，不经过额外改写。翻译快捷键仍可使用。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
 
                 LabeledContent("Provider") {
                     Text("Codex OAuth")
@@ -156,7 +192,7 @@ struct SettingsView: View {
 
     private var testButtonLabel: String {
         switch selectedTab {
-        case .speech: "Test Speech"
+        case .speech: model.settings.speechProvider == .codex ? "Check Codex Login" : "Test Speech"
         case .aiRewrite: "Test AI Rewrite"
         }
     }
