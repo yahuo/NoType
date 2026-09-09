@@ -4,139 +4,216 @@ import SwiftUI
 struct MenuBarContentView: View {
     @ObservedObject var model: NoTypeAppModel
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.colorScheme) private var colorScheme
     let openSettings: () -> Void
 
-    var body: some View {
-        VStack(spacing: 10) {
-            headerRow
-            mainCard
-            iconFooter
-        }
-        .padding(14)
-        .frame(width: 280)
+    private var accentColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.55, green: 0.86, blue: 0.65)
+            : Color(red: 0.21, green: 0.47, blue: 0.31)
     }
 
-    // MARK: - Zone 1 — Header Row
+    var body: some View {
+        VStack(spacing: 0) {
+            headerRow
+                .padding(.bottom, 16)
+
+            statusNotice
+
+            VStack(spacing: 4) {
+                shortcutRow("语音输入", icon: "mic", shortcut: model.hotkeyDisplayName)
+                shortcutRow("语音译成英文", icon: "character.bubble", shortcut: model.translationHotkeyDisplayName)
+                shortcutRow(
+                    "选词译成中文",
+                    icon: "text.bubble",
+                    shortcut: model.selectionTranslationHotkeyDisplayName,
+                    detail: "浮窗查看，保留原文"
+                )
+            }
+
+            Divider().padding(.vertical, 12)
+            neoSection
+            Divider().padding(.vertical, 12)
+            settingsRow
+            Divider().padding(.top, 12).padding(.bottom, 10)
+            footerRow
+        }
+        .padding(18)
+        .frame(width: 352)
+        .background(colorScheme == .dark
+            ? Color(red: 0.14, green: 0.15, blue: 0.14)
+            : Color(nsColor: .windowBackgroundColor))
+        .tint(accentColor)
+    }
 
     private var headerRow: some View {
-        HStack {
+        HStack(spacing: 12) {
             Text("NoType")
-                .font(.headline)
+                .font(.system(size: 18, weight: .semibold))
 
             Spacer()
 
             HStack(spacing: 6) {
                 Circle()
                     .fill(statusColor)
-                    .frame(width: 8, height: 8)
+                    .frame(width: 7, height: 7)
                 Text(statusLabel)
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
             }
+
+            Button(action: openSettingsWindow) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 16))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("设置")
+            .help("设置")
         }
     }
 
-    // MARK: - Zone 2 — Main Card
-
-    private var mainCard: some View {
-        VStack(spacing: 12) {
-            if !model.permissionSnapshot.ready {
-                Button("Open Setup") {
+    @ViewBuilder
+    private var statusNotice: some View {
+        if !model.permissionSnapshot.ready {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(model.statusLine)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button("完成权限设置") {
                     activateAndOpenWindow(id: "onboarding")
                 }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else if !model.hasASRCredentials {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                        .font(.caption)
-                    Text(model.settings.speechProvider == .codex ? "Codex login required" : "Missing Doubao credentials")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.orange)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-
-                Button("Open Settings") {
-                    openSettingsWindow()
-                }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                HStack(spacing: 10) {
-                    Image(systemName: "mic.circle")
-                        .font(.system(size: 36))
-                        .foregroundStyle(statusColor)
-                        .frame(width: 40, height: 40)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                        )
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(model.statusLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
-                        Text(model.hotkeyDisplayName)
-                            .font(.subheadline.monospaced())
-                    }
-
-                    Spacer()
-                }
-            }
-
-            if let warning = model.hotkeyWarningMessage {
-                Text(warning)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            if let errorMessage = model.errorMessage, model.phase == .failed {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundStyle(.red)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Label("选词译为中文 · 浮窗查看", systemImage: "character.bubble")
-                    .font(.caption)
-                Text(model.selectionTranslationHotkeyDisplayName)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                .controlSize(.small)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-
-            Divider()
-            Toggle("语音唤醒", isOn: Binding(
-                get: { model.settings.neoWakeEnabled },
-                set: { model.setNeoWakeEnabled($0) }
-            ))
-            .toggleStyle(.switch)
-            Text(model.neoVoice.state.message ?? model.neoVoice.statusText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Button(model.neoVoice.state.inConversation ? "结束 Neo 对话" : "与 Neo 对话") {
-                if model.neoVoice.state.inConversation { model.neoVoice.endConversation() }
-                else { model.startNeoConversation() }
+            .padding(.bottom, 12)
+        } else if !model.hasASRCredentials {
+            HStack {
+                Label(
+                    model.settings.speechProvider == .codex ? "需要登录 Codex" : "需要配置豆包语音",
+                    systemImage: "exclamationmark.triangle"
+                )
+                .foregroundStyle(.orange)
+                Spacer()
+                Button("打开设置", action: openSettingsWindow)
+                    .controlSize(.small)
             }
-            .disabled(model.phase == .recording || model.phase == .transcribing || model.phase == .refining)
-            settingsTiles
+            .font(.caption)
+            .padding(.bottom, 12)
+        } else if model.phase != .idle {
+            Text(model.phase == .failed ? model.errorMessage ?? model.statusLine : model.statusLine)
+                .font(.caption)
+                .foregroundStyle(model.phase == .failed ? Color.red : Color.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 12)
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(.quaternary.opacity(0.5))
-        )
+
+        if let warning = model.hotkeyWarningMessage {
+            Text(warning)
+                .font(.caption)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 12)
+        }
     }
 
-    private var settingsTiles: some View {
-        HStack(spacing: 8) {
+    private func shortcutRow(_ title: String, icon: String, shortcut: String, detail: String? = nil) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 18))
+                .frame(width: 24, height: 24)
+
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .medium))
+                    Spacer(minLength: 0)
+                    shortcutKeycaps(shortcut)
+                }
+                if let detail {
+                    Text(detail)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func shortcutKeycaps(_ shortcut: String) -> some View {
+        let symbols = ["Option": "⌥", "Control": "⌃", "Shift": "⇧", "Command": "⌘"]
+        return HStack(spacing: 4) {
+            ForEach(Array(shortcut.components(separatedBy: " + ").enumerated()), id: \.offset) { _, key in
+                Text(symbols[key] ?? key)
+                    .font(.system(size: 11, weight: .medium))
+                    .padding(.horizontal, 6)
+                    .frame(minWidth: 23, minHeight: 23)
+                    .background(.primary.opacity(0.05), in: RoundedRectangle(cornerRadius: 5))
+                    .overlay(RoundedRectangle(cornerRadius: 5).strokeBorder(.primary.opacity(0.12)))
+            }
+        }
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(shortcut)
+    }
+
+    private var neoSection: some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 18))
+                    .frame(width: 24)
+                Text("Neo")
+                    .font(.system(size: 15, weight: .semibold))
+                Spacer()
+                Button(model.neoVoice.state.inConversation ? "结束对话" : "开始对话") {
+                    if model.neoVoice.state.inConversation { model.neoVoice.endConversation() }
+                    else { model.startNeoConversation() }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(accentColor)
+                .disabled(model.phase == .recording || model.phase == .transcribing || model.phase == .refining)
+            }
+
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("语音唤醒")
+                        .font(.system(size: 13, weight: .medium))
+                    Text(model.neoVoice.state.message ?? model.neoVoice.statusText)
+                        .font(.system(size: 11))
+                        .foregroundStyle(model.neoVoice.state.message == nil ? Color.secondary : Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+                Button {
+                    model.setNeoWakeEnabled(!model.settings.neoWakeEnabled)
+                } label: {
+                    Capsule()
+                        .fill(model.settings.neoWakeEnabled ? accentColor : Color.primary.opacity(0.18))
+                        .overlay(alignment: model.settings.neoWakeEnabled ? .trailing : .leading) {
+                            Circle().fill(.white).padding(2)
+                        }
+                        .frame(width: 36, height: 21)
+                }
+                .buttonStyle(.plain)
+                .accessibilityRepresentation {
+                    Toggle("语音唤醒", isOn: Binding(
+                        get: { model.settings.neoWakeEnabled },
+                        set: { model.setNeoWakeEnabled($0) }
+                    ))
+                    .toggleStyle(.switch)
+                }
+            }
+        }
+    }
+
+    private var settingsRow: some View {
+        HStack {
             Menu {
                 ForEach(DictationLanguage.allCases) { language in
                     Button {
@@ -146,165 +223,86 @@ struct MenuBarContentView: View {
                     }
                 }
             } label: {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("LANGUAGE")
-                        .font(.system(size: 9, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text("\(model.settings.language.displayName) ▾")
-                        .font(.caption)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(.quaternary)
-                )
+                Text("\(model.settings.language.displayName) ⌄")
             }
+            .menuStyle(.button)
             .buttonStyle(.plain)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .foregroundStyle(.primary)
+            .accessibilityLabel("输入语言：\(model.settings.language.displayName)")
+
+            Spacer()
 
             if model.settings.speechProvider == .codex {
-                Button {
-                    openSettingsWindow()
-                } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("CODEX")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        Text("直接输入")
-                            .font(.caption)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(.quaternary))
-                }
-                .buttonStyle(.plain)
+                Button("Codex · 直接输入", action: openSettingsWindow)
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("语音服务设置")
             } else {
                 Menu {
                     Button {
                         model.setAIRewriteEnabled(!model.aiRewriteEnabled)
                     } label: {
                         Label(
-                            model.aiRewriteEnabled ? "Enabled" : "Disabled",
+                            model.aiRewriteEnabled ? "关闭 AI 改写" : "开启 AI 改写",
                             systemImage: model.aiRewriteEnabled ? "checkmark.circle.fill" : "circle"
                         )
                     }
-
-                    Button("Settings…") {
-                        openSettingsWindow()
-                    }
+                    Button("设置…", action: openSettingsWindow)
                 } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("AI REWRITE")
-                            .font(.system(size: 9, weight: .medium))
-                            .foregroundStyle(.secondary)
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(model.aiRewriteEnabled ? Color.green : Color.secondary)
-                                .frame(width: 6, height: 6)
-                            Text("\(model.aiRewriteEnabled ? "On" : "Off") ▾")
-                                .font(.caption)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.quaternary)
-                    )
+                    Text(model.aiRewriteEnabled ? "AI 改写：开 ⌄" : "AI 改写：关 ⌄")
                 }
+                .menuStyle(.button)
                 .buttonStyle(.plain)
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .foregroundStyle(.secondary)
             }
         }
+        .font(.system(size: 11))
     }
 
-    // MARK: - Zone 3 — Icon Footer
-
-    private var iconFooter: some View {
+    private var footerRow: some View {
         HStack {
-            Button {
-                openSettingsWindow()
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.quaternary)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Settings")
-
-            Spacer()
-
             Text("v\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0")")
-                .font(.caption2)
                 .foregroundStyle(.tertiary)
-
             Spacer()
-
             Button {
                 NSApp.terminate(nil)
             } label: {
-                Image(systemName: "power")
-                    .font(.system(size: 14))
+                Label("退出", systemImage: "power")
                     .foregroundStyle(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(.quaternary)
-                    )
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Quit")
         }
+        .font(.system(size: 11))
     }
 
-    // MARK: - Computed Properties
-
     private var statusLabel: String {
-        switch model.phase {
-        case .idle:
-            "Ready"
-        case .onboarding:
-            "Setup"
-        case .recording:
-            "Recording"
-        case .transcribing:
-            "Transcribing"
-        case .refining:
-            "Rewriting"
-        case .inserted:
-            "Inserted"
-        case .copiedToClipboard:
-            "Copied"
-        case .failed:
-            "Error"
+        if !model.permissionSnapshot.ready { return "待授权" }
+        if !model.hasASRCredentials { return "待配置" }
+        return switch model.phase {
+        case .idle: "已就绪"
+        case .onboarding: "待设置"
+        case .recording: "录音中"
+        case .transcribing: "转写中"
+        case .refining: "处理中"
+        case .inserted: "已输入"
+        case .copiedToClipboard: "已复制"
+        case .failed: "出错了"
         }
     }
 
     private var statusColor: Color {
-        switch model.phase {
-        case .recording:
-            .red
-        case .transcribing, .refining:
-            .orange
-        case .inserted, .copiedToClipboard:
-            .green
-        case .failed:
-            .yellow
-        case .idle:
-            .green
-        case .onboarding:
-            .secondary
+        if !model.permissionSnapshot.ready || !model.hasASRCredentials { return .orange }
+        return switch model.phase {
+        case .recording, .failed: .red
+        case .transcribing, .refining: .orange
+        case .idle, .inserted, .copiedToClipboard: accentColor
+        case .onboarding: .secondary
         }
     }
-
-    // MARK: - Helper Functions
 
     private func activateAndOpenWindow(id: String) {
         dismissMenuBarWindow()
