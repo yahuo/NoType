@@ -143,6 +143,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         guard let location = response.value(forHTTPHeaderField: "Location"),
               let callID = URL(string: location)?.lastPathComponent,
               callID.range(of: #"^rtc_[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else { throw NeoVoiceError.invalidResponse }
+        Self.logger.notice("call_created status=\(response.statusCode)")
         _ = try await web.callAsyncJavaScript("await neo.answer(sdp);", arguments: ["sdp": answer], in: nil, contentWorld: .page)
         try checkActive(id)
         try await agent.attach(callID: callID)
@@ -230,6 +231,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard webView === self.webView else { return }
+        Self.logger.error("media_failed reason=web_content_terminated")
         onEvent?(.failed(NeoVoiceError.connectionLost))
     }
 
@@ -250,7 +252,11 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         case "playbackEnded": onEvent?(.playbackEnded)
         case "playbackInterrupted": Self.logger.notice("playback_interrupted")
         case "playbackResumed": Self.logger.notice("playback_resumed")
-        case "error": onEvent?(.failed(NeoVoiceError.connectionLost))
+        case "transport":
+            Self.logger.notice("transport_state peer=\(body["state"] as? String ?? "unknown", privacy: .public) ice=\(body["ice"] as? String ?? "unknown", privacy: .public)")
+        case "error":
+            Self.logger.error("media_failed reason=\(body["reason"] as? String ?? "unknown", privacy: .public)")
+            onEvent?(.failed(NeoVoiceError.connectionLost))
         default: break
         }
     }
@@ -260,9 +266,9 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; media-src blob:; connect-src 'none'">
     <script>
     const neo = (() => {
-      let pc, dc, mic, remote, context, timer, closed = false;
+      let pc, dc, mic, remote, context, timer, disconnectTimer, closed = false;
       const post = (type, extra = {}) => { if (!closed) window.webkit.messageHandlers.neo.postMessage({type, ...extra}); };
-      const fail = () => post('error');
+      const fail = reason => post('error', {reason});
       let inputMeter, outputMeter;
       let userTurn, assistantTurn, ending, lastOutputAt = -Infinity;
       let assistantStarted, interrupted, inputStartedAt, lastInputAt = -Infinity;
@@ -340,21 +346,30 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         context = new AudioContext(); await context.resume(); inputMeter = meter(mic);
         pc = new RTCPeerConnection({iceServers: []});
         mic.getTracks().forEach(t => pc.addTrack(t, mic));
-        pc.onconnectionstatechange = () => { if (['failed', 'disconnected'].includes(pc.connectionState)) fail(); };
+        pc.onconnectionstatechange = () => {
+          post('transport', {state: pc.connectionState, ice: pc.iceConnectionState});
+          clearTimeout(disconnectTimer);
+          if (pc.connectionState === 'failed') fail('peer_failed');
+          if (pc.connectionState === 'disconnected') {
+            disconnectTimer = setTimeout(() => {
+              if (!closed && pc.connectionState === 'disconnected') fail('peer_disconnected_timeout');
+            }, 5000);
+          }
+        };
         pc.ontrack = async event => {
           if (closed) return;
           const stream = event.streams[0] || new MediaStream([event.track]);
           outputMeter = meter(stream);
           remote = new Audio(); remote.srcObject = stream; remote.autoplay = true; remote.muted = !!interrupted;
-          try { await remote.play(); } catch { fail(); }
+          try { await remote.play(); } catch { fail('audio_playback'); }
         };
         dc = pc.createDataChannel('oai-events');
-        dc.onopen = () => post('ready'); dc.onerror = fail;
-        dc.onclose = () => { if (!closed) fail(); };
+        dc.onopen = () => post('ready'); dc.onerror = () => fail('data_channel_error');
+        dc.onclose = () => { if (!closed) fail('data_channel_closed'); };
         dc.onmessage = event => {
           if (closed) return;
           let value; try { value = JSON.parse(event.data); } catch { return; }
-          if (value.type === 'error') fail();
+          if (value.type === 'error') fail('server_event');
           if (value.type === 'turn.created') {
             if (value.turn?.role === 'user') {
               if (performance.now() - lastOutputAt < 250) interruptPlayback();
@@ -403,7 +418,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
       }
       async function answer(sdp) { if (!closed) await pc.setRemoteDescription({type: 'answer', sdp}); }
       function stop() {
-        closed = true; clearInterval(timer);
+        closed = true; clearInterval(timer); clearTimeout(disconnectTimer);
         mic?.getTracks().forEach(t => t.stop());
         if (remote) { remote.pause(); remote.srcObject = null; }
         dc?.close(); pc?.close(); context?.close();

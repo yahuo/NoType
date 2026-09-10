@@ -73,6 +73,7 @@ final class NeoVoiceController {
     private var idle: Task<Void, Never>?
     private var lastActivity = ProcessInfo.processInfo.systemUptime
     private var agentWorking = false
+    private var retryStartup: (() -> Void)?
 
     init(
         wake: WakeWordListening = NativeWakeWordService(),
@@ -121,12 +122,20 @@ final class NeoVoiceController {
 
     func startConversation() {
         guard !suspended, !state.inConversation else { return }
+        connect(voice: voice, speechGuidance: speechGuidance, model: executionModel, effort: reasoningEffort, retryAllowed: true)
+    }
+
+    private func connect(voice selectedVoice: NeoVoice, speechGuidance selectedSpeechGuidance: String,
+                         model selectedExecutionModel: NeoExecutionModel, effort selectedReasoningEffort: NeoReasoningEffort,
+                         retryAllowed: Bool) {
         reset()
         let id = generation
-        let selectedVoice = voice
-        let selectedSpeechGuidance = speechGuidance
-        let selectedExecutionModel = executionModel
-        let selectedReasoningEffort = reasoningEffort
+        if retryAllowed {
+            retryStartup = { [weak self] in
+                self?.connect(voice: selectedVoice, speechGuidance: selectedSpeechGuidance,
+                              model: selectedExecutionModel, effort: selectedReasoningEffort, retryAllowed: false)
+            }
+        }
         state = .connecting
         operation = Task { [weak self] in
             guard let self else { return }
@@ -148,7 +157,7 @@ final class NeoVoiceController {
                 }
             } catch {
                 guard self.generation == id, !Task.isCancelled else { return }
-                self.fail(error)
+                self.handleCallFailure(error)
             }
         }
     }
@@ -196,6 +205,7 @@ final class NeoVoiceController {
         case .mediaViewReady: onChange?()
         case .ready:
             guard state == .connecting else { return }
+            retryStartup = nil
             deadline?.cancel()
             state = .listening
             call.greet()
@@ -219,6 +229,8 @@ final class NeoVoiceController {
             let next: NeoVoiceState = speaking ? .speaking : (agentWorking ? .working : .listening)
             if state != next { state = next }
         case .working(let working):
+            // Never restart once the backend may have acted on a spoken request.
+            if working { retryStartup = nil }
             guard state != .ending else { return }
             agentWorking = working
             lastActivity = ProcessInfo.processInfo.systemUptime
@@ -231,8 +243,17 @@ final class NeoVoiceController {
         case .playbackEnded:
             if state == .ending { endConversation() }
         case .failed(let error):
-            if state == .ending { endConversation() } else { fail(error) }
+            if state == .ending { endConversation() } else { handleCallFailure(error) }
         }
+    }
+
+    private func handleCallFailure(_ error: Error) {
+        if state == .connecting, let voiceError = error as? NeoVoiceError,
+           case .connectionLost = voiceError, let retry = retryStartup {
+            retryStartup = nil
+            Self.logger.notice("startup_retry attempt=2 reason=connection_lost")
+            retry()
+        } else { fail(error) }
     }
 
     private func fail(_ error: Error) {
@@ -248,6 +269,7 @@ final class NeoVoiceController {
         operation = nil
         deadline = nil
         idle = nil
+        retryStartup = nil
         wake.stop()
         call.stop()
         agentWorking = false

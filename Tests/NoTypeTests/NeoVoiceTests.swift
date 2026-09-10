@@ -358,6 +358,7 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
     var speechGuidances: [String] = []
     var executionModels: [NeoExecutionModel] = []
     var reasoningEfforts: [NeoReasoningEffort] = []
+    var startError: Error?
     func start(voice: NeoVoice, speechGuidance: String, executionModel: NeoExecutionModel, reasoningEffort: NeoReasoningEffort, onEvent: @escaping (NeoRealtimeEvent) -> Void) async throws {
         starts += 1
         voices.append(voice)
@@ -365,6 +366,10 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
         executionModels.append(executionModel)
         reasoningEfforts.append(reasoningEffort)
         events.append(onEvent)
+        if let error = startError {
+            startError = nil
+            throw error
+        }
     }
     func stop() { stops += 1 }
     func finishAfterReply() { finishes += 1 }
@@ -458,6 +463,83 @@ func neoCustomWakePhraseMatchesCompleteWords(phrase: String, text: String, expec
 
 @MainActor private func settle() async {
     for _ in 0..<12 { await Task.yield() }
+}
+
+@MainActor @Test(arguments: [false, true])
+func neoStartupDisconnectRetriesOnceWithOriginalSettings(throwsDuringStart: Bool) async throws {
+    let call = FakeCall()
+    if throwsDuringStart { call.startError = NeoVoiceError.connectionLost }
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.setVoice(.maple)
+    neo.setExecution(model: .terra, reasoningEffort: .high)
+    neo.startConversation()
+    neo.setVoice(.cove)
+    neo.setExecution(model: .sol, reasoningEffort: .low)
+    await settle()
+    if !throwsDuringStart { call.events[0](.failed(NeoVoiceError.connectionLost)) }
+    await settle()
+    try #require(call.starts == 2)
+    #expect(neo.state == .connecting)
+    #expect(call.voices == [.maple, .maple])
+    #expect(call.executionModels == [.terra, .terra])
+    #expect(call.reasoningEfforts == [.high, .high])
+    call.events[0](.ready)
+    call.events[0](.failed(NeoVoiceError.connectionLost))
+    #expect(call.greetings == 0)
+    call.events[1](.ready)
+    #expect(neo.state == .listening)
+    #expect(call.greetings == 1)
+}
+
+@MainActor @Test func neoStartupRetryIsBoundedAndManualCloseCancelsIt() async throws {
+    let call = FakeCall()
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.startConversation()
+    await settle()
+    call.events[0](.failed(NeoVoiceError.connectionLost))
+    await settle()
+    try #require(call.starts == 2)
+    call.events[1](.failed(NeoVoiceError.connectionLost))
+    await settle()
+    #expect(call.starts == 2)
+    #expect(neo.state == .failed(NeoVoiceError.connectionLost.localizedDescription))
+    neo.startConversation()
+    await settle()
+    call.events[2](.failed(NeoVoiceError.connectionLost))
+    neo.endConversation()
+    await settle()
+    #expect(call.starts == 3)
+    #expect(neo.state == .off)
+}
+
+@MainActor @Test(arguments: [false, true])
+func neoDoesNotRestartAnEstablishedOrActiveConversation(backendStarted: Bool) async {
+    let call = FakeCall()
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.startConversation()
+    await settle()
+    if backendStarted {
+        call.events[0](.working(true))
+        call.events[0](.working(false))
+    } else { call.events[0](.ready) }
+    call.events[0](.failed(NeoVoiceError.connectionLost))
+    await settle()
+    #expect(call.starts == 1)
+    #expect(neo.state == .failed(NeoVoiceError.connectionLost.localizedDescription))
+}
+
+@MainActor @Test func neoStartupAuthFailureDoesNotRetry() async {
+    let call = FakeCall()
+    call.startError = AIRewriteError.codexAuthExpired
+    let neo = NeoVoiceController(wake: FakeWake(), call: call, microphoneAccess: { true })
+    defer { neo.shutdown() }
+    neo.startConversation()
+    await settle()
+    #expect(call.starts == 1)
+    #expect(neo.state == .failed(AIRewriteError.codexAuthExpired.localizedDescription))
 }
 
 @MainActor @Test func neoWakeStartsOneCallAndOldCallbacksCannotReviveEndedSession() async {

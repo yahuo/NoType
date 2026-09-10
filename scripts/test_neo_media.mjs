@@ -9,7 +9,7 @@ const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
 const shutdown = source.match(/web\.evaluateJavaScript\("([^"]*neo\.stop\(\)[^"]*)"\)/)[1];
 
 function harness(pendingPermission = false) {
-  const state = {stops: 0, peerCloses: 0, audioCloses: 0, messages: [], sent: [], now: 1000, input: 0, output: 0};
+  const state = {stops: 0, peerCloses: 0, audioCloses: 0, messages: [], sent: [], now: 1000, input: 0, output: 0, timeouts: new Map()};
   const track = {enabled: true, stop: () => state.stops++};
   const microphone = {getTracks: () => [track]};
   let grant;
@@ -41,6 +41,8 @@ function harness(pendingPermission = false) {
     performance: {now: () => state.now},
     setInterval: callback => { state.tick = callback; return 1; },
     clearInterval() { state.tick = null; },
+    setTimeout(callback, delay) { const token = {}; state.timeouts.set(token, {callback, at: state.now + delay}); return token; },
+    clearTimeout(token) { state.timeouts.delete(token); },
   });
   vm.runInContext(script, context);
   return {
@@ -51,7 +53,12 @@ function harness(pendingPermission = false) {
     greet: () => vm.runInContext('neo.greet()', context),
     event(value) { state.channel.onmessage({data: JSON.stringify(value)}); },
     receive(role, end_ms) { state.channel.onmessage({data: JSON.stringify({type: 'turn.done', turn: {role, end_ms}})}); },
-    advance(ms, output = 0, input = 0) { state.now += ms; state.output = output; state.input = input; state.tick?.(); },
+    advance(ms, output = 0, input = 0) {
+      state.now += ms; state.output = output; state.input = input; state.tick?.();
+      for (const [token, timeout] of state.timeouts) {
+        if (timeout.at <= state.now) { state.timeouts.delete(token); timeout.callback(); }
+      }
+    },
     ended: () => state.messages.filter(message => message.type === 'playbackEnded').length,
   };
 }
@@ -332,4 +339,41 @@ function harness(pendingPermission = false) {
   assert.equal(test.ended(), 1);
   test.stop();
 }
-console.log('Neo media lifecycle: 20 scenarios passed');
+{
+  const test = harness();
+  await test.offer();
+  test.state.peer.connectionState = 'failed';
+  test.state.peer.iceConnectionState = 'failed';
+  test.state.peer.onconnectionstatechange();
+  assert.equal(test.state.messages.at(-1).reason, 'peer_failed', 'Connection errors must identify the failing media stage');
+  test.state.channel.onerror();
+  assert.equal(test.state.messages.at(-1).reason, 'data_channel_error');
+  test.state.channel.onclose();
+  assert.equal(test.state.messages.at(-1).reason, 'data_channel_closed');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  test.state.peer.connectionState = 'disconnected';
+  test.state.peer.onconnectionstatechange();
+  test.advance(4900);
+  assert.equal(test.state.messages.some(message => message.type === 'error'), false, 'A transient disconnection must be allowed to recover');
+  test.state.peer.connectionState = 'connected';
+  test.state.peer.onconnectionstatechange();
+  test.advance(5000);
+  assert.equal(test.state.messages.some(message => message.type === 'error'), false, 'Recovery must cancel the pending disconnect error');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  test.state.peer.connectionState = 'disconnected';
+  test.state.peer.onconnectionstatechange();
+  test.advance(5000);
+  assert.equal(test.state.messages.at(-1).reason, 'peer_disconnected_timeout', 'A persistent disconnect must still release the failed call');
+  test.state.peer.onconnectionstatechange();
+  test.stop();
+  assert.equal(test.state.timeouts.size, 0, 'Closing a call must cancel its disconnect timer');
+}
+console.log('Neo media lifecycle: 23 scenarios passed');
