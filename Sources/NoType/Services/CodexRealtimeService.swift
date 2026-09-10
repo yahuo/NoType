@@ -1,5 +1,6 @@
 @preconcurrency import WebKit
 import Foundation
+import OSLog
 
 enum NeoRealtimeEvent {
     case mediaViewReady
@@ -24,6 +25,7 @@ protocol NeoRealtimeCalling: AnyObject {
 /// OAuth stays in Swift; the private, nonpersistent page only receives SDP and media events.
 @MainActor
 final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
+    private static let logger = Logger(subsystem: "com.opensource.notype", category: "NeoLatency")
     private var webView: WKWebView?
     private var loaded: CheckedContinuation<Void, Error>?
     private var session: URLSession?
@@ -57,6 +59,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         request.setValue(threadID, forHTTPHeaderField: "Thread-Id")
         var instructions = """
         You are Neo, a concise Chinese voice assistant connected to a capable Codex backend.
+        When the user starts speaking, stop speaking immediately and listen. Discard the unfinished part of your previous reply, including any sentence already started. After the user finishes, respond only to the new input; never finish or repeat the interrupted reply unless explicitly asked to continue it.
         Immediately delegate every action, current-information question, web search, screen reading, or app-control request to the backend. Answer self-contained conversation, explanations, and simple calculations from confirmed facts directly.
         The backend can access the user's existing local Codex memories. Always delegate questions or discussions about the user's preferences, projects, past conversations, decisions, or remembered context. Never invent personal memories or claim they are unavailable before checking with the backend.
         You cannot see the screen or execute actions yourself. After delegating, you may briefly acknowledge the request, then stay available for conversation while the backend works. When backend progress reports a new checked fact or a blocker, promptly speak one short Chinese sentence about it while work continues; do not wait for the final result. Skip repetitive plans and acknowledgements. Present the final result when it arrives. Never guess screen content, numbers, search results, or whether an action succeeded. A progress update such as 'I will check' is not a result.
@@ -245,6 +248,8 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         case "userTurn":
             if let text = body["text"] as? String, Self.isEndCommand(text) { onEvent?(.endRequested) }
         case "playbackEnded": onEvent?(.playbackEnded)
+        case "playbackInterrupted": Self.logger.notice("playback_interrupted")
+        case "playbackResumed": Self.logger.notice("playback_resumed")
         case "error": onEvent?(.failed(NeoVoiceError.connectionLost))
         default: break
         }
@@ -260,6 +265,40 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
       const fail = () => post('error');
       let inputMeter, outputMeter;
       let userTurn, assistantTurn, ending, lastOutputAt = -Infinity;
+      let assistantStarted, interrupted, inputStartedAt, lastInputAt = -Infinity;
+      function interruptPlayback() {
+        if (closed || ending || interrupted) return;
+        interrupted = {at: performance.now(), assistantID: assistantStarted?.id, confirmed: false};
+        if (remote) remote.muted = true;
+        post('playbackInterrupted');
+      }
+      function resumePlayback() {
+        interrupted = null;
+        if (remote) remote.muted = false;
+        post('playbackResumed');
+      }
+      function confirmInterruption() {
+        if (!interrupted || interrupted.confirmed) return;
+        interrupted.confirmed = true;
+        // Frameless Bidi has no response.cancel; tell the live model to drop the old reply.
+        dc.send(JSON.stringify({type: 'session.context.append', content: [{type: 'input_text',
+          text: 'The user is interrupting. Stop the previous reply immediately. Listen to the user and answer only the newest request. Discard the unfinished sentence; do not resume it.'}]}));
+      }
+      function resumeAfterNewInput() {
+        if (!interrupted?.confirmed || interrupted.userDoneAt == null || !assistantStarted) return;
+        // Live voice can finish a transcript segment before the user stops talking.
+        if (performance.now() - lastInputAt < 300) return;
+        const afterInput = Number.isFinite(assistantStarted.end) && Number.isFinite(interrupted.userEnd)
+          ? assistantStarted.end >= interrupted.userEnd : assistantStarted.at >= interrupted.userDoneAt;
+        if (assistantStarted.id !== interrupted.assistantID && afterInput) resumePlayback();
+      }
+      function checkInterruption(now, input) {
+        if (input > 0.015) { inputStartedAt ??= now; lastInputAt = now; }
+        else if (now - lastInputAt > 150) inputStartedAt = null;
+        // Hold playback locally while the service recognizes the new user turn.
+        if (inputStartedAt != null && now - inputStartedAt >= 200 && now - lastOutputAt < 250) interruptPlayback();
+        if (interrupted && !interrupted.confirmed && now - interrupted.at >= 4000 && now - lastInputAt >= 600) resumePlayback();
+      }
       let greeted = false;
       function greet() {
         if (closed || greeted || dc?.readyState !== 'open') return;
@@ -286,7 +325,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         }
       }
       function meter(stream) {
-        const analyser = context.createAnalyser(); analyser.fftSize = 256;
+        const analyser = context.createAnalyser(); analyser.fftSize = 2048;
         context.createMediaStreamSource(stream).connect(analyser);
         return analyser;
       }
@@ -306,7 +345,7 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
           if (closed) return;
           const stream = event.streams[0] || new MediaStream([event.track]);
           outputMeter = meter(stream);
-          remote = new Audio(); remote.srcObject = stream; remote.autoplay = true;
+          remote = new Audio(); remote.srcObject = stream; remote.autoplay = true; remote.muted = !!interrupted;
           try { await remote.play(); } catch { fail(); }
         };
         dc = pc.createDataChannel('oai-events');
@@ -316,11 +355,31 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
           if (closed) return;
           let value; try { value = JSON.parse(event.data); } catch { return; }
           if (value.type === 'error') fail();
+          if (value.type === 'turn.created') {
+            if (value.turn?.role === 'user') {
+              if (performance.now() - lastOutputAt < 250) interruptPlayback();
+              if (interrupted) { confirmInterruption(); interrupted.userDoneAt = null; }
+            }
+            if (value.turn?.role === 'assistant') {
+              assistantStarted = {id: value.turn.id, end: value.turn.end_ms, at: performance.now()};
+              resumeAfterNewInput();
+            }
+          }
           if (value.type === 'turn.done') {
             const turn = {end: value.turn?.end_ms, at: performance.now()};
             if (value.turn?.role === 'assistant') assistantTurn = turn;
             if (value.turn?.role === 'user') {
               userTurn = turn;
+              if (interrupted) {
+                confirmInterruption();
+                if (interrupted.userDoneAt == null && value.turn.transcript) {
+                  dc.send(JSON.stringify({type: 'session.context.append', content: [{type: 'input_text',
+                    text: 'The user has interrupted and finished speaking. Their newest request is: ' + JSON.stringify(value.turn.transcript) + '. Answer only this newest request. Do not continue your previous interrupted answer.'}]}));
+                }
+                interrupted.userDoneAt = turn.at;
+                interrupted.userEnd = turn.end;
+                resumeAfterNewInput();
+              }
               post('userTurn', {text: value.turn.transcript || ''});
             }
           }
@@ -329,7 +388,10 @@ final class CodexRealtimeService: NSObject, NeoRealtimeCalling, WKNavigationDele
         timer = setInterval(() => {
           const input = level(inputMeter), output = level(outputMeter);
           checkPlaybackEnd(performance.now(), output);
-          post('level', {level: Math.min(1, Math.max(input, output) * 4), speaking: output > 0.015});
+          checkInterruption(performance.now(), input);
+          resumeAfterNewInput();
+          const audible = interrupted ? 0 : output;
+          post('level', {level: Math.min(1, Math.max(input, audible) * 4), speaking: audible > 0.015});
         }, 100);
         await pc.setLocalDescription(await pc.createOffer());
         if (pc.iceGatheringState !== 'complete') await new Promise(resolve => {

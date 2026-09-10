@@ -9,7 +9,7 @@ const script = page.match(/<script>([\s\S]*?)<\/script>/)[1];
 const shutdown = source.match(/web\.evaluateJavaScript\("([^"]*neo\.stop\(\)[^"]*)"\)/)[1];
 
 function harness(pendingPermission = false) {
-  const state = {stops: 0, peerCloses: 0, audioCloses: 0, messages: [], sent: [], now: 1000, output: 0};
+  const state = {stops: 0, peerCloses: 0, audioCloses: 0, messages: [], sent: [], now: 1000, input: 0, output: 0};
   const track = {enabled: true, stop: () => state.stops++};
   const microphone = {getTracks: () => [track]};
   let grant;
@@ -28,7 +28,7 @@ function harness(pendingPermission = false) {
     async resume() {}
     createAnalyser() {
       const output = this.analysers++ > 0;
-      return {fftSize: 256, getFloatTimeDomainData(values) { values.fill(output ? state.output : 0); }};
+      return {fftSize: 256, getFloatTimeDomainData(values) { values.fill(output ? state.output : state.input); }};
     }
     createMediaStreamSource() { return {connect() {}}; }
     close() { state.audioCloses++; }
@@ -49,8 +49,9 @@ function harness(pendingPermission = false) {
     stop: () => vm.runInContext(shutdown, context),
     finish: () => vm.runInContext('neo.finishAfterReply()', context),
     greet: () => vm.runInContext('neo.greet()', context),
+    event(value) { state.channel.onmessage({data: JSON.stringify(value)}); },
     receive(role, end_ms) { state.channel.onmessage({data: JSON.stringify({type: 'turn.done', turn: {role, end_ms}})}); },
-    advance(ms, output = 0) { state.now += ms; state.output = output; state.tick?.(); },
+    advance(ms, output = 0, input = 0) { state.now += ms; state.output = output; state.input = input; state.tick?.(); },
     ended: () => state.messages.filter(message => message.type === 'playbackEnded').length,
   };
 }
@@ -221,4 +222,114 @@ function harness(pendingPermission = false) {
   test.greet();
   assert.equal(test.state.sent.length, 1, 'A closed call must never speak a delayed greeting');
 }
-console.log('Neo media lifecycle: 13 scenarios passed');
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', start_ms: 1000, end_ms: 1200}});
+  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
+  assert.equal(test.state.audio.muted, true, 'Sustained near-end speech must silence playback before the final transcript');
+  assert.equal(test.state.messages.at(-1).speaking, false, 'Suppressed audio must not show Neo as speaking');
+  assert.equal(test.track.enabled, true, 'Barge-in must keep capturing the new request');
+  assert.equal(test.state.sent.length, 0, 'Local microphone noise alone must not change model context');
+  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', start_ms: 1800, end_ms: 2000}});
+  assert.equal(test.state.sent.length, 1, 'Confirmed speech must tell the live model to discard the old reply');
+  assert.equal(test.state.sent[0].type, 'session.context.append', 'Use the supported Frameless Bidi context channel');
+  test.event({type: 'turn.done', turn: {id: 'old', role: 'assistant', end_ms: 2000}});
+  test.advance(500, 0.1);
+  assert.equal(test.state.audio.muted, true, 'An interrupted turn completing must not resume buffered audio');
+  test.event({type: 'turn.done', turn: {id: 'user', role: 'user', end_ms: 3000, transcript: '停一下，只说收到。'}});
+  assert.equal(test.state.sent.length, 2, 'The completed new request must replace the interrupted topic in model context');
+  assert.equal(test.state.sent[1].type, 'session.context.append');
+  assert.equal(test.state.sent[1].channel, undefined, 'The interruption reminder must not be read as a spoken reply');
+  assert.ok(test.state.sent[1].content[0].text.includes('停一下，只说收到。'));
+  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', start_ms: 1000, end_ms: 1200}});
+  assert.equal(test.state.audio.muted, true, 'A late old assistant event must not resume playback');
+  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', start_ms: 2800, end_ms: 3000}});
+  assert.equal(test.state.audio.muted, false, 'The reply to the completed new user turn must become audible');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.advance(100, 0.1, 0.05);
+  test.advance(100, 0.1);
+  assert.equal(test.state.audio.muted, false, 'A short microphone noise must not interrupt playback');
+  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
+  assert.equal(test.state.audio.muted, true);
+  test.advance(4000, 0.1);
+  assert.equal(test.state.audio.muted, false, 'Unconfirmed local noise must not leave playback muted forever');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.advance(100, 0.1);
+  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', start_ms: 2000, end_ms: 2200}});
+  assert.equal(test.state.audio.muted, true, 'A confirmed user turn must also interrupt quiet microphone input');
+  test.advance(5000, 0.1);
+  assert.equal(test.state.audio.muted, true, 'Confirmed speech must not use the noise recovery timeout');
+  test.receive('user', 3000);
+  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', start_ms: 2800, end_ms: 3000}});
+  assert.equal(test.state.audio.muted, false);
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.advance(100, 0.1);
+  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', start_ms: 2000, end_ms: 2200}});
+  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', start_ms: 2800, end_ms: 3000}});
+  assert.equal(test.state.audio.muted, true, 'Do not resume before the interrupted user input has completed');
+  test.receive('user', 3000);
+  assert.equal(test.state.audio.muted, false, 'A late user completion must still release the new reply');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.advance(100, 0.1, 0.05);
+  test.advance(100, 0.1, 0.05);
+  test.advance(100, 0.1);
+  assert.equal(test.state.audio.muted, true, 'A brief gap between syllables must not restart speech detection');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', end_ms: 1200}});
+  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
+  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', end_ms: 1800}});
+  test.receive('user', 2000);
+  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', end_ms: 2000}});
+  assert.equal(test.state.audio.muted, true, 'A partial user turn must not resume playback while the user is still speaking');
+  test.advance(100, 0.1, 0.05);
+  test.advance(300, 0.1);
+  assert.equal(test.state.audio.muted, false, 'The new reply can resume once the microphone is quiet');
+  test.stop();
+}
+{
+  const test = harness();
+  await test.offer();
+  await test.state.peer.ontrack({streams: [{}]});
+  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', end_ms: 1200}});
+  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
+  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', end_ms: 1800}});
+  test.receive('user', 2000);
+  test.finish();
+  test.event({type: 'turn.created', turn: {id: 'farewell', role: 'assistant', end_ms: 2200}});
+  test.advance(300, 0.1);
+  assert.equal(test.state.audio.muted, false, 'Ending during playback must still make the farewell audible');
+  test.receive('assistant', 4000);
+  test.advance(799);
+  assert.equal(test.ended(), 0, 'The farewell must finish even after barge-in');
+  test.advance(1);
+  assert.equal(test.ended(), 1);
+  test.stop();
+}
+console.log('Neo media lifecycle: 20 scenarios passed');

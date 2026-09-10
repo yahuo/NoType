@@ -53,7 +53,6 @@ final class CodexAgentService: NeoAgentSession {
 
     init(workspace: URL? = nil, processFactory: (() throws -> Process)? = nil) {
         self.workspace = workspace ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/NoType/Neo", isDirectory: true)
         self.processFactory = processFactory ?? Self.makeProcess
     }
 

@@ -24,7 +24,7 @@ private final class AgentFixture {
             sys.stdout.write(line[5:]);sys.stdout.flush()
         for line in sys.stdin:
             value=json.loads(line)
-            with open('requests.jsonl','a') as f:f.write(line)
+            with open(sys.argv[5],'a') as f:f.write(line)
             method=value.get('method')
             if method is None:
                 if value.get('id')=='frontmost' and sys.argv[3]=='finish':
@@ -45,7 +45,7 @@ private final class AgentFixture {
                 send({'id':'frontmost','method':'item/tool/call','params':{'threadId':'neo-test-thread','tool':'neo_frontmost_app','arguments':{},'turnId':'turn-1','callId':'call-1'}})
             if method=='thread/realtime/stop':
                 send({'method':'turn/completed','params':{'threadId':'neo-test-thread'}})
-        """#, persistent ? "persistent" : "temporary", holdInitialize ? "hold" : "reply", finishTurn ? "finish" : "hold", turnStatus]
+        """#, persistent ? "persistent" : "temporary", holdInitialize ? "hold" : "reply", finishTurn ? "finish" : "hold", turnStatus, directory.appendingPathComponent("requests.jsonl").path]
         self.process = process
         return process
     }
@@ -64,6 +64,20 @@ private final class AgentFixture {
     }
 
     func clean() { try? FileManager.default.removeItem(at: directory) }
+}
+
+@MainActor @Test func neoDefaultWorkspaceUsesUserHomeForProcessAndThread() async throws {
+    let fixture = AgentFixture()
+    let agent = CodexAgentService(processFactory: fixture.makeProcess)
+    defer { agent.stop(); fixture.clean() }
+    _ = try await agent.start { _ in }
+    let home = FileManager.default.homeDirectoryForCurrentUser
+    #expect(fixture.process?.currentDirectoryURL == home)
+    let start = try #require(fixture.requests().first { $0["method"] as? String == "thread/start" })
+    let parameters = try #require(start["params"] as? [String: Any])
+    #expect(parameters["cwd"] as? String == home.path)
+    agent.stop()
+    try await fixture.waitUntil { fixture.process?.isRunning == false }
 }
 
 @MainActor @Test(arguments: [
