@@ -18,7 +18,7 @@ jobs:
         run: brew install imagemagick
 
       - name: Swift Test
-        run: swift test
+        run: swift test --no-parallel
 
       - name: Package Experimental Build
         env:

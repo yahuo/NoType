@@ -80,8 +80,8 @@ app_target.build_configurations.each do |config|
   settings['SWIFT_VERSION'] = '6.0'
   settings['MACOSX_DEPLOYMENT_TARGET'] = DEPLOYMENT_TARGET
   settings['CODE_SIGN_STYLE'] = 'Automatic'
-  settings['CURRENT_PROJECT_VERSION'] = '1'
-  settings['MARKETING_VERSION'] = '1.0.0'
+  settings['CURRENT_PROJECT_VERSION'] = '2'
+  settings['MARKETING_VERSION'] = '2.0.0'
   settings['LD_RUNPATH_SEARCH_PATHS'] = ['$(inherited)', '@executable_path/../Frameworks']
   settings['ENABLE_HARDENED_RUNTIME'] = 'YES'
   settings['ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS'] = 'NO'

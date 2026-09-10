@@ -30,7 +30,10 @@ create_dmg() {
 
 write_checksums() {
   rm -f "$CHECKSUM_PATH"
-  shasum -a 256 "$ZIP_PATH" "$DMG_PATH" > "$CHECKSUM_PATH"
+  (
+    cd "$RELEASE_DIR"
+    shasum -a 256 "${ARTIFACT_BASENAME}.zip" "${ARTIFACT_BASENAME}.dmg" > "$CHECKSUM_PATH"
+  )
 }
 
 if [[ "$SKIP_BUILD" != "1" ]]; then
