@@ -85,6 +85,16 @@ NoType 目前处于早期可用阶段：
 
 ## 快速开始
 
+### Homebrew 安装（Apple Silicon）
+
+```bash
+brew install --cask ssdev-labs/tap/notype
+```
+
+后续使用 `brew upgrade --cask notype` 升级。已经手动安装相同版本时，可用 `brew install --cask --adopt ssdev-labs/tap/notype` 纳入 Homebrew 管理。
+
+当前下载包使用 Apple Development 签名，未经过 Apple 公证；首次打开若被拦截，请在「系统设置 → 隐私与安全性」中允许 NoType。
+
 ### 直接运行
 
 ```bash

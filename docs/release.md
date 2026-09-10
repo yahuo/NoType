@@ -102,7 +102,19 @@ gh release create v2.0.0 \
 
 发布后重新下载附件，核对 SHA256、包内版本、签名和启动情况。构建通过或签名有效不代表已完成真人麦克风与目标应用操作验收。
 
-## 4. 官网下载链接
+## 4. 更新 Homebrew Cask
+
+公开安装入口为：
+
+```bash
+brew install --cask ssdev-labs/tap/notype
+```
+
+GitHub Release 发布并验证后，更新 [homebrew-tap 的 Casks/notype.rb](https://github.com/ssdev-labs/homebrew-tap/blob/master/Casks/notype.rb) 中的 `version` 和 DMG 的 `sha256`，校验通过后推送 tap。Cask 直接使用 NoType Release 附件，不重复构建或上传安装包。
+
+`livecheck` 用于检查最新 Release，不会自动修改 Cask；每次发布仍需同步版本与 SHA-256，用户才可通过 `brew upgrade --cask notype` 升级。
+
+## 5. 官网下载链接
 
 官网不要直接把二进制托管在 Vercel 上，推荐做法是：
 
@@ -114,7 +126,7 @@ gh release create v2.0.0 \
 https://github.com/yahuo/NoType/releases/latest
 ```
 
-## 5. 如果以后要升级到正式官网分发
+## 6. 如果以后要升级到正式官网分发
 
 等你后面加入付费 Apple Developer Program 后，再补下面两步：
 
