@@ -32,7 +32,7 @@ open dist/NoType.app
 
 仓库已经提供了打包脚本：
 
-发布前同步 `packaging/Info.plist`、`NoType.xcodeproj/project.pbxproj` 和 `scripts/generate_xcodeproj.rb` 中的版本号与构建号。当前版本为 `2.0.0`，构建号为 `2`。`NOTYPE_VERSION` 只影响产物文件名，不能代替包内版本更新。
+发布前同步 `packaging/Info.plist`、`NoType.xcodeproj/project.pbxproj` 和 `scripts/generate_xcodeproj.rb` 中的版本号与构建号。当前版本为 `2.0.1`，构建号为 `3`。`NOTYPE_VERSION` 只影响产物文件名，不能代替包内版本更新。
 
 ```bash
 make package
@@ -91,13 +91,13 @@ Release 文案至少写清楚：
 
 ```bash
 git push origin master
-git tag -a v2.0.0 -m 'NoType 2.0.0'
-git push origin v2.0.0
-gh release create v2.0.0 \
-  dist/release/NoType-2.0.0-macOS.zip \
-  dist/release/NoType-2.0.0-macOS.dmg \
+git tag -a v2.0.1 -m 'NoType 2.0.1'
+git push origin v2.0.1
+gh release create v2.0.1 \
+  dist/release/NoType-2.0.1-macOS.zip \
+  dist/release/NoType-2.0.1-macOS.dmg \
   dist/release/SHA256SUMS.txt \
-  --verify-tag --title 'NoType 2.0.0' --notes-file /path/to/release-notes.md
+  --verify-tag --title 'NoType 2.0.1' --notes-file /path/to/release-notes.md
 ```
 
 发布后重新下载附件，核对 SHA256、包内版本、签名和启动情况。构建通过或签名有效不代表已完成真人麦克风与目标应用操作验收。
