@@ -1,4 +1,4 @@
-// Exercise the shipped page's microphone ownership without a device or network.
+// Exercise the shipped page's audio playback and microphone ownership without a device or network.
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
@@ -233,40 +233,17 @@ function harness(pendingPermission = false) {
   const test = harness();
   await test.offer();
   await test.state.peer.ontrack({streams: [{}]});
-  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', start_ms: 1000, end_ms: 1200}});
-  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
-  assert.equal(test.state.audio.muted, true, 'Sustained near-end speech must silence playback before the final transcript');
-  assert.equal(test.state.messages.at(-1).speaking, false, 'Suppressed audio must not show Neo as speaking');
-  assert.equal(test.track.enabled, true, 'Barge-in must keep capturing the new request');
-  assert.equal(test.state.sent.length, 0, 'Local microphone noise alone must not change model context');
-  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', start_ms: 1800, end_ms: 2000}});
-  assert.equal(test.state.sent.length, 1, 'Confirmed speech must tell the live model to discard the old reply');
-  assert.equal(test.state.sent[0].type, 'session.context.append', 'Use the supported Frameless Bidi context channel');
-  test.event({type: 'turn.done', turn: {id: 'old', role: 'assistant', end_ms: 2000}});
-  test.advance(500, 0.1);
-  assert.equal(test.state.audio.muted, true, 'An interrupted turn completing must not resume buffered audio');
-  test.event({type: 'turn.done', turn: {id: 'user', role: 'user', end_ms: 3000, transcript: '停一下，只说收到。'}});
-  assert.equal(test.state.sent.length, 2, 'The completed new request must replace the interrupted topic in model context');
-  assert.equal(test.state.sent[1].type, 'session.context.append');
-  assert.equal(test.state.sent[1].channel, undefined, 'The interruption reminder must not be read as a spoken reply');
-  assert.ok(test.state.sent[1].content[0].text.includes('停一下，只说收到。'));
-  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', start_ms: 1000, end_ms: 1200}});
-  assert.equal(test.state.audio.muted, true, 'A late old assistant event must not resume playback');
-  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', start_ms: 2800, end_ms: 3000}});
-  assert.equal(test.state.audio.muted, false, 'The reply to the completed new user turn must become audible');
-  test.stop();
-}
-{
-  const test = harness();
-  await test.offer();
-  await test.state.peer.ontrack({streams: [{}]});
-  test.advance(100, 0.1, 0.05);
-  test.advance(100, 0.1);
-  assert.equal(test.state.audio.muted, false, 'A short microphone noise must not interrupt playback');
-  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
-  assert.equal(test.state.audio.muted, true);
-  test.advance(4000, 0.1);
-  assert.equal(test.state.audio.muted, false, 'Unconfirmed local noise must not leave playback muted forever');
+  for (let i = 0; i < 150; i++) {
+    test.advance(100, 0.1, i % 50 < 5 ? 0.02 : 0.005);
+    assert.equal(test.state.audio.muted, false, 'Recurring background noise must not punch holes in remote audio');
+    assert.equal(test.state.messages.at(-1).speaking, true, 'The HUD must reflect the audio being received');
+  }
+  for (let i = 0; i < 70; i++) {
+    test.advance(100, 0.1, 0.05);
+    assert.equal(test.state.audio.muted, false, 'Sustained microphone input must leave turn-taking to the model');
+  }
+  assert.equal(test.track.enabled, true, 'The model must keep receiving microphone input while speaking');
+  assert.equal(test.state.sent.length, 0, 'Microphone levels must not inject interruption instructions');
   test.stop();
 }
 {
@@ -274,50 +251,33 @@ function harness(pendingPermission = false) {
   await test.offer();
   await test.state.peer.ontrack({streams: [{}]});
   test.advance(100, 0.1);
-  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', start_ms: 2000, end_ms: 2200}});
-  assert.equal(test.state.audio.muted, true, 'A confirmed user turn must also interrupt quiet microphone input');
-  test.advance(5000, 0.1);
-  assert.equal(test.state.audio.muted, true, 'Confirmed speech must not use the noise recovery timeout');
-  test.receive('user', 3000);
-  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', start_ms: 2800, end_ms: 3000}});
-  assert.equal(test.state.audio.muted, false);
+  const events = [
+    {type: 'turn.created', turn: {id: 'old', role: 'assistant', end_ms: 1200}},
+    {type: 'turn.created', turn: {id: 'user', role: 'user', end_ms: 2000}},
+    {type: 'turn.done', turn: {id: 'old', role: 'assistant', end_ms: 2000}},
+    {type: 'turn.created', turn: {id: 'new', role: 'assistant', end_ms: 3000}},
+    {type: 'turn.done', turn: {id: 'user', role: 'user', end_ms: 3000, transcript: '停一下，只说收到。'}},
+    {type: 'turn.created', turn: {id: 'old', role: 'assistant', end_ms: 1200}},
+  ];
+  for (const event of events) {
+    test.event(event);
+    assert.equal(test.state.audio.muted, false, 'Transcript events must not gate remote audio playback');
+    assert.equal(test.state.sent.length, 0, 'Transcript events must not tell the model when to stop or answer');
+  }
+  assert.equal(test.state.messages.at(-1).text, '停一下，只说收到。', 'User transcripts must still reach the native command handler');
+  assert.equal(test.track.enabled, true);
   test.stop();
 }
 {
   const test = harness();
   await test.offer();
   await test.state.peer.ontrack({streams: [{}]});
-  test.advance(100, 0.1);
-  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', start_ms: 2000, end_ms: 2200}});
-  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', start_ms: 2800, end_ms: 3000}});
-  assert.equal(test.state.audio.muted, true, 'Do not resume before the interrupted user input has completed');
-  test.receive('user', 3000);
-  assert.equal(test.state.audio.muted, false, 'A late user completion must still release the new reply');
-  test.stop();
-}
-{
-  const test = harness();
-  await test.offer();
-  await test.state.peer.ontrack({streams: [{}]});
-  test.advance(100, 0.1, 0.05);
-  test.advance(100, 0.1, 0.05);
-  test.advance(100, 0.1);
-  assert.equal(test.state.audio.muted, true, 'A brief gap between syllables must not restart speech detection');
-  test.stop();
-}
-{
-  const test = harness();
-  await test.offer();
-  await test.state.peer.ontrack({streams: [{}]});
-  test.event({type: 'turn.created', turn: {id: 'old', role: 'assistant', end_ms: 1200}});
-  for (let i = 0; i < 3; i++) test.advance(100, 0.1, 0.05);
-  test.event({type: 'turn.created', turn: {id: 'user', role: 'user', end_ms: 1800}});
-  test.receive('user', 2000);
-  test.event({type: 'turn.created', turn: {id: 'new', role: 'assistant', end_ms: 2000}});
-  assert.equal(test.state.audio.muted, true, 'A partial user turn must not resume playback while the user is still speaking');
-  test.advance(100, 0.1, 0.05);
-  test.advance(300, 0.1);
-  assert.equal(test.state.audio.muted, false, 'The new reply can resume once the microphone is quiet');
+  for (const output of [0.1, 0, 0, 0.1, 0.1, 0, 0.1]) {
+    test.advance(100, output, 0.05);
+    assert.equal(test.state.audio.muted, false, 'Model-selected pauses and speech must pass through without a local hold');
+    assert.equal(test.state.messages.at(-1).speaking, output > 0, 'Speaking state must follow remote audio even while the microphone is active');
+  }
+  assert.equal(test.state.sent.length, 0, 'Playback must not require a local resume command');
   test.stop();
 }
 {
@@ -376,4 +336,4 @@ function harness(pendingPermission = false) {
   test.stop();
   assert.equal(test.state.timeouts.size, 0, 'Closing a call must cancel its disconnect timer');
 }
-console.log('Neo media lifecycle: 23 scenarios passed');
+console.log('Neo media lifecycle: 20 scenarios passed');
