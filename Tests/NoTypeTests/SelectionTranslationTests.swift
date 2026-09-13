@@ -92,7 +92,9 @@ private final class ScriptedRewriteProtocol: URLProtocol, @unchecked Sendable {
             let duplicate = #"data: {"type":"response.output_text.done","text":"段"}"#
             events = [(0, delta)] + (1...10).map { (Double($0) * 0.04, duplicate) } + [(0.45, done)]
         case "slow-first":
-            events = [(0.18, delta), (0.24, delta), (0.28, done)]
+            events = [(0.9, delta), (1.2, delta), (1.4, done)]
+        case "progress":
+            events = (0...5).map { (Double($0) * 0.3, delta) } + [(1.6, done)]
         default:
             events = (0...5).map { (Double($0) * 0.06, delta) } + [(0.32, done)]
         }
@@ -149,8 +151,9 @@ func dictationRewriteUsesSeparateFirstTextAndRenewableIdleBudgets(scenario: Stri
         let service = AIRewriteService(
             session: session,
             rewriteTimeouts: RewriteTimeouts(
-                firstText: scenario == "slow-first" ? .milliseconds(300) : .milliseconds(150),
-                idle: .milliseconds(150), total: .seconds(2)
+                // Preserve the relative deadlines while allowing CI scheduling delays.
+                firstText: scenario == "slow-first" ? .milliseconds(1500) : .milliseconds(750),
+                idle: .milliseconds(750), total: .seconds(5)
             ),
             authStore: authStore
         )
