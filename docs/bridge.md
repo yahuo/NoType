@@ -7,10 +7,10 @@ NoType exposes a local Unix domain socket while the menu bar app is running. Ter
 Default socket path:
 
 ```text
-$TMPDIR/com.opensource.notype/bridge.sock
+$(/usr/bin/getconf DARWIN_USER_TEMP_DIR)/com.opensource.notype/bridge.sock
 ```
 
-Clients may override it with `NOTYPE_BRIDGE_SOCKET`. NoType creates the runtime directory with mode `0700` and the socket with mode `0600`.
+On macOS, clients query the current user's temporary directory rather than trusting an inherited `TMPDIR`, which may be stale. Clients may override it with `NOTYPE_BRIDGE_SOCKET`. NoType creates the runtime directory with mode `0700` and the socket with mode `0600`.
 
 The bridge starts from `NoTypeAppModel.bootstrap()` and stops during application termination. A lock file prevents a second NoType process from unlinking the active socket. If NoType is not running, clients must preserve the user's draft.
 
@@ -123,6 +123,14 @@ cp integrations/pi/notype.ts ~/.pi/agent/extensions/notype/index.ts
 Then run `/reload` in Pi. With NoType running and Codex logged in, enter a non-empty draft and press Space three times within one second. The extension removes only the trigger spaces, asks NoType to translate, and replaces the draft only if it has not changed while the request was running.
 
 The Pi adapter does not use or remap `Ctrl+G`.
+
+If Pi reports `ENOENT` or `ECONNREFUSED`, first check that NoType is running locally. Update the extension and run `/reload` if the error points to an old temporary directory. An explicit `NOTYPE_BRIDGE_SOCKET` takes priority; if it is stale, correct or unset it before restarting Pi.
+
+Run the adapter regression tests with Node.js 22.6+:
+
+```bash
+node --experimental-strip-types --test integrations/pi/tests/*.test.mjs
+```
 
 ## Editor-only bridge request
 
