@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
+import { promisify } from "node:util";
 import { createConnection } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -22,11 +24,30 @@ type BridgeResponse = {
 	};
 };
 
-function socketPath(): string {
-	return process.env.NOTYPE_BRIDGE_SOCKET ?? join(tmpdir(), "com.opensource.notype", "bridge.sock");
+const execFileAsync = promisify(execFile);
+
+export async function socketPath(): Promise<string> {
+	if (process.env.NOTYPE_BRIDGE_SOCKET !== undefined) return process.env.NOTYPE_BRIDGE_SOCKET;
+
+	let directory = tmpdir();
+	if (process.platform === "darwin") {
+		// A terminal can inherit a stale TMPDIR. Query the same per-user directory
+		// Foundation uses in NoType instead of trusting the terminal environment.
+		try {
+			const { stdout } = await execFileAsync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], {
+				timeout: 1_000,
+				maxBuffer: 4_096,
+			});
+			directory = stdout.trim();
+			if (!isAbsolute(directory)) throw new Error("Invalid temporary directory");
+		} catch {
+			throw new Error("Cannot locate the NoType bridge. Set NOTYPE_BRIDGE_SOCKET to its socket path.");
+		}
+	}
+	return join(directory, "com.opensource.notype", "bridge.sock");
 }
 
-function translateThroughNoType(text: string): Promise<string> {
+async function translateThroughNoType(text: string): Promise<string> {
 	const id = randomUUID();
 	const payload = Buffer.from(
 		JSON.stringify({
@@ -47,8 +68,9 @@ function translateThroughNoType(text: string): Promise<string> {
 	frame.writeUInt32BE(payload.length, 0);
 	payload.copy(frame, 4);
 
+	const path = await socketPath();
 	return new Promise((resolve, reject) => {
-		const socket = createConnection({ path: socketPath() });
+		const socket = createConnection({ path });
 		let buffered = Buffer.alloc(0);
 		let expectedPayloadBytes: number | undefined;
 		let settled = false;
@@ -64,7 +86,13 @@ function translateThroughNoType(text: string): Promise<string> {
 		socket.setTimeout(15_000);
 		socket.once("connect", () => socket.write(frame));
 		socket.once("timeout", () => finish(new Error("NoType translation timed out.")));
-		socket.once("error", (error) => finish(error));
+		socket.once("error", (error: NodeJS.ErrnoException) => {
+			if (error.code === "ENOENT" || error.code === "ECONNREFUSED") {
+				finish(new Error(`Cannot connect to NoType. Open NoType on this Mac and check NOTYPE_BRIDGE_SOCKET if set. (${error.code}: ${path})`));
+			} else {
+				finish(error);
+			}
+		});
 		socket.once("close", () => {
 			if (!settled) finish(new Error("NoType closed the bridge before returning a response."));
 		});
@@ -115,6 +143,8 @@ export default function (pi: ExtensionAPI) {
 	};
 
 	const translateCurrentDraft = async (ctx: ExtensionContext) => {
+		if (translationInFlight) return;
+
 		const currentText = ctx.ui.getEditorText();
 		if (!currentText.endsWith("   ")) return;
 
@@ -124,11 +154,6 @@ export default function (pi: ExtensionAPI) {
 		// Remove the trigger immediately. If the request fails, the user's source remains intact.
 		ctx.ui.setEditorText(sourceText);
 
-		if (translationInFlight) {
-			ctx.ui.notify("NoType is already translating another Pi draft.", "warning");
-			return;
-		}
-
 		translationInFlight = true;
 		const generation = ++translationGeneration;
 		ctx.ui.setStatus(STATUS_KEY, ctx.ui.theme.fg("accent", "NoType: translating…"));
@@ -137,12 +162,16 @@ export default function (pi: ExtensionAPI) {
 			const translated = await translateThroughNoType(sourceText);
 			if (generation !== translationGeneration) return;
 
-			if (ctx.ui.getEditorText() !== sourceText) {
+			const updatedText = ctx.ui.getEditorText();
+			const appendedSpaces = updatedText.slice(sourceText.length);
+			// Extra Space taps while waiting must not discard a completed translation.
+			// Preserve that spacing, but never overwrite an edited or submitted draft.
+			if (!updatedText.startsWith(sourceText) || /[^ ]/.test(appendedSpaces)) {
 				ctx.ui.notify("NoType finished, but the Pi draft changed, so it was not overwritten.", "warning");
 				return;
 			}
 
-			ctx.ui.setEditorText(translated);
+			ctx.ui.setEditorText(translated + appendedSpaces);
 		} catch (error) {
 			if (generation !== translationGeneration) return;
 			ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
