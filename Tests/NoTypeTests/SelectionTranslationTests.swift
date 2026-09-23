@@ -89,8 +89,8 @@ private final class ScriptedRewriteProtocol: URLProtocol, @unchecked Sendable {
             events = [(0, "data: {\"type\":\"response.created\"}"),
                       (0.04, ": keepalive"), (0.12, ": keepalive"), (0.35, delta), (0.38, done)]
         case "stalled":
-            let duplicate = #"data: {"type":"response.output_text.done","text":"段"}"#
-            events = [(0, delta)] + (1...10).map { (Double($0) * 0.04, duplicate) } + [(0.45, done)]
+            let heartbeat = #"data: {"type":"response.in_progress"}"#
+            events = [(0, delta)] + (1...10).map { (Double($0) * 0.04, heartbeat) } + [(0.45, done)]
         case "slow-first":
             events = [(0.9, delta), (1.2, delta), (1.4, done)]
         case "progress":
@@ -266,6 +266,68 @@ func selectionTranslationUsesLongerNetworkTimeoutAndChineseFeedback() async thro
         } catch AIRewriteError.translationTimedOut {
             #expect(!AIRewriteError.translationTimedOut.localizedDescription.contains("AI Rewrite"))
         }
+    }
+}
+
+private final class LingeringStreamProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "text/event-stream"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        send(#"data: {"type":"response.output_text.delta","delta":"Hello"}"#)
+        send(#"data: {"type":"response.output_text.done","text":"Hello"}"#)
+        // The stream intentionally stays open, like a server delaying response.completed.
+    }
+    override func stopLoading() {}
+
+    private func send(_ line: String) {
+        client?.urlProtocol(self, didLoad: Data((line + "\n\n").utf8))
+    }
+}
+
+@Test
+func translationReturnsOnFinalTextWithoutWaitingForStreamClose() async throws {
+    try await withTranslationSession(protocolClass: LingeringStreamProtocol.self) { session, authStore in
+        let service = AIRewriteService(
+            session: session,
+            englishTranslationTimeout: .seconds(2),
+            authStore: authStore
+        )
+        let translated = try await service.translateToEnglish("你好")
+        #expect(translated == "Hello")
+    }
+}
+
+private final class PrewarmCountingProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var headRequestCount = 0
+    private static let lock = NSLock()
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        if request.httpMethod == "HEAD" {
+            Self.lock.withLock { Self.headRequestCount += 1 }
+        }
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 405, httpVersion: "HTTP/1.1", headerFields: nil
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+@Test
+func connectionPrewarmSendsOneHeadRequestPerWarmWindow() async throws {
+    try await withTranslationSession(protocolClass: PrewarmCountingProtocol.self) { session, authStore in
+        let service = AIRewriteService(session: session, authStore: authStore)
+        await service.prewarmConnection()
+        await service.prewarmConnection()
+        #expect(PrewarmCountingProtocol.headRequestCount == 1)
     }
 }
 

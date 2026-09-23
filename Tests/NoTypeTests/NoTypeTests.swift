@@ -49,25 +49,25 @@ func appSettingsDefaultLanguageUsesSimplifiedChinese() {
 func tripleSpaceDetectorTriggersOnlyWhenThreePlainSpacesArriveWithinOneSecond() {
     var detector = TripleSpaceSequenceDetector()
 
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.0) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.4) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.9) == true)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.0) == .pending)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.4) == .armed)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.9) == .triggered)
 }
 
 @Test
 func tripleSpaceDetectorResetsAfterTimeoutOtherKeysAndKeyRepeat() {
     var detector = TripleSpaceSequenceDetector()
 
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.0) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.5) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.1) == false)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.0) == .pending)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.5) == .armed)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.1) == .pending)
 
-    #expect(detector.consume(isPlainSpace: false, isRepeat: false, timestamp: 21.2) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.3) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: true, timestamp: 21.4) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.5) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.7) == false)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.9) == true)
+    #expect(detector.consume(isPlainSpace: false, isRepeat: false, timestamp: 21.2) == .pending)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.3) == .pending)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: true, timestamp: 21.4) == .pending)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.5) == .pending)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.7) == .armed)
+    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.9) == .triggered)
 }
 
 @Test

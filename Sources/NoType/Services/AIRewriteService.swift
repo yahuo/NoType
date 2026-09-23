@@ -84,6 +84,9 @@ actor AIRewriteService {
     static let rewriteReasoningEffort = "high"
     static let translationModel = "gpt-5.6-luna"
     static let translationReasoningEffort = "none"
+    static let codexResponsesURL = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
+    // An HTTP/2 connection used within this window is assumed to still be pooled.
+    static let connectionWarmWindow: Duration = .seconds(20)
 
     private let session: URLSession
     private let rewriteTimeouts: RewriteTimeouts
@@ -91,6 +94,7 @@ actor AIRewriteService {
     private let selectionTranslationTimeout: Duration
     private let authStore: CodexAuthStore
     private let modelResolver: CodexModelResolver
+    private var lastConnectionActivity: ContinuousClock.Instant?
 
     init(
         session: URLSession = .shared,
@@ -233,6 +237,22 @@ actor AIRewriteService {
         return translated
     }
 
+    /// Opens the TLS connection ahead of a likely request so the request can reuse it.
+    /// The response status is irrelevant; only the pooled connection matters.
+    func prewarmConnection() async {
+        let now = ContinuousClock.now
+        if let lastConnectionActivity, now - lastConnectionActivity < Self.connectionWarmWindow {
+            return
+        }
+        guard (try? authStore.loadCredentials()) != nil else { return }
+        lastConnectionActivity = now
+
+        var request = URLRequest(url: Self.codexResponsesURL)
+        request.httpMethod = "HEAD"
+        request.timeoutInterval = 5
+        _ = try? await session.data(for: request)
+    }
+
     func testConnection() async throws {
         let content = try await performStreamingCodexResponse(
             instructions: "Reply with exactly OK.",
@@ -287,7 +307,12 @@ actor AIRewriteService {
             if let partial = try accumulator.consume(line: line) {
                 onPartial(partial)
             }
+            // The server can hold the stream open for seconds after the final text.
+            if accumulator.isComplete {
+                break
+            }
         }
+        lastConnectionActivity = .now
 
         guard accumulator.isComplete else {
             throw AIRewriteError.incompleteStream
@@ -304,7 +329,7 @@ actor AIRewriteService {
         userMessage: String,
         timeoutInterval: TimeInterval = 30
     ) throws -> URLRequest {
-        var request = URLRequest(url: URL(string: "https://chatgpt.com/backend-api/codex/responses")!)
+        var request = URLRequest(url: codexResponsesURL)
         request.httpMethod = "POST"
         request.timeoutInterval = timeoutInterval
         request.setValue("Bearer \(credentials.accessToken)", forHTTPHeaderField: "Authorization")
