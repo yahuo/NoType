@@ -13,6 +13,13 @@ enum TripleSpaceTriggerServiceError: LocalizedError {
     }
 }
 
+enum TripleSpaceSequenceResult: Equatable {
+    case pending
+    /// Two spaces arrived; the next one triggers translation.
+    case armed
+    case triggered
+}
+
 struct TripleSpaceSequenceDetector {
     private let maximumDuration: TimeInterval
     private var firstTimestamp: TimeInterval?
@@ -26,10 +33,10 @@ struct TripleSpaceSequenceDetector {
         isPlainSpace: Bool,
         isRepeat: Bool,
         timestamp: TimeInterval
-    ) -> Bool {
+    ) -> TripleSpaceSequenceResult {
         guard isPlainSpace, !isRepeat else {
             reset()
-            return false
+            return .pending
         }
 
         if let firstTimestamp,
@@ -41,9 +48,15 @@ struct TripleSpaceSequenceDetector {
             spaceCount = 1
         }
 
-        guard spaceCount == 3 else { return false }
-        reset()
-        return true
+        switch spaceCount {
+        case 2:
+            return .armed
+        case 3:
+            reset()
+            return .triggered
+        default:
+            return .pending
+        }
     }
 
     mutating func reset() {
@@ -54,6 +67,7 @@ struct TripleSpaceSequenceDetector {
 
 final class TripleSpaceTriggerService {
     var eventHandler: (() -> Void)?
+    var armedHandler: (() -> Void)?
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
@@ -139,11 +153,16 @@ final class TripleSpaceTriggerService {
         let isRepeat = event.getIntegerValueField(.keyboardEventAutorepeat) != 0
         let timestamp = TimeInterval(event.timestamp) / 1_000_000_000
 
-        if detector.consume(
+        switch detector.consume(
             isPlainSpace: isPlainSpace,
             isRepeat: isRepeat,
             timestamp: timestamp
         ) {
+        case .pending:
+            break
+        case .armed:
+            armedHandler?()
+        case .triggered:
             eventHandler?()
         }
     }

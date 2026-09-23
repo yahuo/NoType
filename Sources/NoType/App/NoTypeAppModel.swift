@@ -136,6 +136,11 @@ final class NoTypeAppModel: ObservableObject {
                 await self?.translateFocusedFieldAfterTripleSpace()
             }
         }
+        tripleSpaceTriggerService.armedHandler = { [weak self] in
+            Task { @MainActor in
+                self?.prewarmTranslationConnection()
+            }
+        }
 
         neoVoice.onChange = { [weak self] in
             guard let self else { return }
@@ -739,6 +744,13 @@ final class NoTypeAppModel: ObservableObject {
             return
         }
         await translateTextReplacingCurrentSelection(sourceText)
+    }
+
+    private func prewarmTranslationConnection() {
+        guard phase == .idle else { return }
+        Task { [aiRewriteService] in
+            await aiRewriteService.prewarmConnection()
+        }
     }
 
     private func hasRecentDirectBridgeRequest(for target: DictationTargetContext) -> Bool {
