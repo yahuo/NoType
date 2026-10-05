@@ -30,6 +30,27 @@ macOS 上的 Chrome / Edge 扩展。点击工具栏按钮，将页面已加载�
 
 扩展目录改动后，在扩展管理页点击“重新加载”，并刷新之前使用过扩展的网页。
 
+## Linux（Omarchy）
+
+需要 Python 3、Chromium / Chrome / Edge / Brave 119 或更新版本，以及正在运行的 Linux 版 NoType（`linux/` 目录）。扩展本身与 macOS 相同。
+
+1. 打开 `chrome://extensions`（Brave 为 `brave://extensions`，Edge 为 `edge://extensions`），开启开发者模式，加载本目录下的 **extension** 文件夹。
+2. 复制扩展 ID，在仓库根目录执行同一条命令：
+
+   ```sh
+   python3 integrations/browser/install.py <扩展ID>
+   ```
+
+   安装程序把连接程序复制到 `$XDG_DATA_HOME/notype/browser/`（默认 `~/.local/share/notype/browser/`），并在 `$XDG_CONFIG_HOME`（默认 `~/.config`）下为以下浏览器写入清单（未安装的浏览器也会写入，可忽略或按卸载步骤删除）：
+   - `google-chrome/NativeMessagingHosts/`
+   - `chromium/NativeMessagingHosts/`
+   - `microsoft-edge/NativeMessagingHosts/`
+   - `BraveSoftware/Brave-Browser/NativeMessagingHosts/`
+
+连接程序按以下顺序查找 socket，与 Linux 版 NoType 一致：非空的 `NOTYPE_BRIDGE_SOCKET`；`$XDG_RUNTIME_DIR/notype/bridge.sock`；`${TMPDIR:-/tmp}/notype-<uid>/bridge.sock`。日志写入 `$XDG_STATE_HOME/notype/browser-bridge.log`（默认 `~/.local/state/notype/`）。Flatpak / Snap 版浏览器的沙箱不读取上述目录，不支持。
+
+卸载：移除扩展后，删除上述四个目录中的 `com.opensource.notype.browser.json` 和 `~/.local/share/notype/browser/`。
+
 ## 首版范围
 
 - 支持段落、标题、简单列表、表格单元格和仅包含行内内容的 div；将段内链接、强调和行内代码作为上下文一起翻译。

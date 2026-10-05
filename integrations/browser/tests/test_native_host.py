@@ -25,6 +25,61 @@ class NativeHostTests(unittest.TestCase):
         self.assertTrue(path.parent.parent.is_dir())
         self.assertEqual(path.parts[-2:], ("com.opensource.notype", "bridge.sock"))
 
+    def environment(self, **values):
+        """Patches os.environ; a value of None removes the variable."""
+        patcher = patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        for key, value in values.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
+
+    def linux(self):
+        patcher = patch("sys.platform", "linux")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_linux_socket_matches_daemon_rule(self):
+        self.linux()
+        self.environment(NOTYPE_BRIDGE_SOCKET="/tmp/forwarded.sock", XDG_RUNTIME_DIR="/run/user/1000")
+        self.assertEqual(native_host.bridge_socket(), Path("/tmp/forwarded.sock"))
+        os.environ["NOTYPE_BRIDGE_SOCKET"] = ""
+        self.assertEqual(native_host.bridge_socket(), Path("/run/user/1000/notype/bridge.sock"))
+        for runtime in (None, ""):
+            self.environment(NOTYPE_BRIDGE_SOCKET=None, XDG_RUNTIME_DIR=runtime, TMPDIR="/tmp/notype-test")
+            self.assertEqual(native_host.bridge_socket(), Path(f"/tmp/notype-test/notype-{os.geteuid()}/bridge.sock"))
+        self.environment(TMPDIR=None)
+        self.assertEqual(native_host.bridge_socket(), Path(f"/tmp/notype-{os.geteuid()}/bridge.sock"))
+
+    def test_linux_logs_under_xdg_state_home(self):
+        self.linux()
+        default = Path.home() / ".local/state/notype"
+        for state in (None, "", "relative/state"):
+            self.environment(XDG_STATE_HOME=state)
+            self.assertEqual(native_host.log_directory(), default)
+        with tempfile.TemporaryDirectory(prefix="nt-state-") as directory:
+            self.environment(XDG_STATE_HOME=directory)
+            self.assertEqual(native_host.log_directory(), Path(directory) / "notype")
+            logger = native_host.logging.getLogger("notype.browser")
+            handlers = list(logger.handlers)
+            native_host.configure_logging()
+            added = [handler for handler in logger.handlers if handler not in handlers]
+            try:
+                log = Path(directory) / "notype/browser-bridge.log"
+                self.assertEqual([Path(handler.baseFilename) for handler in added], [log])
+                self.assertEqual(log.stat().st_mode & 0o777, 0o600)
+            finally:
+                for handler in added:
+                    logger.removeHandler(handler)
+                    handler.close()
+
+    def test_macos_paths_ignore_linux_environment(self):
+        with patch("sys.platform", "darwin"):
+            self.environment(XDG_STATE_HOME="/tmp/state")
+            self.assertEqual(native_host.log_directory(), Path.home() / "Library/Logs/NoType")
+
     def request(self):
         return {"version": 1, "id": "paragraph-1", "method": "translate_chinese", "text": "Hello 世界"}
 
@@ -295,6 +350,32 @@ class NativeHostTests(unittest.TestCase):
             self.assertEqual((support / "NoType/Browser/native_host.py").read_bytes(), source.read_bytes())
         with self.assertRaises(ValueError):
             install.install("../bad", Path("/tmp"), sys.executable, source)
+
+    def test_linux_installer_writes_every_chromium_family_manifest(self):
+        with tempfile.TemporaryDirectory(prefix="notype install '") as directory:
+            config, data = Path(directory) / "config", Path(directory) / "data"
+            source = Path(__file__).resolve().parents[1] / "native_host.py"
+            install.install_linux("a" * 32, config, data, sys.executable, source)
+            install.install_linux("b" * 32, config, data, sys.executable, source)
+            launcher = data / "notype/browser/notype-browser-host"
+            for browser in ("google-chrome", "chromium", "microsoft-edge", "BraveSoftware/Brave-Browser"):
+                path = config / browser / "NativeMessagingHosts/com.opensource.notype.browser.json"
+                manifest = json.loads(path.read_text())
+                self.assertEqual(manifest["path"], str(launcher))
+                self.assertEqual(manifest["allowed_origins"], [f"chrome-extension://{'a' * 32}/", f"chrome-extension://{'b' * 32}/"])
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(launcher.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((data / "notype/browser/native_host.py").read_bytes(), source.read_bytes())
+            # The launcher runs the copied host despite quotes and spaces; EOF on stdin exits cleanly.
+            home = Path(directory) / "home"
+            completed = subprocess.run([str(launcher)], stdin=subprocess.DEVNULL, capture_output=True, timeout=5,
+                                       env={**os.environ, "HOME": str(home), "XDG_STATE_HOME": str(home / "state")})
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_installer_resolves_xdg_homes(self):
+        self.environment(XDG_CONFIG_HOME="/srv/config", XDG_DATA_HOME="relative")
+        self.assertEqual(install.xdg_home("XDG_CONFIG_HOME", ".config"), Path("/srv/config"))
+        self.assertEqual(install.xdg_home("XDG_DATA_HOME", ".local/share"), Path.home() / ".local/share")
 
 
 if __name__ == "__main__":
