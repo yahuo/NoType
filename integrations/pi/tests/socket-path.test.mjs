@@ -17,10 +17,33 @@ function environment(t, values) {
 	}
 }
 
+function platform(t, value) {
+	const descriptor = Object.getOwnPropertyDescriptor(process, "platform");
+	Object.defineProperty(process, "platform", { ...descriptor, value });
+	t.after(() => Object.defineProperty(process, "platform", descriptor));
+}
+
 test("an explicit socket override takes priority over temporary directories", async (t) => {
 	environment(t, { NOTYPE_BRIDGE_SOCKET: "/tmp/forwarded-notype.sock", TMPDIR: "/tmp/stale" });
 	assert.equal(await socketPath(), "/tmp/forwarded-notype.sock");
 });
+
+test("Linux prefers the override, then the user runtime directory", async (t) => {
+	platform(t, "linux");
+	environment(t, { NOTYPE_BRIDGE_SOCKET: "/tmp/forwarded-notype.sock", XDG_RUNTIME_DIR: "/run/user/1000" });
+	assert.equal(await socketPath(), "/tmp/forwarded-notype.sock");
+	// An empty override is unset, matching the daemon and the editor proxy.
+	process.env.NOTYPE_BRIDGE_SOCKET = "";
+	assert.equal(await socketPath(), "/run/user/1000/notype/bridge.sock");
+});
+
+for (const runtimeDirectory of [undefined, ""]) {
+	test(`Linux falls back to a per-user temporary directory with XDG_RUNTIME_DIR=${JSON.stringify(runtimeDirectory)}`, async (t) => {
+		platform(t, "linux");
+		environment(t, { NOTYPE_BRIDGE_SOCKET: undefined, XDG_RUNTIME_DIR: runtimeDirectory, TMPDIR: "/tmp/notype-pi-test" });
+		assert.equal(await socketPath(), `/tmp/notype-pi-test/notype-${process.geteuid()}/bridge.sock`);
+	});
+}
 
 for (const temporaryDirectory of ["/tmp/notype-stale-user", undefined]) {
 	test(`macOS resolves its user directory with TMPDIR=${temporaryDirectory}`, {
@@ -60,6 +83,7 @@ test("a missing bridge preserves the source and explains how to reconnect", { ti
 	assert.equal(text, "请检查这段代码");
 	assert.equal(notifications.length, 1);
 	assert.equal(notifications[0].level, "error");
-	assert.match(notifications[0].message, /Open NoType.*ENOENT/);
+	assert.match(notifications[0].message, /Make sure NoType is running.*ENOENT/);
+	assert.doesNotMatch(notifications[0].message, /Mac/);
 	handlers.session_shutdown({}, ctx);
 });

@@ -27,22 +27,27 @@ type BridgeResponse = {
 const execFileAsync = promisify(execFile);
 
 export async function socketPath(): Promise<string> {
-	if (process.env.NOTYPE_BRIDGE_SOCKET !== undefined) return process.env.NOTYPE_BRIDGE_SOCKET;
+	if (process.env.NOTYPE_BRIDGE_SOCKET) return process.env.NOTYPE_BRIDGE_SOCKET;
 
-	let directory = tmpdir();
-	if (process.platform === "darwin") {
-		// A terminal can inherit a stale TMPDIR. Query the same per-user directory
-		// Foundation uses in NoType instead of trusting the terminal environment.
-		try {
-			const { stdout } = await execFileAsync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], {
-				timeout: 1_000,
-				maxBuffer: 4_096,
-			});
-			directory = stdout.trim();
-			if (!isAbsolute(directory)) throw new Error("Invalid temporary directory");
-		} catch {
-			throw new Error("Cannot locate the NoType bridge. Set NOTYPE_BRIDGE_SOCKET to its socket path.");
-		}
+	if (process.platform !== "darwin") {
+		// Same rule as the Linux daemon: $XDG_RUNTIME_DIR/notype, else a per-user temporary directory.
+		const runtime = process.env.XDG_RUNTIME_DIR;
+		const directory = runtime ? join(runtime, "notype") : join(tmpdir(), `notype-${process.geteuid?.()}`);
+		return join(directory, "bridge.sock");
+	}
+
+	let directory: string;
+	// A terminal can inherit a stale TMPDIR. Query the same per-user directory
+	// Foundation uses in NoType instead of trusting the terminal environment.
+	try {
+		const { stdout } = await execFileAsync("/usr/bin/getconf", ["DARWIN_USER_TEMP_DIR"], {
+			timeout: 1_000,
+			maxBuffer: 4_096,
+		});
+		directory = stdout.trim();
+		if (!isAbsolute(directory)) throw new Error("Invalid temporary directory");
+	} catch {
+		throw new Error("Cannot locate the NoType bridge. Set NOTYPE_BRIDGE_SOCKET to its socket path.");
 	}
 	return join(directory, "com.opensource.notype", "bridge.sock");
 }
@@ -88,7 +93,7 @@ async function translateThroughNoType(text: string): Promise<string> {
 		socket.once("timeout", () => finish(new Error("NoType translation timed out.")));
 		socket.once("error", (error: NodeJS.ErrnoException) => {
 			if (error.code === "ENOENT" || error.code === "ECONNREFUSED") {
-				finish(new Error(`Cannot connect to NoType. Open NoType on this Mac and check NOTYPE_BRIDGE_SOCKET if set. (${error.code}: ${path})`));
+				finish(new Error(`Cannot connect to NoType. Make sure NoType is running and check NOTYPE_BRIDGE_SOCKET if set. (${error.code}: ${path})`));
 			} else {
 				finish(error);
 			}

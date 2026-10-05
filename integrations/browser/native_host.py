@@ -46,6 +46,13 @@ def encode_frame(value, endian):
 
 
 def bridge_socket():
+    if sys.platform != "darwin":
+        # Same rule as the Linux daemon: $XDG_RUNTIME_DIR/notype, else a per-user temporary directory.
+        if os.environ.get("NOTYPE_BRIDGE_SOCKET"):
+            return Path(os.environ["NOTYPE_BRIDGE_SOCKET"])
+        if os.environ.get("XDG_RUNTIME_DIR"):
+            return Path(os.environ["XDG_RUNTIME_DIR"]) / "notype/bridge.sock"
+        return Path(os.environ.get("TMPDIR") or "/tmp") / f"notype-{os.geteuid()}/bridge.sock"
     # Match Foundation's per-user temporary directory, independently of Chrome's TMPDIR.
     directory = subprocess.check_output(
         ["/usr/bin/getconf", "DARWIN_USER_TEMP_DIR"], text=True,
@@ -176,8 +183,15 @@ def translate(request, socket_path=None):
     return list(responses(request, socket_path))[-1]
 
 
+def log_directory():
+    if sys.platform == "darwin":
+        return Path.home() / "Library/Logs/NoType"
+    state = os.environ.get("XDG_STATE_HOME", "")
+    return (Path(state) if os.path.isabs(state) else Path.home() / ".local/state") / "notype"
+
+
 def configure_logging():
-    directory = Path.home() / "Library/Logs/NoType"
+    directory = log_directory()
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     handler = RotatingFileHandler(directory / "browser-bridge.log", maxBytes=1_048_576, backupCount=2)
     os.chmod(handler.baseFilename, 0o600)
