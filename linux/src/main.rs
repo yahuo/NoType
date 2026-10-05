@@ -182,7 +182,13 @@ async fn doctor() -> Result<()> {
 
     let config = match Config::load() {
         Ok(config) => {
-            report(true, true, "config", paths::config_file().display().to_string());
+            let path = paths::config_file();
+            let detail = if path.exists() {
+                path.display().to_string()
+            } else {
+                format!("{} not found, using defaults", path.display())
+            };
+            report(true, true, "config", detail);
             config
         }
         Err(error) => {
