@@ -1,0 +1,16 @@
+[Unit]
+Description=NoType voice input daemon
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/notype daemon
+Restart=on-failure
+RestartSec=2
+
+# Sockets live under $XDG_RUNTIME_DIR/notype.
+Environment=XDG_RUNTIME_DIR=%t
+
+[Install]
+WantedBy=graphical-session.target

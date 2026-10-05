@@ -1,0 +1,19 @@
+# ~/.config/notype/config.toml
+# Changes apply to the next recording; the daemon does not need a restart.
+
+# "codex" uses the Codex CLI login (~/.codex/auth.json). "doubao" streams to Volcengine.
+speech_provider = "codex"
+
+# zh-CN, en-US, zh-TW, ja-JP or ko-KR.
+language = "zh-CN"
+
+# Rewrite Doubao transcripts with Codex before pasting. Ignored for the Codex provider.
+ai_rewrite = false
+
+[doubao]
+app_id = ""
+resource_id = "volc.seedasr.sauc.duration"
+# Prefer the keyring:
+#   secret-tool store --label='NoType Doubao' application notype account doubao.access-token
+# access_token is only a fallback for systems without a Secret Service.
+access_token = ""

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "notype",
+  "name": "NoType",
+  "version": "0.1.0",
+  "description": "Voice dictation HUD, bar indicator and Chinese selection translation panel for the NoType daemon.",
+  "kinds": [
+    "service",
+    "panel",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "panel": "Overlay.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "NoType",
+    "description": "Dictation state. Left click toggles recording, right click cancels.",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "schema": [
+      {
+        "key": "hideWhenIdle",
+        "type": "boolean",
+        "label": "Hide When Idle",
+        "description": "Hide the icon while NoType is idle instead of dimming it.",
+        "defaultValue": false
+      }
+    ]
+  }
+}
