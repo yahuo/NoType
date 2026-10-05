@@ -43,6 +43,11 @@ pub fn bridge_lock() -> PathBuf {
     runtime_dir().join("bridge.lock")
 }
 
+/// Held by the running daemon for its whole lifetime.
+pub fn daemon_lock() -> PathBuf {
+    runtime_dir().join("daemon.lock")
+}
+
 /// Control socket used by the `notype` CLI, Hyprland bindings and the shell plugin.
 pub fn control_socket() -> PathBuf {
     runtime_dir().join("control.sock")
