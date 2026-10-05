@@ -1,5 +1,5 @@
-//! OWNER: agent C. Transparent `$VISUAL` proxy for Claude Code and Codex CLI.
+//! Transparent `$VISUAL` proxy for Claude Code and Codex CLI.
 
-fn main() {
-    todo!()
+fn main() -> std::process::ExitCode {
+    notype::editor::run()
 }
