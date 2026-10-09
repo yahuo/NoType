@@ -120,6 +120,8 @@ mkdir -p ~/.pi/agent/extensions/notype
 cp integrations/pi/notype.ts ~/.pi/agent/extensions/notype/index.ts
 ```
 
+On Omarchy, `integrations/omarchy/install.sh --pi` does the same and honors `PI_CODING_AGENT_DIR`. The Linux extension connects to `$XDG_RUNTIME_DIR/notype/bridge.sock`.
+
 Then run `/reload` in Pi. With NoType running and Codex logged in, enter a non-empty draft and press Space three times within one second. The extension removes only the trigger spaces, asks NoType to translate, and replaces the draft only if it has not changed while the request was running.
 
 The Pi adapter does not use or remap `Ctrl+G`.
