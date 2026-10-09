@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "NoType 网页双语翻译",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "minimum_chrome_version": "119",
   "description": "通过本机 NoType 翻译网页段落，在原文下方显示中文。再次点击移除译文。",
   "permissions": ["activeTab", "nativeMessaging", "storage", "webNavigation"],

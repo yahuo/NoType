@@ -71,6 +71,37 @@ globalThis.__noTypeToggleTranslation = () => {
     return true;
   }
 
+  // Built node by node: pages with Trusted Types reject innerHTML.
+  function svg(tag, attributes) {
+    const element = document.createElementNS("http://www.w3.org/2000/svg", tag);
+    for (const [name, value] of Object.entries(attributes)) element.setAttribute(name, value);
+    return element;
+  }
+
+  function icon(path) {
+    const graphic = svg("svg", { viewBox: "0 0 12 12", "aria-hidden": "true" });
+    graphic.append(svg("path", { d: path }));
+    return graphic;
+  }
+
+  const statusStyle = ":host{all:initial!important;position:fixed!important;right:20px!important;bottom:20px!important;z-index:2147483647!important;display:block!important}" +
+    ".wrap{position:relative;width:40px;height:40px;font:13px/1.5 system-ui,sans-serif;color:#fff;--tone:#5aa9ff}" +
+    ".wrap[data-tone=done]{--tone:#4cd07d}.wrap[data-tone=warn]{--tone:#ffb340}.wrap[data-tone=error]{--tone:#ff6b6b}" +
+    ".ring{position:absolute;inset:0;border-radius:50%;background:#20272f;box-shadow:0 4px 16px #0004}" +
+    ".ring>svg{position:absolute;inset:0;width:100%;height:100%;transform:rotate(-90deg)}" +
+    "circle{fill:none;stroke-width:3}.track{stroke:#ffffff26}.bar{stroke:var(--tone);stroke-linecap:round;transition:stroke-dasharray .3s}.bar[stroke-dasharray^='0 ']{stroke:none}" +
+    ".spinning .ring>svg{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(270deg)}}" +
+    "button{all:unset;box-sizing:border-box;cursor:pointer;display:grid;place-items:center;border-radius:50%}" +
+    "button:focus-visible{outline:2px solid var(--tone);outline-offset:2px}" +
+    "button svg{width:12px;height:12px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}" +
+    ".close{position:absolute;inset:8px;color:#ffffffc0}.close:hover{background:#ffffff1f;color:#fff}" +
+    ".retry{position:absolute;top:-6px;left:-6px;width:20px;height:20px;background:#ffb340;color:#20272f;box-shadow:0 0 0 2px #20272f}" +
+    ".retry svg{width:11px;height:11px;stroke-width:1.8}.retry[hidden]{display:none}.retry:disabled{opacity:.5;cursor:default}" +
+    ".label{position:absolute;right:52px;top:50%;transform:translateY(-50%);width:max-content;max-width:300px;padding:8px 12px;border-radius:8px;" +
+    "background:#20272f;box-shadow:0 4px 16px #0004;overflow-wrap:anywhere;opacity:0;pointer-events:none;transition:opacity .15s}" +
+    ".wrap:hover .label,.wrap:focus-within .label,.pinned .label{opacity:1}" +
+    "@media (prefers-reduced-motion:reduce){.spinning .ring>svg{animation:none}.bar,.label{transition:none}}";
+
   function createView(tag, status = false) {
     const host = document.createElement(tag);
     host.setAttribute("translate", "no");
@@ -78,39 +109,56 @@ globalThis.__noTypeToggleTranslation = () => {
     const root = host.attachShadow({ mode: "open" });
     const style = document.createElement("style");
     style.textContent = status
-      ? ":host{all:initial!important;position:fixed!important;right:20px!important;bottom:20px!important;z-index:2147483647!important;display:block!important}div{font:14px/1.6 system-ui,sans-serif;background:#20272f;color:#fff;padding:12px 16px;border-radius:10px;box-shadow:0 4px 20px #0003;max-width:360px;overflow-wrap:anywhere;display:flex;align-items:center;gap:12px}.actions{display:flex;gap:8px;flex-shrink:0}button{cursor:pointer;background:transparent;color:inherit;border:1px solid #ffffff70;border-radius:4px;padding:2px 6px;white-space:nowrap}button:disabled{opacity:.5;cursor:default}"
+      ? statusStyle
       : ":host{display:block!important;margin:0.4em 0 0.85em!important}div{font:inherit;font-feature-settings:inherit;font-variation-settings:inherit;letter-spacing:inherit;word-spacing:inherit;color:inherit;white-space:pre-wrap;overflow-wrap:anywhere}";
     const body = document.createElement("div");
     const text = document.createElement("span");
     let retry;
+    let bar;
     body.append(text);
     root.append(style, body);
     if (status) {
-      body.setAttribute("role", "status");
-      const actions = document.createElement("span");
-      actions.className = "actions";
+      // A progress ring with the close button in its center. The text shows on
+      // hover, or stays pinned for errors; a small badge retries failures.
+      body.className = "wrap";
+      text.className = "label";
+      text.setAttribute("role", "status");
+      const ring = document.createElement("span");
+      ring.className = "ring";
+      const graphic = svg("svg", { viewBox: "0 0 40 40", "aria-hidden": "true" });
+      bar = svg("circle", { class: "bar", cx: 20, cy: 20, r: 17, pathLength: 100, "stroke-dasharray": "0 100" });
+      graphic.append(svg("circle", { class: "track", cx: 20, cy: 20, r: 17 }), bar);
+      const close = document.createElement("button");
+      close.className = "close";
+      close.setAttribute("aria-label", "关闭");
+      close.append(icon("M2.5 2.5l7 7M9.5 2.5l-7 7"));
+      close.addEventListener("click", () => (globalThis.__noTypeStopTab || stop)());
+      ring.append(graphic, close);
       retry = document.createElement("button");
-      retry.textContent = "重试失败段落";
+      retry.className = "retry";
+      retry.setAttribute("aria-label", "重试失败段落");
+      retry.append(icon("M9.8 6.6A3.9 3.9 0 1 1 8.6 3M9.6 1.4v2.4H7.2"));
       retry.hidden = true;
       retry.addEventListener("click", () => (globalThis.__noTypeRetryTab || state.retry)());
-      actions.append(retry);
-      const close = document.createElement("button");
-      close.textContent = "关闭";
-      close.addEventListener("click", () => (globalThis.__noTypeStopTab || stop)());
-      actions.append(close);
-      body.append(actions);
+      body.append(ring, retry);
     }
     nodes.push(host);
-    return { host, text, retry };
+    return { host, body, text, retry, bar };
   }
 
-  function setStatus(text) {
+  // tone: active, done, warn (some paragraphs failed) or error (stopped).
+  function setStatus(text, { progress = 0, tone = "active", spinning = false, pinned = false } = {}) {
     if (globalThis.top !== globalThis) return;
     if (!status) {
       status = createView("notype-status", true);
       document.documentElement.append(status.host);
     }
     if (status.text.textContent !== text) status.text.textContent = text;
+    const dash = `${spinning ? 25 : Math.floor(Math.min(1, Math.max(0, progress)) * 100)} 100`;
+    if (status.bar.getAttribute("stroke-dasharray") !== dash) status.bar.setAttribute("stroke-dasharray", dash);
+    if (status.body.dataset.tone !== tone) status.body.dataset.tone = tone;
+    status.body.classList.toggle("spinning", spinning);
+    status.body.classList.toggle("pinned", pinned);
   }
 
   // Decode only a JSON string's available prefix, including split escape sequences.
@@ -183,10 +231,18 @@ globalThis.__noTypeToggleTranslation = () => {
       }
       const failures = Math.max(failed, tabFailures);
       const scope = tabFailures > failed ? "主页面" : "";
-      setStatus((!paragraphs.length ? `${scope}未找到可翻译的外文段落。` :
-        `${scope}已翻译 ${completed} / ${paragraphs.length} 段${skipped ? `，跳过 ${skipped} 段` : ""}。` +
-        (requests.size ? (receiving.size ? "正在接收译文…" : "等待模型响应…") : completed + skipped + failed < paragraphs.length ? "正在准备翻译…" : failures ? "" : "再次点击插件可恢复原文。")) +
-        (failures ? `全页有 ${failures} 段失败，可重试。` : ""));
+      const total = paragraphs.length;
+      const finished = completed + skipped;
+      setStatus((!total ? `${scope}未找到可翻译的外文段落。` :
+        `${scope}已翻译 ${completed} / ${total} 段${skipped ? `，跳过 ${skipped} 段` : ""}。` +
+        (requests.size ? (receiving.size ? "正在接收译文…" : "等待模型响应…") : finished + failed < total ? "正在准备翻译…" : failures ? "" : "再次点击插件可恢复原文。")) +
+        (failures ? `全页有 ${failures} 段失败，可重试。` : ""), {
+        progress: total ? finished / total : 0,
+        tone: failures ? "warn" : total && finished === total ? "done" : "active",
+        // Nothing to show yet: spin instead of an empty ring.
+        spinning: !failures && finished === 0 && finished + failed < total,
+        pinned: !total,
+      });
       if (status) {
         status.retry.hidden = !failures;
         status.retry.disabled = !!requests.size || tabPending;
@@ -236,7 +292,7 @@ globalThis.__noTypeToggleTranslation = () => {
       document.removeEventListener("visibilitychange", visibilityChanged);
       requests.forEach(group => group.forEach(item => item.view?.host.remove()));
       port?.disconnect();
-      setStatus(`翻译已停止：${message} 关闭后可重新点击插件重试。`);
+      setStatus(`翻译已停止：${message} 关闭后可重新点击插件重试。`, { progress: 1, tone: "error", pinned: true });
       if (status) status.retry.hidden = true;
     }
     function queueViews(response, inFlight) {
@@ -400,6 +456,6 @@ globalThis.__noTypeToggleTranslation = () => {
     visibleObserver?.disconnect();
     document.removeEventListener("visibilitychange", visibilityChanged);
     port?.disconnect();
-    setStatus(`无法翻译此页面：${error.message}`);
+    setStatus(`无法翻译此页面：${error.message}`, { progress: 1, tone: "error", pinned: true });
   }
 };
