@@ -3,7 +3,7 @@
   "id": "notype",
   "name": "NoType",
   "version": "0.1.0",
-  "description": "Voice dictation HUD, bar indicator and Chinese selection translation panel for the NoType daemon.",
+  "description": "Voice dictation HUD, bar menu, settings window and Chinese selection translation panel for the NoType daemon.",
   "kinds": [
     "service",
     "panel",
@@ -17,7 +17,7 @@
   },
   "barWidget": {
     "displayName": "NoType",
-    "description": "Dictation state. Left click toggles recording, right click cancels.",
+    "description": "Dictation state. Left click opens the menu, middle click toggles recording, right click cancels.",
     "category": "Status",
     "allowMultiple": false,
     "defaultSection": "right",
