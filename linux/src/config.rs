@@ -16,6 +16,7 @@ pub const DEFAULT_RESOURCE_ID: &str = "volc.seedasr.sauc.duration";
 pub const SECRET_APPLICATION: &str = "notype";
 pub const SECRET_ACCOUNT: &str = "doubao.access-token";
 const LANGUAGES: [&str; 5] = ["zh-CN", "en-US", "zh-TW", "ja-JP", "ko-KR"];
+const KEYRING_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -102,22 +103,24 @@ impl Config {
 
 /// Keyring token first, then the config fallback. Returns an empty string when neither is set.
 pub async fn doubao_access_token(config: &Config) -> String {
-    let output = tokio::process::Command::new("secret-tool")
+    match keyring_token().await {
+        Some(token) => token,
+        None => config.doubao.access_token.trim().to_owned(),
+    }
+}
+
+/// The Doubao token stored in the Secret Service, if any.
+/// A locked keyring shows an unlock prompt; give up if nobody answers it.
+pub async fn keyring_token() -> Option<String> {
+    let lookup = tokio::process::Command::new("secret-tool")
         .args(["lookup", "application", SECRET_APPLICATION, "account", SECRET_ACCOUNT])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
-        .output()
-        .await;
-    if let Ok(output) = output
-        && output.status.success()
-    {
-        let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-        if !token.is_empty() {
-            return token;
-        }
-    }
-    config.doubao.access_token.trim().to_owned()
+        .output();
+    let output = tokio::time::timeout(KEYRING_LOOKUP_TIMEOUT, lookup).await.ok()?.ok()?;
+    let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    (output.status.success() && !token.is_empty()).then_some(token)
 }
 
 #[cfg(test)]
