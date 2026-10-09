@@ -65,7 +65,9 @@ impl CodexTranscriptionService {
     pub fn new(auth: CodexAuthStore) -> Self {
         Self {
             auth,
-            client: client_builder().build().expect("HTTP client configuration is valid"),
+            client: client_builder()
+                .build()
+                .expect("HTTP client configuration is valid"),
             endpoint: TRANSCRIBE_URL.to_owned(),
         }
     }
@@ -94,7 +96,9 @@ impl CodexTranscriptionService {
         let mut operation = Operation::start(pcm.len());
         let result = self.upload(pcm, &operation).await;
         match &result {
-            Ok(text) => operation.finish("success", &format!(" characters={}", text.chars().count())),
+            Ok(text) => {
+                operation.finish("success", &format!(" characters={}", text.chars().count()))
+            }
             Err(error) => operation.finish(&failure_category(error), ""),
         }
         result
@@ -102,19 +106,31 @@ impl CodexTranscriptionService {
 
     async fn upload(&self, pcm: Vec<u8>, operation: &Operation) -> anyhow::Result<String> {
         let credentials = self.current_credentials()?;
-        let boundary = format!("----notype-{}", uuid::Uuid::new_v4().to_string().to_uppercase());
+        let boundary = format!(
+            "----notype-{}",
+            uuid::Uuid::new_v4().to_string().to_uppercase()
+        );
         let multipart_boundary = boundary.clone();
-        let body = tokio::task::spawn_blocking(move || multipart_body(&pcm, &multipart_boundary, true)).await??;
+        let body =
+            tokio::task::spawn_blocking(move || multipart_body(&pcm, &multipart_boundary, true))
+                .await??;
         operation.record(
             "audio_prepared",
-            &format!("body_bytes={} elapsed_ms={}", body.len(), operation.elapsed_ms()),
+            &format!(
+                "body_bytes={} elapsed_ms={}",
+                body.len(),
+                operation.elapsed_ms()
+            ),
         );
 
         let response = self.request(&credentials, &boundary, body).send().await?;
         let status = response.status();
         let headers = response.headers().clone();
         let data = response.bytes().await?;
-        operation.record("http_response", &response_summary(status.as_u16(), &headers, data.len()));
+        operation.record(
+            "http_response",
+            &response_summary(status.as_u16(), &headers, data.len()),
+        );
         if !status.is_success() {
             return Err(TranscriptionError::RequestFailed(status.as_u16()).into());
         }
@@ -127,15 +143,26 @@ impl CodexTranscriptionService {
         Ok(text.to_owned())
     }
 
-    fn request(&self, credentials: &CodexCredentials, boundary: &str, body: Vec<u8>) -> reqwest::RequestBuilder {
-        let mut request = self.client.post(&self.endpoint).bearer_auth(&credentials.access_token);
+    fn request(
+        &self,
+        credentials: &CodexCredentials,
+        boundary: &str,
+        body: Vec<u8>,
+    ) -> reqwest::RequestBuilder {
+        let mut request = self
+            .client
+            .post(&self.endpoint)
+            .bearer_auth(&credentials.access_token);
         if let Some(account_id) = &credentials.account_id {
             request = request.header("ChatGPT-Account-Id", account_id);
         }
         request
             .header("originator", "Codex Desktop")
             .header(USER_AGENT, "NoType/0.1")
-            .header(CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+            .header(
+                CONTENT_TYPE,
+                format!("multipart/form-data; boundary={boundary}"),
+            )
             .header(ACCEPT, "application/json")
             .body(body)
     }
@@ -152,7 +179,11 @@ fn validate_pcm(pcm: &[u8]) -> Result<(), TranscriptionError> {
 }
 
 /// The upload body: one `file` part holding WAV, or FLAC when that is smaller.
-pub fn multipart_body(pcm: &[u8], boundary: &str, compress: bool) -> Result<Vec<u8>, TranscriptionError> {
+pub fn multipart_body(
+    pcm: &[u8],
+    boundary: &str,
+    compress: bool,
+) -> Result<Vec<u8>, TranscriptionError> {
     validate_pcm(pcm)?;
     let wav = wav_bytes(pcm);
     let (audio, format) = match compress.then(|| compress_pcm(pcm).ok()).flatten() {
@@ -191,9 +222,15 @@ fn wav_bytes(pcm: &[u8]) -> Vec<u8> {
 /// Lossless FLAC encoding of the PCM (pure Rust, `flacenc`).
 pub fn compress_pcm(pcm: &[u8]) -> Result<Vec<u8>, TranscriptionError> {
     validate_pcm(pcm).map_err(|_| TranscriptionError::InvalidAudio)?;
-    let samples: Vec<i32> =
-        pcm.as_chunks::<2>().0.iter().map(|&sample| i32::from(i16::from_le_bytes(sample))).collect();
-    let config = flacenc::config::Encoder::default().into_verified().map_err(|_| TranscriptionError::InvalidAudio)?;
+    let samples: Vec<i32> = pcm
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&sample| i32::from(i16::from_le_bytes(sample)))
+        .collect();
+    let config = flacenc::config::Encoder::default()
+        .into_verified()
+        .map_err(|_| TranscriptionError::InvalidAudio)?;
     let source = flacenc::source::MemSource::from_samples(
         &samples,
         usize::from(CHANNEL_COUNT),
@@ -203,7 +240,9 @@ pub fn compress_pcm(pcm: &[u8]) -> Result<Vec<u8>, TranscriptionError> {
     let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
         .map_err(|_| TranscriptionError::InvalidAudio)?;
     let mut sink = flacenc::bitsink::ByteSink::new();
-    stream.write(&mut sink).map_err(|_| TranscriptionError::InvalidAudio)?;
+    stream
+        .write(&mut sink)
+        .map_err(|_| TranscriptionError::InvalidAudio)?;
     Ok(sink.into_inner())
 }
 
@@ -216,8 +255,18 @@ struct Operation {
 
 impl Operation {
     fn start(pcm_bytes: usize) -> Self {
-        let operation = Self { id: uuid::Uuid::new_v4().to_string().to_uppercase(), started: Instant::now(), finished: false };
-        operation.record("request_start", &format!("pcm_bytes={pcm_bytes} audio_ms={}", pcm_bytes * 1000 / 32000));
+        let operation = Self {
+            id: uuid::Uuid::new_v4().to_string().to_uppercase(),
+            started: Instant::now(),
+            finished: false,
+        };
+        operation.record(
+            "request_start",
+            &format!(
+                "pcm_bytes={pcm_bytes} audio_ms={}",
+                pcm_bytes * 1000 / 32000
+            ),
+        );
         operation
     }
 
@@ -231,7 +280,10 @@ impl Operation {
 
     fn finish(&mut self, outcome: &str, extra: &str) {
         self.finished = true;
-        self.record("request_end", &format!("outcome={outcome} elapsed_ms={}{extra}", self.elapsed_ms()));
+        self.record(
+            "request_end",
+            &format!("outcome={outcome} elapsed_ms={}{extra}", self.elapsed_ms()),
+        );
     }
 }
 
@@ -245,7 +297,9 @@ impl Drop for Operation {
 
 /// A header value safe to log, or `none` / `invalid`.
 pub fn safe_identifier(value: Option<&str>) -> String {
-    let Some(value) = value else { return "none".to_owned() };
+    let Some(value) = value else {
+        return "none".to_owned();
+    };
     let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':');
     if value.is_empty() || value.len() > 128 || !value.chars().all(allowed) {
         return "invalid".to_owned();
@@ -255,8 +309,19 @@ pub fn safe_identifier(value: Option<&str>) -> String {
 
 /// Response metadata that is safe to log: no cookies, tokens or body.
 pub fn response_summary(status: u16, headers: &HeaderMap, byte_count: usize) -> String {
-    let header = |name: &str| headers.get(name).map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned());
-    let mime_type = header("content-type").map(|value| value.split(';').next().unwrap_or_default().trim().to_lowercase());
+    let header = |name: &str| {
+        headers
+            .get(name)
+            .map(|value| String::from_utf8_lossy(value.as_bytes()).into_owned())
+    };
+    let mime_type = header("content-type").map(|value| {
+        value
+            .split(';')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_lowercase()
+    });
     let format = match mime_type.as_deref() {
         Some("application/json") => "json",
         Some("text/html") => "html",
@@ -305,15 +370,25 @@ mod tests {
     use crate::rewrite::test_support::{MockResponse, MockServer, TempCodexHome};
 
     fn credentials(account_id: Option<&str>) -> CodexCredentials {
-        CodexCredentials { access_token: "test-token".into(), account_id: account_id.map(str::to_owned), expires_at: None }
+        CodexCredentials {
+            access_token: "test-token".into(),
+            account_id: account_id.map(str::to_owned),
+            expires_at: None,
+        }
     }
 
     fn sine_pcm() -> Vec<u8> {
-        (0..16000).flat_map(|index| ((((index as f64) * 0.04).sin() * 12000.0) as i16).to_le_bytes()).collect()
+        (0..16000)
+            .flat_map(|index| ((((index as f64) * 0.04).sin() * 12000.0) as i16).to_le_bytes())
+            .collect()
     }
 
     fn file_part(body: &[u8]) -> &[u8] {
-        let start = body.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
+        let start = body
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .unwrap()
+            + 4;
         &body[start..]
     }
 
@@ -322,8 +397,14 @@ mod tests {
         let pcm = [0x01, 0x02, 0xFF, 0x7F];
         let service = CodexTranscriptionService::new(CodexAuthStore::default());
         let body = multipart_body(&pcm, "test-boundary", false).unwrap();
-        let request = service.request(&credentials(Some("test-account")), "test-boundary", body).build().unwrap();
-        assert_eq!(request.url().as_str(), "https://chatgpt.com/backend-api/transcribe");
+        let request = service
+            .request(&credentials(Some("test-account")), "test-boundary", body)
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.url().as_str(),
+            "https://chatgpt.com/backend-api/transcribe"
+        );
         assert_eq!(request.method(), reqwest::Method::POST);
         let headers = request.headers();
         assert_eq!(headers["authorization"], "Bearer test-token");
@@ -331,7 +412,10 @@ mod tests {
         assert_eq!(headers["chatgpt-account-id"], "test-account");
         assert_eq!(headers["originator"], "Codex Desktop");
         assert_eq!(headers["user-agent"], "NoType/0.1");
-        assert_eq!(headers["content-type"], "multipart/form-data; boundary=test-boundary");
+        assert_eq!(
+            headers["content-type"],
+            "multipart/form-data; boundary=test-boundary"
+        );
         assert_eq!(headers["accept"], "application/json");
 
         let body = request.body().unwrap().as_bytes().unwrap();
@@ -348,14 +432,23 @@ mod tests {
         assert!(body.ends_with(b"\r\n--test-boundary--\r\n"));
         assert!(!String::from_utf8_lossy(body).contains("name=\"model\""));
 
-        let request = service.request(&credentials(None), "b", Vec::new()).build().unwrap();
+        let request = service
+            .request(&credentials(None), "b", Vec::new())
+            .build()
+            .unwrap();
         assert!(request.headers().get("chatgpt-account-id").is_none());
     }
 
     #[test]
     fn rejects_empty_or_truncated_audio() {
-        assert_eq!(multipart_body(&[], "b", true), Err(TranscriptionError::NoSpeech));
-        assert_eq!(multipart_body(&[1], "b", true), Err(TranscriptionError::InvalidAudio));
+        assert_eq!(
+            multipart_body(&[], "b", true),
+            Err(TranscriptionError::NoSpeech)
+        );
+        assert_eq!(
+            multipart_body(&[1], "b", true),
+            Err(TranscriptionError::InvalidAudio)
+        );
         assert_eq!(compress_pcm(&[]), Err(TranscriptionError::InvalidAudio));
     }
 
@@ -377,13 +470,40 @@ mod tests {
         let (flac, decoded) = (directory.join("in.flac"), directory.join("out.raw"));
         std::fs::write(&flac, &compressed).unwrap();
         let decoders: [(&str, Vec<&std::ffi::OsStr>); 2] = [
-            ("flac", vec!["-d".as_ref(), "-s".as_ref(), "-f".as_ref(), "--force-raw-format".as_ref(),
-                "--endian=little".as_ref(), "--sign=signed".as_ref(), "-o".as_ref(), decoded.as_os_str(), flac.as_os_str()]),
-            ("ffmpeg", vec!["-v".as_ref(), "error".as_ref(), "-y".as_ref(), "-i".as_ref(), flac.as_os_str(),
-                "-f".as_ref(), "s16le".as_ref(), decoded.as_os_str()]),
+            (
+                "flac",
+                vec![
+                    "-d".as_ref(),
+                    "-s".as_ref(),
+                    "-f".as_ref(),
+                    "--force-raw-format".as_ref(),
+                    "--endian=little".as_ref(),
+                    "--sign=signed".as_ref(),
+                    "-o".as_ref(),
+                    decoded.as_os_str(),
+                    flac.as_os_str(),
+                ],
+            ),
+            (
+                "ffmpeg",
+                vec![
+                    "-v".as_ref(),
+                    "error".as_ref(),
+                    "-y".as_ref(),
+                    "-i".as_ref(),
+                    flac.as_os_str(),
+                    "-f".as_ref(),
+                    "s16le".as_ref(),
+                    decoded.as_os_str(),
+                ],
+            ),
         ];
         let decoded_pcm = decoders.iter().find_map(|(tool, args)| {
-            let status = std::process::Command::new(tool).args(args).output().ok()?.status;
+            let status = std::process::Command::new(tool)
+                .args(args)
+                .output()
+                .ok()?
+                .status;
             status.success().then(|| std::fs::read(&decoded).unwrap())
         });
         std::fs::remove_dir_all(&directory).ok();
@@ -415,9 +535,21 @@ mod tests {
         assert_eq!(safe_identifier(Some(&"x".repeat(200))), "invalid");
         assert_eq!(safe_identifier(Some("")), "invalid");
         assert_eq!(safe_identifier(None), "none");
-        assert!(!TranscriptionError::RequestFailed(403).to_string().contains("账号无法"));
-        assert_eq!(TranscriptionError::RequestFailed(502).to_string(), "Codex 语音转写失败（HTTP 502）。");
-        assert_eq!(response_summary(200, &HeaderMap::new(), 0).split(' ').nth(2), Some("format=other"));
+        assert!(
+            !TranscriptionError::RequestFailed(403)
+                .to_string()
+                .contains("账号无法")
+        );
+        assert_eq!(
+            TranscriptionError::RequestFailed(502).to_string(),
+            "Codex 语音转写失败（HTTP 502）。"
+        );
+        assert_eq!(
+            response_summary(200, &HeaderMap::new(), 0)
+                .split(' ')
+                .nth(2),
+            Some("format=other")
+        );
     }
 
     async fn transcribe(scenario: &'static str) -> (anyhow::Result<String>, MockServer) {
@@ -435,7 +567,10 @@ mod tests {
         let service = CodexTranscriptionService::new(home.store()).with_endpoint(&server.url);
         let result = service.transcribe(vec![0, 0]).await;
         // Tiny audio is smaller as WAV than as FLAC.
-        assert!(String::from_utf8_lossy(&server.requests()[0].body).contains("filename=\"dictation.wav\""));
+        assert!(
+            String::from_utf8_lossy(&server.requests()[0].body)
+                .contains("filename=\"dictation.wav\"")
+        );
         (result, server)
     }
 
@@ -444,12 +579,26 @@ mod tests {
         let (result, server) = transcribe("success").await;
         assert_eq!(result.unwrap(), "嗯，五秒，不对，十秒。\n不要修改翻译。");
         let request = &server.requests()[0];
-        assert_eq!((request.method.as_str(), request.path.as_str()), ("POST", "/"));
-        assert_eq!(request.header("authorization"), Some("Bearer test-only-token"));
+        assert_eq!(
+            (request.method.as_str(), request.path.as_str()),
+            ("POST", "/")
+        );
+        assert_eq!(
+            request.header("authorization"),
+            Some("Bearer test-only-token")
+        );
         assert_eq!(request.header("chatgpt-account-id"), None);
-        let boundary = request.header("content-type").unwrap().strip_prefix("multipart/form-data; boundary=").unwrap();
+        let boundary = request
+            .header("content-type")
+            .unwrap()
+            .strip_prefix("multipart/form-data; boundary=")
+            .unwrap();
         assert!(boundary.starts_with("----notype-"));
-        assert!(request.body.starts_with(format!("--{boundary}\r\n").as_bytes()));
+        assert!(
+            request
+                .body
+                .starts_with(format!("--{boundary}\r\n").as_bytes())
+        );
     }
 
     #[tokio::test]
@@ -462,7 +611,11 @@ mod tests {
                 "invalid" => TranscriptionError::InvalidResponse,
                 status => TranscriptionError::RequestFailed(status.parse().unwrap()),
             };
-            assert_eq!(error.downcast_ref::<TranscriptionError>(), Some(&expected), "{scenario}: {error:?}");
+            assert_eq!(
+                error.downcast_ref::<TranscriptionError>(),
+                Some(&expected),
+                "{scenario}: {error:?}"
+            );
             // A redirect is never followed.
             assert_eq!(server.requests().len(), 1, "{scenario}");
         }
@@ -477,7 +630,9 @@ mod tests {
             response
         })
         .await;
-        let service = std::sync::Arc::new(CodexTranscriptionService::new(home.store()).with_endpoint(&server.url));
+        let service = std::sync::Arc::new(
+            CodexTranscriptionService::new(home.store()).with_endpoint(&server.url),
+        );
         let task = tokio::spawn({
             let service = service.clone();
             async move { service.transcribe(vec![0, 0]).await }
@@ -490,12 +645,19 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_missing_and_expired_login_before_uploading() {
-        let server = MockServer::start(|_| MockResponse::new(200, "application/json").body(r#"{"text":"x"}"#)).await;
+        let server = MockServer::start(|_| {
+            MockResponse::new(200, "application/json").body(r#"{"text":"x"}"#)
+        })
+        .await;
         let home = TempCodexHome::new(None);
         let service = CodexTranscriptionService::new(home.store()).with_endpoint(&server.url);
-        assert!(matches!(service.check_credentials(), Err(AiError::MissingCodexAuth)));
+        assert!(matches!(
+            service.check_credentials(),
+            Err(AiError::MissingCodexAuth)
+        ));
 
-        let payload = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, r#"{"exp":1}"#);
+        let payload =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, r#"{"exp":1}"#);
         std::fs::write(
             home.path.join("auth.json"),
             format!(r#"{{"tokens":{{"access_token":"header.{payload}.signature"}}}}"#),
@@ -503,7 +665,13 @@ mod tests {
         .unwrap();
         // Credentials are checked before the audio.
         let error = service.transcribe(Vec::new()).await.unwrap_err();
-        assert!(matches!(error.downcast_ref::<AiError>(), Some(AiError::CodexAuthExpired)), "{error:?}");
+        assert!(
+            matches!(
+                error.downcast_ref::<AiError>(),
+                Some(AiError::CodexAuthExpired)
+            ),
+            "{error:?}"
+        );
         assert_eq!(failure_category(&error), "authentication");
         assert!(server.requests().is_empty());
     }
@@ -516,9 +684,16 @@ mod tests {
         let pcm = std::fs::read(path).unwrap();
         // Shows the diagnostics (sizes and response metadata only, never the token).
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
-        println!("wav_bytes={} flac_bytes={}", wav_bytes(&pcm).len(), compress_pcm(&pcm).map_or(0, |flac| flac.len()));
+        println!(
+            "wav_bytes={} flac_bytes={}",
+            wav_bytes(&pcm).len(),
+            compress_pcm(&pcm).map_or(0, |flac| flac.len())
+        );
         let started = std::time::Instant::now();
-        let text = CodexTranscriptionService::new(CodexAuthStore::default()).transcribe(pcm).await.unwrap();
+        let text = CodexTranscriptionService::new(CodexAuthStore::default())
+            .transcribe(pcm)
+            .await
+            .unwrap();
         assert!(!text.is_empty());
         println!("Codex live transcription ({:?}): {text}", started.elapsed());
     }

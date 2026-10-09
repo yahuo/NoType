@@ -24,7 +24,10 @@ impl Phase {
     }
 
     pub fn is_busy(self) -> bool {
-        matches!(self, Phase::Recording | Phase::Transcribing | Phase::Refining)
+        matches!(
+            self,
+            Phase::Recording | Phase::Transcribing | Phase::Refining
+        )
     }
 }
 

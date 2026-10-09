@@ -105,9 +105,15 @@ async fn main() -> ExitCode {
 
 fn request(command: Command) -> ControlRequest {
     match command {
-        Command::Record { action: RecordAction::Toggle } => ControlRequest::RecordToggle,
-        Command::Record { action: RecordAction::Start } => ControlRequest::RecordStart,
-        Command::Record { action: RecordAction::Stop } => ControlRequest::RecordStop,
+        Command::Record {
+            action: RecordAction::Toggle,
+        } => ControlRequest::RecordToggle,
+        Command::Record {
+            action: RecordAction::Start,
+        } => ControlRequest::RecordStart,
+        Command::Record {
+            action: RecordAction::Stop,
+        } => ControlRequest::RecordStop,
         Command::Translate => ControlRequest::Translate,
         Command::Cancel => ControlRequest::Cancel,
         Command::AgentTranslate => ControlRequest::AgentTranslate,
@@ -123,7 +129,8 @@ fn request(command: Command) -> ControlRequest {
 async fn run_daemon() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "notype=info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "notype=info".into()),
         )
         .with_writer(std::io::stderr)
         // journald stores escape codes verbatim.
@@ -150,7 +157,11 @@ async fn run_daemon() -> Result<()> {
             "NoType cannot reach Hyprland: {missing} not set. Run `systemctl --user import-environment {missing}` and restart notype."
         ));
     }
-    let bridge = match BridgeServer::start(Arc::new(BridgeHandler::new(ai, editor.clone(), app.clone()))) {
+    let bridge = match BridgeServer::start(Arc::new(BridgeHandler::new(
+        ai,
+        editor.clone(),
+        app.clone(),
+    ))) {
         Ok(bridge) => Some(bridge),
         Err(error) => {
             tracing::warn!("bridge unavailable: {error:#}");
@@ -183,10 +194,20 @@ async fn run_daemon() -> Result<()> {
 async fn doctor() -> Result<()> {
     let checks = checks::run(&Config::load()).await;
     for check in &checks {
-        let mark = if check.ok { "ok  " } else if check.required { "FAIL" } else { "warn" };
+        let mark = if check.ok {
+            "ok  "
+        } else if check.required {
+            "FAIL"
+        } else {
+            "warn"
+        };
         println!("{mark} {}: {}", check.label, check.detail);
     }
-    if checks::ready(&checks) { Ok(()) } else { anyhow::bail!("some required checks failed") }
+    if checks::ready(&checks) {
+        Ok(())
+    } else {
+        anyhow::bail!("some required checks failed")
+    }
 }
 
 async fn settings_command(action: SettingsAction) -> Result<()> {
@@ -199,11 +220,15 @@ async fn settings_command(action: SettingsAction) -> Result<()> {
             Ok(draft) => settings::save(draft).await,
             Err(error) => Outcome::failed(format!("{error:#}")),
         },
-        SettingsAction::Test { target: TestTarget::Speech } => match settings::read_draft().await {
+        SettingsAction::Test {
+            target: TestTarget::Speech,
+        } => match settings::read_draft().await {
             Ok(draft) => settings::test_speech(draft).await,
             Err(error) => Outcome::failed(format!("{error:#}")),
         },
-        SettingsAction::Test { target: TestTarget::AiRewrite } => settings::test_ai_rewrite().await,
+        SettingsAction::Test {
+            target: TestTarget::AiRewrite,
+        } => settings::test_ai_rewrite().await,
     };
     println!("{}", serde_json::to_string(&outcome)?);
     match outcome.error {

@@ -21,7 +21,8 @@ pub struct CodexCredentials {
 
 impl CodexCredentials {
     pub fn is_expired(&self) -> bool {
-        self.expires_at.is_some_and(|expires_at| expires_at <= SystemTime::now())
+        self.expires_at
+            .is_some_and(|expires_at| expires_at <= SystemTime::now())
     }
 }
 
@@ -64,7 +65,8 @@ impl CodexAuthStore {
 
         let data = std::fs::read(&auth_path)?;
         // Swift surfaces the raw DecodingError here; a malformed file is reported as invalid auth.
-        let decoded: CodexAuthFile = serde_json::from_slice(&data).map_err(|_| AiError::InvalidCodexAuth)?;
+        let decoded: CodexAuthFile =
+            serde_json::from_slice(&data).map_err(|_| AiError::InvalidCodexAuth)?;
         let access_token = decoded.tokens.access_token.trim().to_owned();
         if access_token.is_empty() {
             return Err(AiError::InvalidCodexAuth);
@@ -83,7 +85,11 @@ impl CodexAuthStore {
             .and_then(Value::as_f64)
             .and_then(unix_time);
 
-        Ok(CodexCredentials { access_token, account_id, expires_at })
+        Ok(CodexCredentials {
+            access_token,
+            account_id,
+            expires_at,
+        })
     }
 
     pub fn has_credentials(&self) -> bool {
@@ -96,7 +102,11 @@ impl CodexAuthStore {
 }
 
 fn codex_home_dir(explicit: Option<&Path>) -> PathBuf {
-    resolve_codex_home(explicit, std::env::var_os("CODEX_HOME"), &crate::paths::home_dir())
+    resolve_codex_home(
+        explicit,
+        std::env::var_os("CODEX_HOME"),
+        &crate::paths::home_dir(),
+    )
 }
 
 /// Explicit home, then a non-blank `CODEX_HOME`, then `~/.codex`.
@@ -116,7 +126,9 @@ fn unix_time(seconds: f64) -> Option<SystemTime> {
     }
     if seconds >= 0.0 {
         // An unrepresentably distant expiry behaves like no expiry.
-        Duration::try_from_secs_f64(seconds).ok().and_then(|offset| UNIX_EPOCH.checked_add(offset))
+        Duration::try_from_secs_f64(seconds)
+            .ok()
+            .and_then(|offset| UNIX_EPOCH.checked_add(offset))
     } else {
         Some(
             Duration::try_from_secs_f64(-seconds)
@@ -141,7 +153,9 @@ pub fn decode_jwt_payload(token: &str) -> Option<Map<String, Value>> {
         base64.push_str(&"=".repeat(4 - padding));
     }
 
-    let data = base64::engine::general_purpose::STANDARD.decode(base64).ok()?;
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(base64)
+        .ok()?;
     serde_json::from_slice(&data).ok()
 }
 
@@ -157,7 +171,8 @@ impl CodexModelResolver {
     }
 
     pub fn resolve_model(&self) -> String {
-        self.configured_model().unwrap_or_else(|| "gpt-5.5".to_owned())
+        self.configured_model()
+            .unwrap_or_else(|| "gpt-5.5".to_owned())
     }
 
     fn configured_model(&self) -> Option<String> {
@@ -170,11 +185,15 @@ impl CodexModelResolver {
 fn model_from_config(contents: &str) -> Option<String> {
     let blank = |c: char| c == ' ' || c == '\t';
     for raw_line in contents.split('\n') {
-        let Some((key, value)) = raw_line.trim_matches(blank).split_once('=') else { continue };
+        let Some((key, value)) = raw_line.trim_matches(blank).split_once('=') else {
+            continue;
+        };
         if key.is_empty() || value.is_empty() || key.trim_matches(blank) != "model" {
             continue;
         }
-        let value = value.trim_matches(blank).trim_matches(|c: char| c == '"' || c == '\'');
+        let value = value
+            .trim_matches(blank)
+            .trim_matches(|c: char| c == '"' || c == '\'');
         return (!value.is_empty()).then(|| value.to_owned());
     }
     None
@@ -197,7 +216,8 @@ mod tests {
     #[test]
     fn reads_access_token_and_account_id() {
         let home = temp_home();
-        let payload = r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-123"},"exp":4102444800}"#;
+        let payload =
+            r#"{"https://api.openai.com/auth":{"chatgpt_account_id":"acct-123"},"exp":4102444800}"#;
         let token = format!("header.{}.signature", base64_url(payload));
         let auth = format!(r#"{{"tokens":{{"access_token":"{token}"}}}}"#);
         std::fs::write(home.join("auth.json"), auth).unwrap();
@@ -207,7 +227,10 @@ mod tests {
 
         assert_eq!(credentials.access_token, token);
         assert_eq!(credentials.account_id.as_deref(), Some("acct-123"));
-        assert_eq!(credentials.expires_at, Some(UNIX_EPOCH + Duration::from_secs(4_102_444_800)));
+        assert_eq!(
+            credentials.expires_at,
+            Some(UNIX_EPOCH + Duration::from_secs(4_102_444_800))
+        );
         assert!(!credentials.is_expired());
         assert!(!format!("{credentials:?}").contains("signature"));
     }
@@ -219,20 +242,31 @@ mod tests {
         assert!(matches!(store.load(), Err(AiError::MissingCodexAuth)));
         assert!(!store.has_credentials());
 
-        std::fs::write(home.join("auth.json"), r#"{"tokens":{"access_token":"  "}}"#).unwrap();
+        std::fs::write(
+            home.join("auth.json"),
+            r#"{"tokens":{"access_token":"  "}}"#,
+        )
+        .unwrap();
         assert!(matches!(store.load(), Err(AiError::InvalidCodexAuth)));
 
         std::fs::write(home.join("auth.json"), r#"{"OPENAI_API_KEY":"sk"}"#).unwrap();
         assert!(matches!(store.load(), Err(AiError::InvalidCodexAuth)));
 
         // A token that is not a JWT is still usable and never expires.
-        std::fs::write(home.join("auth.json"), r#"{"tokens":{"access_token":" opaque "}}"#).unwrap();
+        std::fs::write(
+            home.join("auth.json"),
+            r#"{"tokens":{"access_token":" opaque "}}"#,
+        )
+        .unwrap();
         let opaque = store.load().unwrap();
         assert_eq!(opaque.access_token, "opaque");
         assert_eq!(opaque.account_id, None);
         assert!(!opaque.is_expired());
 
-        let expired = format!(r#"{{"tokens":{{"access_token":"header.{}.signature"}}}}"#, base64_url(r#"{"exp":1}"#));
+        let expired = format!(
+            r#"{{"tokens":{{"access_token":"header.{}.signature"}}}}"#,
+            base64_url(r#"{"exp":1}"#)
+        );
         std::fs::write(home.join("auth.json"), expired).unwrap();
         assert!(store.load().unwrap().is_expired());
         std::fs::remove_dir_all(&home).ok();
@@ -243,7 +277,10 @@ mod tests {
         let claims = r#"{"k":"??>>~~"}"#;
         let encoded = base64_url(claims);
         assert!(encoded.contains('-') || encoded.contains('_'));
-        assert_eq!(decode_jwt_payload(&format!("h.{encoded}.s")).unwrap()["k"], "??>>~~");
+        assert_eq!(
+            decode_jwt_payload(&format!("h.{encoded}.s")).unwrap()["k"],
+            "??>>~~"
+        );
         assert!(decode_jwt_payload("only-one-part").is_none());
         assert!(decode_jwt_payload("h.!!!.s").is_none());
         // Empty segments are skipped like Swift's `split`.
@@ -253,10 +290,22 @@ mod tests {
     #[test]
     fn codex_home_prefers_explicit_then_env_then_user_home() {
         let user = Path::new("/home/me");
-        assert_eq!(resolve_codex_home(Some(Path::new("/x")), Some("/env".into()), user), PathBuf::from("/x"));
-        assert_eq!(resolve_codex_home(None, Some("/env".into()), user), PathBuf::from("/env"));
-        assert_eq!(resolve_codex_home(None, Some("  ".into()), user), PathBuf::from("/home/me/.codex"));
-        assert_eq!(resolve_codex_home(None, None, user), PathBuf::from("/home/me/.codex"));
+        assert_eq!(
+            resolve_codex_home(Some(Path::new("/x")), Some("/env".into()), user),
+            PathBuf::from("/x")
+        );
+        assert_eq!(
+            resolve_codex_home(None, Some("/env".into()), user),
+            PathBuf::from("/env")
+        );
+        assert_eq!(
+            resolve_codex_home(None, Some("  ".into()), user),
+            PathBuf::from("/home/me/.codex")
+        );
+        assert_eq!(
+            resolve_codex_home(None, None, user),
+            PathBuf::from("/home/me/.codex")
+        );
     }
 
     #[test]
@@ -264,9 +313,15 @@ mod tests {
         let home = temp_home();
         let config = "model_reasoning_effort = \"high\"\nplan_mode_reasoning_effort = \"high\"\nmodel = \"gpt-5.5\"\n";
         std::fs::write(home.join("config.toml"), config).unwrap();
-        assert_eq!(CodexModelResolver::new(Some(home.clone())).resolve_model(), "gpt-5.5");
+        assert_eq!(
+            CodexModelResolver::new(Some(home.clone())).resolve_model(),
+            "gpt-5.5"
+        );
         std::fs::write(home.join("config.toml"), "model = 'custom'\n").unwrap();
-        assert_eq!(CodexModelResolver::new(Some(home.clone())).resolve_model(), "custom");
+        assert_eq!(
+            CodexModelResolver::new(Some(home.clone())).resolve_model(),
+            "custom"
+        );
         std::fs::remove_dir_all(&home).ok();
         assert_eq!(model_from_config("model = \"\""), None);
     }

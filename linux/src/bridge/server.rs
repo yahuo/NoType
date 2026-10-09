@@ -67,11 +67,19 @@ impl ProgressSink {
 
 /// Request handler driven by the server. Dropping the returned future cancels the request.
 pub trait RequestHandler: Send + Sync + 'static {
-    fn handle(&self, request: BridgeRequest, progress: ProgressSink) -> BoxFuture<'_, BridgeResponse>;
+    fn handle(
+        &self,
+        request: BridgeRequest,
+        progress: ProgressSink,
+    ) -> BoxFuture<'_, BridgeResponse>;
 }
 
 impl RequestHandler for BridgeHandler {
-    fn handle(&self, request: BridgeRequest, progress: ProgressSink) -> BoxFuture<'_, BridgeResponse> {
+    fn handle(
+        &self,
+        request: BridgeRequest,
+        progress: ProgressSink,
+    ) -> BoxFuture<'_, BridgeResponse> {
         Box::pin(BridgeHandler::handle(self, request, progress))
     }
 }
@@ -126,7 +134,12 @@ impl BridgeServer {
     /// Closes every connection (cancelling in-flight requests), removes the socket and releases
     /// the lock. Idempotent.
     pub fn shutdown(&self) {
-        let Some(running) = self.running.lock().unwrap_or_else(PoisonError::into_inner).take() else {
+        let Some(running) = self
+            .running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        else {
             return;
         };
         // Aborting the accept task drops its JoinSet, which aborts every connection task.
@@ -171,15 +184,19 @@ fn release_lock(lock: &File) {
 
 fn bind(socket_path: &Path) -> anyhow::Result<UnixListener> {
     if socket_path.as_os_str().len() >= SOCKET_PATH_LIMIT {
-        return Err(BridgeServiceError::SocketPathTooLong(socket_path.display().to_string()).into());
+        return Err(
+            BridgeServiceError::SocketPathTooLong(socket_path.display().to_string()).into(),
+        );
     }
     // The lock guarantees no live daemon owns this path.
     match fs::symlink_metadata(socket_path) {
-        Ok(_) => fs::remove_file(socket_path).context("unable to remove the stale NoType bridge socket")?,
+        Ok(_) => fs::remove_file(socket_path)
+            .context("unable to remove the stale NoType bridge socket")?,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {}
         Err(error) => return Err(error).context("unable to inspect the NoType bridge socket"),
     }
-    let listener = UnixListener::bind(socket_path).context("unable to bind the NoType bridge socket")?;
+    let listener =
+        UnixListener::bind(socket_path).context("unable to bind the NoType bridge socket")?;
     fs::set_permissions(socket_path, fs::Permissions::from_mode(0o600))
         .context("Unable to secure the NoType bridge socket")?;
     Ok(listener)
@@ -236,7 +253,12 @@ impl FrameDecoder {
         if self.buffer.len() < 4 {
             return Ok(None);
         }
-        let length = u32::from_be_bytes([self.buffer[0], self.buffer[1], self.buffer[2], self.buffer[3]]) as usize;
+        let length = u32::from_be_bytes([
+            self.buffer[0],
+            self.buffer[1],
+            self.buffer[2],
+            self.buffer[3],
+        ]) as usize;
         if length == 0 {
             return Err(FrameError::Empty);
         }
@@ -252,7 +274,11 @@ impl FrameDecoder {
 }
 
 /// Serves one connection until it closes; returns the close reason for logging.
-async fn serve_connection(stream: UnixStream, handler: Arc<dyn RequestHandler>, connection: &str) -> &'static str {
+async fn serve_connection(
+    stream: UnixStream,
+    handler: Arc<dyn RequestHandler>,
+    connection: &str,
+) -> &'static str {
     let (mut reader, mut writer) = stream.into_split();
     let mut decoder = FrameDecoder::default();
     let mut chunk = vec![0u8; 64 * 1024];
@@ -274,13 +300,19 @@ async fn serve_connection(stream: UnixStream, handler: Arc<dyn RequestHandler>, 
             return reject(&mut writer, "invalid_request").await;
         };
 
-        let keep_alive = request.keep_alive == Some(true) && request.client.as_deref() == Some("browser");
+        let keep_alive =
+            request.keep_alive == Some(true) && request.client.as_deref() == Some("browser");
         let request_id = request.id.clone();
         let started = Instant::now();
         let paragraphs = request.items.as_ref().map_or(1, Vec::len);
         let characters = request.items.as_ref().map_or_else(
             || request.text.as_deref().map_or(0, protocol::utf16_len),
-            |items| items.iter().map(|item| protocol::utf16_len(&item.text)).sum(),
+            |items| {
+                items
+                    .iter()
+                    .map(|item| protocol::utf16_len(&item.text))
+                    .sum()
+            },
         );
         tracing::info!(%connection, request = %request_id, paragraphs, characters, "request_start");
 
@@ -362,7 +394,10 @@ async fn reject(writer: &mut OwnedWriteHalf, code: &str) -> &'static str {
     }
 }
 
-async fn write_response(writer: &mut OwnedWriteHalf, response: &BridgeResponse) -> Result<(), &'static str> {
+async fn write_response(
+    writer: &mut OwnedWriteHalf,
+    response: &BridgeResponse,
+) -> Result<(), &'static str> {
     let frame = protocol::encode_json_frame(response).map_err(|_| "encode_failed")?;
     writer.write_all(&frame).await.map_err(|_| "send_failed")
 }
@@ -406,7 +441,11 @@ mod tests {
     }
 
     impl RequestHandler for FakeHandler {
-        fn handle(&self, request: BridgeRequest, progress: ProgressSink) -> BoxFuture<'_, BridgeResponse> {
+        fn handle(
+            &self,
+            request: BridgeRequest,
+            progress: ProgressSink,
+        ) -> BoxFuture<'_, BridgeResponse> {
             self.started.fetch_add(1, Ordering::SeqCst);
             Box::pin(async move {
                 let mut flag = CancelFlag(self.cancelled.clone(), false);
@@ -428,12 +467,16 @@ mod tests {
     impl Fixture {
         fn start(handler: Arc<dyn RequestHandler>) -> Self {
             let dir = TestDir::new();
-            let server = BridgeServer::start_at(dir.path("bridge.sock"), dir.path("bridge.lock"), handler).unwrap();
+            let server =
+                BridgeServer::start_at(dir.path("bridge.sock"), dir.path("bridge.lock"), handler)
+                    .unwrap();
             Self { server, dir }
         }
 
         async fn connect(&self) -> UnixStream {
-            UnixStream::connect(self.server.socket_path()).await.unwrap()
+            UnixStream::connect(self.server.socket_path())
+                .await
+                .unwrap()
         }
     }
 
@@ -452,7 +495,10 @@ mod tests {
     }
 
     async fn send(stream: &mut UnixStream, request: &BridgeRequest) {
-        stream.write_all(&protocol::encode_json_frame(request).unwrap()).await.unwrap();
+        stream
+            .write_all(&protocol::encode_json_frame(request).unwrap())
+            .await
+            .unwrap();
     }
 
     async fn response(stream: &mut UnixStream) -> BridgeResponse {
@@ -466,8 +512,13 @@ mod tests {
 
     async fn expect_closed(stream: &mut UnixStream) {
         let mut byte = [0u8; 1];
-        let read = tokio::time::timeout(IO_TIMEOUT, stream.read(&mut byte)).await.expect("connection stayed open");
-        assert!(matches!(read, Ok(0) | Err(_)), "unexpected data after close");
+        let read = tokio::time::timeout(IO_TIMEOUT, stream.read(&mut byte))
+            .await
+            .expect("connection stayed open");
+        assert!(
+            matches!(read, Ok(0) | Err(_)),
+            "unexpected data after close"
+        );
     }
 
     async fn wait_for(condition: impl Fn() -> bool) -> bool {
@@ -541,7 +592,10 @@ mod tests {
         use crate::rewrite::AiRewriteService;
 
         let dir = TestDir::new();
-        let editor = AgentEditorTriggers::with_desktop(dir.path("editor-trigger.json"), FakeDesktop::new(None));
+        let editor = AgentEditorTriggers::with_desktop(
+            dir.path("editor-trigger.json"),
+            FakeDesktop::new(None),
+        );
         let handler = Arc::new(BridgeHandler::new(
             Arc::new(AiRewriteService::new(CodexAuthStore::new(None))),
             Arc::new(editor),
@@ -553,7 +607,10 @@ mod tests {
         send(&mut stream, &request("ping", PING_METHOD)).await;
         let pong = response(&mut stream).await;
         assert!(pong.ok);
-        assert_eq!((pong.id.as_str(), pong.text.as_deref()), ("ping", Some("pong")));
+        assert_eq!(
+            (pong.id.as_str(), pong.text.as_deref()),
+            ("ping", Some("pong"))
+        );
         expect_closed(&mut stream).await;
 
         let mut stream = fixture.connect().await;
@@ -575,7 +632,10 @@ mod tests {
             stream.write_all(&frame[..2]).await.unwrap();
             stream.write_all(&frame[2..]).await.unwrap();
             let partial = response(&mut stream).await;
-            assert_eq!((partial.id.as_str(), partial.partial), (request.id.as_str(), Some(true)));
+            assert_eq!(
+                (partial.id.as_str(), partial.partial),
+                (request.id.as_str(), Some(true))
+            );
             let final_response = response(&mut stream).await;
             assert_eq!(final_response.id, request.id);
             assert_eq!(final_response.text.as_deref(), Some("完整"));
@@ -602,16 +662,25 @@ mod tests {
         expect_closed(&mut malformed).await;
 
         let mut oversize = fixture.connect().await;
-        oversize.write_all(&((MAX_FRAME_BYTES + 1) as u32).to_be_bytes()).await.unwrap();
+        oversize
+            .write_all(&((MAX_FRAME_BYTES + 1) as u32).to_be_bytes())
+            .await
+            .unwrap();
         let failure = response(&mut oversize).await;
         assert_eq!(failure.id, "");
         assert_eq!(failure.error.as_ref().unwrap().code, "invalid_frame");
-        assert_eq!(failure.error.unwrap().message, "The NoType bridge request frame is invalid.");
+        assert_eq!(
+            failure.error.unwrap().message,
+            "The NoType bridge request frame is invalid."
+        );
         expect_closed(&mut oversize).await;
 
         let mut empty = fixture.connect().await;
         empty.write_all(&[0, 0, 0, 0]).await.unwrap();
-        assert_eq!(response(&mut empty).await.error.unwrap().code, "invalid_frame");
+        assert_eq!(
+            response(&mut empty).await.error.unwrap().code,
+            "invalid_frame"
+        );
         expect_closed(&mut empty).await;
     }
 
@@ -655,7 +724,11 @@ mod tests {
         let fixture = Fixture::start(FakeHandler::new(Duration::ZERO));
         for index in 0..(MAX_CONNECTIONS * 2) {
             let mut stream = fixture.connect().await;
-            send(&mut stream, &request(&format!("seq-{index}"), TRANSLATE_METHOD)).await;
+            send(
+                &mut stream,
+                &request(&format!("seq-{index}"), TRANSLATE_METHOD),
+            )
+            .await;
             response(&mut stream).await;
             assert_eq!(response(&mut stream).await.id, format!("seq-{index}"));
         }
@@ -679,7 +752,8 @@ mod tests {
             let frame = protocol::encode_json_frame(&request("after", TRANSLATE_METHOD)).unwrap();
             let mut header = [0u8; 4];
             if stream.write_all(&frame).await.is_ok()
-                && let Ok(Ok(_)) = tokio::time::timeout(IO_TIMEOUT, stream.read_exact(&mut header)).await
+                && let Ok(Ok(_)) =
+                    tokio::time::timeout(IO_TIMEOUT, stream.read_exact(&mut header)).await
             {
                 accepted = Some(header);
                 break;

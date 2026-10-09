@@ -72,7 +72,8 @@ pub struct DaemonLock {
 
 impl DaemonLock {
     pub fn acquire() -> Result<Self> {
-        paths::ensure_private_runtime_dir().context("failed to prepare the NoType runtime directory")?;
+        paths::ensure_private_runtime_dir()
+            .context("failed to prepare the NoType runtime directory")?;
         let path = paths::daemon_lock();
         let file = std::fs::OpenOptions::new()
             .create(true)
@@ -100,15 +101,22 @@ impl ControlServer {
         match std::fs::remove_file(&path) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error).with_context(|| format!("failed to remove {}", path.display())),
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to remove {}", path.display()));
+            }
         }
-        let listener = UnixListener::bind(&path).with_context(|| format!("failed to bind {}", path.display()))?;
+        let listener = UnixListener::bind(&path)
+            .with_context(|| format!("failed to bind {}", path.display()))?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         let limit = Arc::new(Semaphore::new(MAX_CONNECTIONS));
         let task = tokio::spawn(async move {
             loop {
-                let Ok((stream, _)) = listener.accept().await else { continue };
-                let Ok(permit) = limit.clone().try_acquire_owned() else { continue };
+                let Ok((stream, _)) = listener.accept().await else {
+                    continue;
+                };
+                let Ok(permit) = limit.clone().try_acquire_owned() else {
+                    continue;
+                };
                 if !same_user(&stream) {
                     continue;
                 }
@@ -131,17 +139,28 @@ impl ControlServer {
 }
 
 fn same_user(stream: &UnixStream) -> bool {
-    stream.peer_cred().is_ok_and(|cred| cred.uid() == unsafe { libc::geteuid() })
+    stream
+        .peer_cred()
+        .is_ok_and(|cred| cred.uid() == unsafe { libc::geteuid() })
 }
 
 async fn serve(stream: UnixStream, handler: Arc<dyn ControlHandler>) -> Result<()> {
     let (reader, mut writer) = stream.into_split();
     let mut line = String::new();
-    BufReader::new(reader.take(MAX_REQUEST_BYTES)).read_line(&mut line).await?;
+    BufReader::new(reader.take(MAX_REQUEST_BYTES))
+        .read_line(&mut line)
+        .await?;
     let request = match serde_json::from_str::<ControlRequest>(line.trim()) {
         Ok(request) => request,
         Err(error) => {
-            return write_line(&mut writer, &ControlResponse { ok: false, error: Some(format!("invalid request: {error}")) }).await;
+            return write_line(
+                &mut writer,
+                &ControlResponse {
+                    ok: false,
+                    error: Some(format!("invalid request: {error}")),
+                },
+            )
+            .await;
         }
     };
 
@@ -149,8 +168,14 @@ async fn serve(stream: UnixStream, handler: Arc<dyn ControlHandler>) -> Result<(
         return stream_status(&mut writer, handler.status(), handler.selection(), follow).await;
     }
     let response = match handler.handle(request) {
-        Ok(()) => ControlResponse { ok: true, error: None },
-        Err(error) => ControlResponse { ok: false, error: Some(error) },
+        Ok(()) => ControlResponse {
+            ok: true,
+            error: None,
+        },
+        Err(error) => ControlResponse {
+            ok: false,
+            error: Some(error),
+        },
     };
     write_line(&mut writer, &response).await
 }
@@ -200,10 +225,20 @@ async fn connect() -> Result<UnixStream> {
     match UnixStream::connect(&path).await {
         Ok(stream) => Ok(stream),
         // No socket, or a stale one left by a crashed daemon.
-        Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused) => {
-            bail!("NoType is not running ({}). Start it with `systemctl --user start notype`.", path.display())
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+            ) =>
+        {
+            bail!(
+                "NoType is not running ({}). Start it with `systemctl --user start notype`.",
+                path.display()
+            )
         }
-        Err(error) => Err(error).with_context(|| format!("failed to connect to {}", path.display())),
+        Err(error) => {
+            Err(error).with_context(|| format!("failed to connect to {}", path.display()))
+        }
     }
 }
 
@@ -213,9 +248,14 @@ pub async fn send(request: &ControlRequest) -> Result<()> {
     write_line(&mut stream, request).await?;
     let mut line = String::new();
     BufReader::new(stream).read_line(&mut line).await?;
-    let response: ControlResponse = serde_json::from_str(line.trim()).context("invalid response from NoType")?;
+    let response: ControlResponse =
+        serde_json::from_str(line.trim()).context("invalid response from NoType")?;
     if !response.ok {
-        bail!(response.error.unwrap_or_else(|| "NoType rejected the command.".into()));
+        bail!(
+            response
+                .error
+                .unwrap_or_else(|| "NoType rejected the command.".into())
+        );
     }
     Ok(())
 }
@@ -232,7 +272,10 @@ pub async fn copy_status<W: AsyncWrite + Unpin>(follow: bool, output: &mut W) ->
 }
 
 /// Returns false when `output` closed first, e.g. `notype status --follow | head -1`.
-async fn copy_lines<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(reader: R, output: &mut W) -> Result<bool> {
+async fn copy_lines<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    reader: R,
+    output: &mut W,
+) -> Result<bool> {
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
         let written = async {
@@ -256,12 +299,18 @@ mod tests {
 
     #[test]
     fn request_lines_are_stable() {
-        assert_eq!(serde_json::to_string(&ControlRequest::RecordToggle).unwrap(), r#"{"command":"record_toggle"}"#);
+        assert_eq!(
+            serde_json::to_string(&ControlRequest::RecordToggle).unwrap(),
+            r#"{"command":"record_toggle"}"#
+        );
         assert_eq!(
             serde_json::from_str::<ControlRequest>(r#"{"command":"status"}"#).unwrap(),
             ControlRequest::Status { follow: false }
         );
-        assert_eq!(serde_json::to_string(&ControlRequest::ReloadConfig).unwrap(), r#"{"command":"reload_config"}"#);
+        assert_eq!(
+            serde_json::to_string(&ControlRequest::ReloadConfig).unwrap(),
+            r#"{"command":"reload_config"}"#
+        );
         assert!(serde_json::from_str::<ControlRequest>(r#"{"command":"rm"}"#).is_err());
     }
 
@@ -281,10 +330,16 @@ mod tests {
         let (status_tx, status_rx) = watch::channel(StatusSnapshot::default());
         let (_selection_tx, selection_rx) = watch::channel(SelectionSnapshot::default());
         let (client, mut server) = tokio::io::duplex(64 * 1024);
-        let streamer = tokio::spawn(async move { stream_status(&mut server, status_rx, selection_rx, true).await });
+        let streamer =
+            tokio::spawn(
+                async move { stream_status(&mut server, status_rx, selection_rx, true).await },
+            );
         let mut lines = BufReader::new(client).lines();
         let first = lines.next_line().await.unwrap().unwrap();
-        assert!(first.starts_with(r#"{"type":"status","phase":"idle""#), "{first}");
+        assert!(
+            first.starts_with(r#"{"type":"status","phase":"idle""#),
+            "{first}"
+        );
         let second = lines.next_line().await.unwrap().unwrap();
         assert!(second.starts_with(r#"{"type":"selection""#), "{second}");
 

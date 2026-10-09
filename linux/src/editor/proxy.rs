@@ -11,7 +11,10 @@ use std::process::{Command, ExitCode};
 
 use super::buffer::{EditorBuffer, is_claude_buffer, is_supported_buffer};
 use super::client::{EditorBridgeClient, EditorTranslation};
-use crate::agent_editor::{HOTKEY_TRIGGER, PendingTrigger, TRIGGER_VERSION, TRIPLE_SPACE_TRIGGER, is_uuid_string, now_milliseconds};
+use crate::agent_editor::{
+    HOTKEY_TRIGGER, PendingTrigger, TRIGGER_VERSION, TRIPLE_SPACE_TRIGGER, is_uuid_string,
+    now_milliseconds,
+};
 use crate::paths;
 
 const MAX_BUFFER_BYTES: u64 = 1_048_576;
@@ -54,11 +57,15 @@ pub fn run() -> ExitCode {
         return exec_fallback_editor(&arguments, &environment);
     };
 
-    let buffer = terminal_path().zip(read_editor_buffer(&file)).and_then(|(terminal, content)| {
-        EditorBuffer::parse(&content, &trigger.trigger).map(|buffer| (terminal, buffer))
-    });
+    let buffer = terminal_path()
+        .zip(read_editor_buffer(&file))
+        .and_then(|(terminal, content)| {
+            EditorBuffer::parse(&content, &trigger.trigger).map(|buffer| (terminal, buffer))
+        });
     let Some((terminal, buffer)) = buffer else {
-        write_error("NoType: automatic translation validation failed; the draft was left unchanged.\n");
+        write_error(
+            "NoType: automatic translation validation failed; the draft was left unchanged.\n",
+        );
         return ExitCode::SUCCESS;
     };
 
@@ -70,7 +77,9 @@ pub fn run() -> ExitCode {
         .enable_all()
         .build()
         .map_err(anyhow::Error::from)
-        .and_then(|runtime| runtime.block_on(translate_file(&client, &file, &buffer, &trigger, &terminal)));
+        .and_then(|runtime| {
+            runtime.block_on(translate_file(&client, &file, &buffer, &trigger, &terminal))
+        });
     if let Err(error) = translated {
         // A failed automatic translation must leave the agent's temporary file untouched.
         write_error(&format!("NoType: {error}\n"));
@@ -107,7 +116,10 @@ pub fn editable_file(arguments: &[OsString]) -> Option<PathBuf> {
         return None;
     }
     let metadata = fs::symlink_metadata(&path).ok()?;
-    (metadata.file_type().is_file() && metadata.uid() == euid() && metadata.len() <= MAX_BUFFER_BYTES).then_some(path)
+    (metadata.file_type().is_file()
+        && metadata.uid() == euid()
+        && metadata.len() <= MAX_BUFFER_BYTES)
+        .then_some(path)
 }
 
 pub fn read_editor_buffer(path: &Path) -> Option<String> {
@@ -123,7 +135,10 @@ pub fn load_pending_trigger(path: &Path, now: i64) -> Option<PendingTrigger> {
         && is_uuid_string(&trigger.token)
         && trigger.target_process_id > 0
         && !trigger.target_window_address.is_empty()
-        && matches!(trigger.trigger.as_str(), HOTKEY_TRIGGER | TRIPLE_SPACE_TRIGGER)
+        && matches!(
+            trigger.trigger.as_str(),
+            HOTKEY_TRIGGER | TRIPLE_SPACE_TRIGGER
+        )
         && trigger.is_fresh(now);
     valid.then_some(trigger)
 }
@@ -151,11 +166,20 @@ fn read_private_file(path: &Path, max_bytes: u64, owner_only: bool) -> Option<(F
 /// Atomically replaces the draft, keeping its permission bits.
 fn replace_editor_buffer(path: &Path, content: &str) -> io::Result<()> {
     let permissions = fs::symlink_metadata(path)?.permissions().mode() & 0o7777;
-    let directory = path.parent().ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-    let name = path.file_name().map(|name| name.to_string_lossy()).unwrap_or_default();
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default();
     let temporary = directory.join(format!(".{name}.notype-{}", uuid::Uuid::new_v4().simple()));
     let written = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
         file.write_all(content.as_bytes())?;
         file.sync_all()?;
         file.set_permissions(fs::Permissions::from_mode(permissions))?;
@@ -176,7 +200,10 @@ pub fn terminal_path() -> Option<String> {
             if unsafe { libc::ttyname_r(descriptor, name.as_mut_ptr(), name.len()) } != 0 {
                 return None;
             }
-            let path = unsafe { CStr::from_ptr(name.as_ptr()) }.to_str().ok()?.to_owned();
+            let path = unsafe { CStr::from_ptr(name.as_ptr()) }
+                .to_str()
+                .ok()?
+                .to_owned();
             let owned = fs::metadata(&path).is_ok_and(|metadata| metadata.uid() == euid());
             (path.starts_with("/dev/") && owned).then_some(path)
         })
@@ -184,14 +211,22 @@ pub fn terminal_path() -> Option<String> {
 
 /// The editor to delegate to: the user's original `$VISUAL`/`$EDITOR`, never the proxy itself.
 pub fn fallback_command(environment: &EditorEnvironment) -> String {
-    let command = [&environment.real_visual, &environment.real_editor, &environment.fallback]
-        .into_iter()
-        .flatten()
-        .map(|command| command.trim())
-        .find(|command| !command.is_empty() && !is_editor_proxy_command(command))
-        .map(str::to_owned)
-        .unwrap_or_else(default_editor);
-    if command.contains(['\n', '\r']) { default_editor() } else { command }
+    let command = [
+        &environment.real_visual,
+        &environment.real_editor,
+        &environment.fallback,
+    ]
+    .into_iter()
+    .flatten()
+    .map(|command| command.trim())
+    .find(|command| !command.is_empty() && !is_editor_proxy_command(command))
+    .map(str::to_owned)
+    .unwrap_or_else(default_editor);
+    if command.contains(['\n', '\r']) {
+        default_editor()
+    } else {
+        command
+    }
 }
 
 /// Matches `(?:^|[/\s'"])notype-?editor(?:$|[\s'"])`, case-insensitively.
@@ -199,10 +234,16 @@ pub fn is_editor_proxy_command(command: &str) -> bool {
     let command = command.to_ascii_lowercase();
     let quote = |character: char| matches!(character, '\'' | '"') || character.is_whitespace();
     command.match_indices("notype").any(|(index, word)| {
-        let starts_word = command[..index].chars().next_back().is_none_or(|before| before == '/' || quote(before));
+        let starts_word = command[..index]
+            .chars()
+            .next_back()
+            .is_none_or(|before| before == '/' || quote(before));
         let rest = &command[index + word.len()..];
         let rest = rest.strip_prefix('-').unwrap_or(rest);
-        starts_word && rest.strip_prefix("editor").is_some_and(|after| after.chars().next().is_none_or(quote))
+        starts_word
+            && rest
+                .strip_prefix("editor")
+                .is_some_and(|after| after.chars().next().is_none_or(quote))
     })
 }
 
@@ -212,10 +253,15 @@ fn default_editor() -> String {
     let path = std::env::var_os("PATH").unwrap_or_default();
     let installed = |name: &str| {
         std::env::split_paths(&path).any(|directory| {
-            fs::metadata(directory.join(name)).is_ok_and(|metadata| metadata.is_file() && metadata.mode() & 0o111 != 0)
+            fs::metadata(directory.join(name))
+                .is_ok_and(|metadata| metadata.is_file() && metadata.mode() & 0o111 != 0)
         })
     };
-    ["vi", "nvim", "vim"].into_iter().find(|name| installed(name)).unwrap_or("vi").to_owned()
+    ["vi", "nvim", "vim"]
+        .into_iter()
+        .find(|name| installed(name))
+        .unwrap_or("vi")
+        .to_owned()
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -231,7 +277,9 @@ fn exec_fallback_editor(arguments: &[OsString], environment: &EditorEnvironment)
         .arg("notype-editor")
         .args(arguments)
         .exec();
-    write_error(&format!("NoType: unable to launch the fallback editor: {error}\n"));
+    write_error(&format!(
+        "NoType: unable to launch the fallback editor: {error}\n"
+    ));
     ExitCode::from(127)
 }
 
@@ -273,17 +321,35 @@ mod tests {
         ] {
             assert!(is_editor_proxy_command(command), "{command}");
         }
-        for command in ["nvim", "code --wait", "notype-editor-old", "mynotype-editor", "notype"] {
+        for command in [
+            "nvim",
+            "code --wait",
+            "notype-editor-old",
+            "mynotype-editor",
+            "notype",
+        ] {
             assert!(!is_editor_proxy_command(command), "{command}");
         }
     }
 
     #[test]
     fn delegates_to_the_original_editor_but_never_to_itself() {
-        assert_eq!(fallback_command(&environment(Some(" nvim "), Some("vim"))), "nvim");
-        assert_eq!(fallback_command(&environment(Some("notype-editor"), Some("helix"))), "helix");
-        assert_eq!(fallback_command(&environment(Some(""), Some("  "))), default_editor());
-        assert_eq!(fallback_command(&environment(Some("vim\nrm -rf ~"), None)), default_editor());
+        assert_eq!(
+            fallback_command(&environment(Some(" nvim "), Some("vim"))),
+            "nvim"
+        );
+        assert_eq!(
+            fallback_command(&environment(Some("notype-editor"), Some("helix"))),
+            "helix"
+        );
+        assert_eq!(
+            fallback_command(&environment(Some(""), Some("  "))),
+            default_editor()
+        );
+        assert_eq!(
+            fallback_command(&environment(Some("vim\nrm -rf ~"), None)),
+            default_editor()
+        );
         let mut fallback = environment(None, None);
         fallback.fallback = Some("nano".into());
         assert_eq!(fallback_command(&fallback), "nano");
@@ -303,7 +369,11 @@ mod tests {
         fs::write(&file, content).unwrap();
         fs::set_permissions(&file, fs::Permissions::from_mode(0o640)).unwrap();
         let trigger_file = dir.path("editor-trigger.json");
-        Draft { dir, file, trigger_file }
+        Draft {
+            dir,
+            file,
+            trigger_file,
+        }
     }
 
     fn write_trigger(path: &Path, trigger: &PendingTrigger, mode: u32) {
@@ -315,16 +385,24 @@ mod tests {
     #[test]
     fn only_private_fresh_triggers_and_owned_drafts_are_accepted() {
         let draft = draft("draft");
-        assert_eq!(editable_file(&["--wait".into(), draft.file.clone().into()]), Some(draft.file.clone()));
+        assert_eq!(
+            editable_file(&["--wait".into(), draft.file.clone().into()]),
+            Some(draft.file.clone())
+        );
         assert_eq!(editable_file(&[draft.dir.path("notes.md").into()]), None);
         assert_eq!(editable_file(&[]), None);
-        let link = draft.file.with_file_name(format!("claude-prompt-{}.md", uuid::Uuid::new_v4()));
+        let link = draft
+            .file
+            .with_file_name(format!("claude-prompt-{}.md", uuid::Uuid::new_v4()));
         symlink(&draft.file, &link).unwrap();
         assert_eq!(editable_file(&[link.into()]), None);
 
         let mut trigger = PendingTrigger::new(&terminal_window(), HOTKEY_TRIGGER, 10_000);
         write_trigger(&draft.trigger_file, &trigger, 0o600);
-        assert_eq!(load_pending_trigger(&draft.trigger_file, 14_999), Some(trigger.clone()));
+        assert_eq!(
+            load_pending_trigger(&draft.trigger_file, 14_999),
+            Some(trigger.clone())
+        );
         assert_eq!(load_pending_trigger(&draft.trigger_file, 15_001), None);
         write_trigger(&draft.trigger_file, &trigger, 0o644);
         assert_eq!(load_pending_trigger(&draft.trigger_file, 10_001), None);
@@ -355,8 +433,14 @@ mod tests {
                 serde_json::from_slice(&read_frame(&mut stream).await.unwrap().unwrap()).unwrap();
             let mut progress = BridgeResponse::success(&request.id, Some("partial".into()));
             progress.partial = Some(true);
-            stream.write_all(&encode_json_frame(&progress).unwrap()).await.unwrap();
-            stream.write_all(&encode_json_frame(&reply(&request)).unwrap()).await.unwrap();
+            stream
+                .write_all(&encode_json_frame(&progress).unwrap())
+                .await
+                .unwrap();
+            stream
+                .write_all(&encode_json_frame(&reply(&request)).unwrap())
+                .await
+                .unwrap();
             request
         })
     }
@@ -366,7 +450,9 @@ mod tests {
         let prefix = format!("{}\n\n", EditorBuffer::CLAUDE_REPLY_MARKER_PREFIX);
         let draft = draft(&format!("{prefix}请继续\n"));
         let trigger = PendingTrigger::new(&terminal_window(), HOTKEY_TRIGGER, now_milliseconds());
-        let buffer = EditorBuffer::parse(&read_editor_buffer(&draft.file).unwrap(), &trigger.trigger).unwrap();
+        let buffer =
+            EditorBuffer::parse(&read_editor_buffer(&draft.file).unwrap(), &trigger.trigger)
+                .unwrap();
         let socket = draft.dir.path("bridge.sock");
         let server = fake_bridge(socket.clone(), |request| {
             BridgeResponse::success(&request.id, Some("Please continue.".into()))
@@ -374,7 +460,9 @@ mod tests {
         .await;
 
         let client = EditorBridgeClient::new(socket);
-        translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9").await.unwrap();
+        translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9")
+            .await
+            .unwrap();
 
         let request = server.await.unwrap();
         assert_eq!(request.method, "translate_editor");
@@ -384,32 +472,57 @@ mod tests {
         assert_eq!(request.process_id, Some(std::process::id() as i32));
         assert_eq!(request.terminal.as_deref(), Some("/dev/pts/9"));
         assert_eq!(request.trigger.as_deref(), Some(HOTKEY_TRIGGER));
-        assert_eq!(fs::read_to_string(&draft.file).unwrap(), format!("{prefix}Please continue.\n"));
+        assert_eq!(
+            fs::read_to_string(&draft.file).unwrap(),
+            format!("{prefix}Please continue.\n")
+        );
         assert_eq!(fs::metadata(&draft.file).unwrap().mode() & 0o777, 0o640);
     }
 
     #[tokio::test]
     async fn failures_leave_the_draft_untouched() {
         let draft = draft("请继续   ");
-        let trigger = PendingTrigger::new(&terminal_window(), TRIPLE_SPACE_TRIGGER, now_milliseconds());
+        let trigger =
+            PendingTrigger::new(&terminal_window(), TRIPLE_SPACE_TRIGGER, now_milliseconds());
         let buffer = EditorBuffer::parse("请继续   ", &trigger.trigger).unwrap();
         let socket = draft.dir.path("bridge.sock");
         let client = EditorBridgeClient::new(socket.clone());
 
-        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9").await.unwrap_err();
-        assert!(error.to_string().starts_with("Unable to connect to NoType: "), "{error}");
+        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9")
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .starts_with("Unable to connect to NoType: "),
+            "{error}"
+        );
 
         let server = fake_bridge(socket.clone(), |request| {
-            BridgeResponse::failure(&request.id, "busy", "NoType is already processing another request.")
+            BridgeResponse::failure(
+                &request.id,
+                "busy",
+                "NoType is already processing another request.",
+            )
         })
         .await;
-        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9").await.unwrap_err();
-        assert_eq!(error.to_string(), "NoType is already processing another request.");
+        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "NoType is already processing another request."
+        );
         server.await.unwrap();
         fs::remove_file(&socket).unwrap();
 
-        let server = fake_bridge(socket.clone(), |_| BridgeResponse::success("other", Some("text".into()))).await;
-        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9").await.unwrap_err();
+        let server = fake_bridge(socket.clone(), |_| {
+            BridgeResponse::success("other", Some("text".into()))
+        })
+        .await;
+        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9")
+            .await
+            .unwrap_err();
         assert_eq!(
             error.to_string(),
             "NoType returned an invalid editor response: response ID or version mismatch"
@@ -417,9 +530,17 @@ mod tests {
         server.await.unwrap();
         fs::remove_file(&socket).unwrap();
 
-        let server = fake_bridge(socket.clone(), |request| BridgeResponse::success(&request.id, Some(" \n".into()))).await;
-        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9").await.unwrap_err();
-        assert_eq!(error.to_string(), "NoType returned an invalid editor response: translation is empty");
+        let server = fake_bridge(socket.clone(), |request| {
+            BridgeResponse::success(&request.id, Some(" \n".into()))
+        })
+        .await;
+        let error = translate_file(&client, &draft.file, &buffer, &trigger, "/dev/pts/9")
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "NoType returned an invalid editor response: translation is empty"
+        );
         server.await.unwrap();
 
         assert_eq!(fs::read_to_string(&draft.file).unwrap(), "请继续   ");

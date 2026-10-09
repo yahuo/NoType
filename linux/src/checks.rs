@@ -25,7 +25,12 @@ pub struct Check {
 
 impl Check {
     fn new(ok: bool, required: bool, label: &str, detail: impl Into<String>) -> Self {
-        Self { label: label.into(), ok, required, detail: detail.into() }
+        Self {
+            label: label.into(),
+            ok,
+            required,
+            detail: detail.into(),
+        }
     }
 }
 
@@ -41,14 +46,36 @@ pub async fn run(config: &anyhow::Result<Config>) -> Vec<Check> {
         ("wl-copy", "wl-clipboard", true),
         ("wl-paste", "wl-clipboard", true),
         ("hyprctl", "hyprland", true),
-        ("secret-tool", "libsecret (Doubao token in the keyring)", false),
+        (
+            "secret-tool",
+            "libsecret (Doubao token in the keyring)",
+            false,
+        ),
     ] {
         let found = on_path(program);
-        checks.push(Check::new(found, required, program, if found { "found".into() } else { format!("missing; install {package}") }));
+        checks.push(Check::new(
+            found,
+            required,
+            program,
+            if found {
+                "found".into()
+            } else {
+                format!("missing; install {package}")
+            },
+        ));
     }
     for variable in SESSION_VARIABLES {
         let value = std::env::var(variable).unwrap_or_default();
-        checks.push(Check::new(!value.is_empty(), true, variable, if value.is_empty() { "not set".into() } else { value }));
+        checks.push(Check::new(
+            !value.is_empty(),
+            true,
+            variable,
+            if value.is_empty() {
+                "not set".into()
+            } else {
+                value
+            },
+        ));
     }
 
     let path = paths::config_file();
@@ -72,12 +99,23 @@ pub async fn run(config: &anyhow::Result<Config>) -> Vec<Check> {
         codex.is_ok(),
         config.speech_provider == SpeechProvider::Codex,
         "codex login",
-        codex.map(|_| "credentials found".into()).unwrap_or_else(|error| error.to_string()),
+        codex
+            .map(|_| "credentials found".into())
+            .unwrap_or_else(|error| error.to_string()),
     ));
     if config.speech_provider == SpeechProvider::Doubao {
         let token = config::doubao_access_token(&config).await;
         let complete = config.has_valid_doubao_configuration() && !token.is_empty();
-        checks.push(Check::new(complete, true, "doubao", if complete { "configured" } else { "set app_id and the access token" }));
+        checks.push(Check::new(
+            complete,
+            true,
+            "doubao",
+            if complete {
+                "configured"
+            } else {
+                "set app_id and the access token"
+            },
+        ));
     }
 
     // The service may run with a different environment than this process, so ask it directly.
@@ -93,7 +131,12 @@ pub async fn run(config: &anyhow::Result<Config>) -> Vec<Check> {
                 });
             match warning {
                 Some(warning) => Check::new(false, true, "daemon", warning),
-                None => Check::new(true, false, "daemon", paths::control_socket().display().to_string()),
+                None => Check::new(
+                    true,
+                    false,
+                    "daemon",
+                    paths::control_socket().display().to_string(),
+                ),
             }
         }
         Err(error) => Check::new(false, false, "daemon", format!("{error:#}")),
@@ -108,5 +151,6 @@ pub fn on_path(program: &str) -> bool {
 }
 
 fn is_executable(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+    std::fs::metadata(path)
+        .is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
 }

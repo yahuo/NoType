@@ -57,7 +57,12 @@ pub struct DoubaoConfig {
 
 impl DoubaoConfig {
     /// Trims the credentials and fills the defaults of the macOS `currentASRSessionConfig()`.
-    pub fn new(app_id: String, access_token: String, resource_id: String, language: String) -> Self {
+    pub fn new(
+        app_id: String,
+        access_token: String,
+        resource_id: String,
+        language: String,
+    ) -> Self {
         Self {
             app_id: app_id.trim().to_owned(),
             access_token: access_token.trim().to_owned(),
@@ -70,7 +75,9 @@ impl DoubaoConfig {
     }
 
     fn is_complete(&self) -> bool {
-        !self.app_id.trim().is_empty() && !self.access_token.trim().is_empty() && !self.resource_id.trim().is_empty()
+        !self.app_id.trim().is_empty()
+            && !self.access_token.trim().is_empty()
+            && !self.resource_id.trim().is_empty()
     }
 }
 
@@ -130,10 +137,14 @@ struct Utterance {
 
 impl ServerPayload {
     fn is_definite(&self) -> bool {
-        match self.result.as_ref().and_then(|result| result.utterances.as_ref()) {
-            Some(utterances) if !utterances.is_empty() => {
-                utterances.iter().all(|utterance| utterance.definite.unwrap_or(false))
-            }
+        match self
+            .result
+            .as_ref()
+            .and_then(|result| result.utterances.as_ref())
+        {
+            Some(utterances) if !utterances.is_empty() => utterances
+                .iter()
+                .all(|utterance| utterance.definite.unwrap_or(false)),
             _ => false,
         }
     }
@@ -163,8 +174,11 @@ fn make_websocket_request_for(
         ("X-Api-Connect-Id", connect_id),
         ("User-Agent", user_agent),
     ] {
-        let value = HeaderValue::from_str(value)
-            .map_err(|_| AsrError::Transport(format!("{name} contains characters that are not valid in a header.")))?;
+        let value = HeaderValue::from_str(value).map_err(|_| {
+            AsrError::Transport(format!(
+                "{name} contains characters that are not valid in a header."
+            ))
+        })?;
         headers.insert(name, value);
     }
     Ok(request)
@@ -220,7 +234,8 @@ pub fn parse_server_message(data: &[u8]) -> Result<ParsedServerMessage, AsrError
     match metadata.message_type {
         MESSAGE_FULL_SERVER_RESPONSE => {
             let (metadata, payload) = unpack_message(data)?;
-            let decoded: ServerPayload = serde_json::from_slice(&payload).map_err(|_| AsrError::InvalidResponse)?;
+            let decoded: ServerPayload =
+                serde_json::from_slice(&payload).map_err(|_| AsrError::InvalidResponse)?;
             let is_definite = metadata.sequence_number.unwrap_or(0) < 0 || decoded.is_definite();
             let error_message = match decoded.code {
                 None | Some(1000) => None,
@@ -240,7 +255,9 @@ pub fn parse_server_message(data: &[u8]) -> Result<ParsedServerMessage, AsrError
             let code = read_u32(data, start);
             let size = read_u32(data, start + 4) as usize;
             let message_start = start + 8;
-            let message_end = message_start.checked_add(size).ok_or(AsrError::InvalidResponse)?;
+            let message_end = message_start
+                .checked_add(size)
+                .ok_or(AsrError::InvalidResponse)?;
             if message_end > data.len() {
                 return Err(AsrError::InvalidResponse);
             }
@@ -265,7 +282,8 @@ pub fn parse_metadata(data: &[u8]) -> Result<MessageMetadata, AsrError> {
     let message_flags = data[1] & 0x0F;
     let compression = data[2] & 0x0F;
 
-    let has_sequence = message_type == MESSAGE_FULL_SERVER_RESPONSE && matches!(message_flags, 0x01 | 0x03);
+    let has_sequence =
+        message_type == MESSAGE_FULL_SERVER_RESPONSE && matches!(message_flags, 0x01 | 0x03);
     let (sequence_number, payload_size_offset) = if has_sequence {
         if data.len() < header_size + 8 {
             return Err(AsrError::InvalidResponse);
@@ -290,7 +308,12 @@ pub fn parse_metadata(data: &[u8]) -> Result<MessageMetadata, AsrError> {
 /// Returns the payload, inflating gzip payloads the macOS client would reject.
 pub fn unpack_message(data: &[u8]) -> Result<(MessageMetadata, Vec<u8>), AsrError> {
     let metadata = parse_metadata(data)?;
-    let start = metadata.header_size + if metadata.sequence_number.is_none() { 4 } else { 8 };
+    let start = metadata.header_size
+        + if metadata.sequence_number.is_none() {
+            4
+        } else {
+            8
+        };
     let end = start
         .checked_add(metadata.payload_size)
         .ok_or(AsrError::InvalidResponse)?;
@@ -309,7 +332,8 @@ pub fn unpack_message(data: &[u8]) -> Result<(MessageMetadata, Vec<u8>), AsrErro
         }
         _ => {
             return Err(AsrError::Transport(
-                "Server returned compressed payload, which this app does not decode yet.".to_owned(),
+                "Server returned compressed payload, which this app does not decode yet."
+                    .to_owned(),
             ));
         }
     };
@@ -317,7 +341,12 @@ pub fn unpack_message(data: &[u8]) -> Result<(MessageMetadata, Vec<u8>), AsrErro
 }
 
 fn read_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_be_bytes([data[offset], data[offset + 1], data[offset + 2], data[offset + 3]])
+    u32::from_be_bytes([
+        data[offset],
+        data[offset + 1],
+        data[offset + 2],
+        data[offset + 3],
+    ])
 }
 
 /// Receive-side state of one session; mirrors the flags of the Swift provider.
@@ -348,7 +377,10 @@ impl Progress {
         if let Some(error) = response.error_message {
             return (Some(AsrEvent::Error(error)), true);
         }
-        match response.transcript.filter(|transcript| !transcript.trim().is_empty()) {
+        match response
+            .transcript
+            .filter(|transcript| !transcript.trim().is_empty())
+        {
             Some(transcript) => {
                 self.latest_transcript = transcript.clone();
                 if self.is_awaiting_final_response && response.is_definite {
@@ -358,7 +390,9 @@ impl Progress {
                     (Some(AsrEvent::Partial(transcript)), false)
                 }
             }
-            None if self.is_awaiting_final_response && !self.latest_transcript.trim().is_empty() => {
+            None if self.is_awaiting_final_response
+                && !self.latest_transcript.trim().is_empty() =>
+            {
                 self.did_emit_final = true;
                 (Some(AsrEvent::Final(self.latest_transcript.clone())), true)
             }
@@ -420,16 +454,29 @@ pub struct DoubaoSession {
 }
 
 impl DoubaoSession {
-    pub async fn start(config: DoubaoConfig, events: UnboundedSender<AsrEvent>) -> anyhow::Result<Self> {
+    pub async fn start(
+        config: DoubaoConfig,
+        events: UnboundedSender<AsrEvent>,
+    ) -> anyhow::Result<Self> {
         Self::start_at(SERVICE_URL, config, events).await
     }
 
-    async fn start_at(url: &str, config: DoubaoConfig, events: UnboundedSender<AsrEvent>) -> anyhow::Result<Self> {
+    async fn start_at(
+        url: &str,
+        config: DoubaoConfig,
+        events: UnboundedSender<AsrEvent>,
+    ) -> anyhow::Result<Self> {
         if !config.is_complete() {
             return Err(AsrError::NotConfigured.into());
         }
         let connect_id = uuid::Uuid::new_v4().to_string();
-        let mut socket = connect(make_websocket_request_for(url, &config, &connect_id, USER_AGENT)?).await?;
+        let mut socket = connect(make_websocket_request_for(
+            url,
+            &config,
+            &connect_id,
+            USER_AGENT,
+        )?)
+        .await?;
         socket
             .send(Message::Binary(make_full_client_request(&config).into()))
             .await
@@ -461,7 +508,9 @@ impl DoubaoSession {
                 .map_err(|_| AsrError::SessionNotStarted)?;
             receiver
         };
-        acknowledged.await.map_err(|_| AsrError::SessionNotStarted)??;
+        acknowledged
+            .await
+            .map_err(|_| AsrError::SessionNotStarted)??;
         Ok(())
     }
 
@@ -493,9 +542,18 @@ async fn test_connection_at(url: &str, config: DoubaoConfig) -> anyhow::Result<(
         return Err(AsrError::NotConfigured.into());
     }
     let connect_id = uuid::Uuid::new_v4().to_string();
-    let mut socket = connect(make_websocket_request_for(url, &config, &connect_id, USER_AGENT)?).await?;
+    let mut socket = connect(make_websocket_request_for(
+        url,
+        &config,
+        &connect_id,
+        USER_AGENT,
+    )?)
+    .await?;
     let result = async {
-        for request in [make_full_client_request(&config), make_audio_request(&[], true)] {
+        for request in [
+            make_full_client_request(&config),
+            make_audio_request(&[], true),
+        ] {
             socket
                 .send(Message::Binary(request.into()))
                 .await
@@ -503,7 +561,9 @@ async fn test_connection_at(url: &str, config: DoubaoConfig) -> anyhow::Result<(
         }
         let data = tokio::time::timeout(CONNECT_TIMEOUT, next_data(&mut socket))
             .await
-            .map_err(|_| AsrError::Transport("Timed out waiting for the ASR service.".to_owned()))??;
+            .map_err(|_| {
+                AsrError::Transport("Timed out waiting for the ASR service.".to_owned())
+            })??;
         match parse_server_message(&data)?.error_message {
             Some(error) => Err(AsrError::Transport(error)),
             None => Ok(()),
@@ -520,7 +580,9 @@ async fn next_data(socket: &mut Socket) -> Result<Vec<u8>, AsrError> {
             Some(Ok(Message::Binary(data))) => return Ok(data.to_vec()),
             Some(Ok(Message::Text(text))) => return Ok(text.as_bytes().to_vec()),
             Some(Ok(Message::Ping(_) | Message::Pong(_) | Message::Frame(_))) => continue,
-            Some(Ok(Message::Close(frame))) => return Err(AsrError::Transport(closed_description(frame.as_ref()))),
+            Some(Ok(Message::Close(frame))) => {
+                return Err(AsrError::Transport(closed_description(frame.as_ref())));
+            }
             Some(Err(error)) => return Err(AsrError::Transport(error.to_string())),
             None => return Err(AsrError::Transport(closed_description(None))),
         }
@@ -594,7 +656,11 @@ enum Stop {
 }
 
 /// Owns the socket: writes queued audio and turns server messages into events.
-async fn run(mut socket: Socket, mut commands: UnboundedReceiver<Command>, shared: Arc<Mutex<Shared>>) {
+async fn run(
+    mut socket: Socket,
+    mut commands: UnboundedReceiver<Command>,
+    shared: Arc<Mutex<Shared>>,
+) {
     let mut handle_alive = true;
     loop {
         let awaiting_final = lock(&shared).progress.is_awaiting_final_response;
@@ -661,14 +727,19 @@ fn handle_message(shared: &Mutex<Shared>, data: &[u8]) -> Option<Stop> {
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn host_name() -> String {
     let mut buffer = [0u8; 256];
     let result = unsafe { libc::gethostname(buffer.as_mut_ptr().cast(), buffer.len()) };
     if result == 0 {
-        let end = buffer.iter().position(|&byte| byte == 0).unwrap_or(buffer.len());
+        let end = buffer
+            .iter()
+            .position(|&byte| byte == 0)
+            .unwrap_or(buffer.len());
         let name = String::from_utf8_lossy(&buffer[..end]).trim().to_owned();
         if !name.is_empty() {
             return name;
@@ -682,7 +753,9 @@ mod tests {
     use super::*;
     use std::io::Write;
     use tokio::net::TcpListener;
-    use tokio_tungstenite::tungstenite::handshake::server::{Request as ServerRequest, Response as ServerResponse};
+    use tokio_tungstenite::tungstenite::handshake::server::{
+        Request as ServerRequest, Response as ServerResponse,
+    };
 
     fn config(language: &str) -> DoubaoConfig {
         DoubaoConfig {
@@ -696,7 +769,12 @@ mod tests {
         }
     }
 
-    fn server_response(flags: u8, sequence: Option<i32>, compression: u8, payload: &[u8]) -> Vec<u8> {
+    fn server_response(
+        flags: u8,
+        sequence: Option<i32>,
+        compression: u8,
+        payload: &[u8],
+    ) -> Vec<u8> {
         let mut data = vec![
             0x11,
             (MESSAGE_FULL_SERVER_RESPONSE << 4) | flags,
@@ -750,7 +828,12 @@ mod tests {
 
     #[test]
     fn config_new_fills_macos_defaults() {
-        let config = DoubaoConfig::new(" app ".into(), " token\n".into(), " resource ".into(), "zh-CN".into());
+        let config = DoubaoConfig::new(
+            " app ".into(),
+            " token\n".into(),
+            " resource ".into(),
+            "zh-CN".into(),
+        );
         assert_eq!(config.app_id, "app");
         assert_eq!(config.access_token, "token");
         assert_eq!(config.resource_id, "resource");
@@ -781,12 +864,16 @@ mod tests {
             [0x11, 0x20, 0x00, 0x00, 0, 0, 0, 3, 1, 2, 3]
         );
         assert_eq!(make_audio_request(&audio, true)[1], 0x22);
-        assert_eq!(make_audio_request(&[], true), [0x11, 0x22, 0x00, 0x00, 0, 0, 0, 0]);
+        assert_eq!(
+            make_audio_request(&[], true),
+            [0x11, 0x22, 0x00, 0x00, 0, 0, 0, 0]
+        );
     }
 
     #[test]
     fn websocket_request_uses_v3_resource_headers() {
-        let request = make_websocket_request(&config("zh-CN"), "connect-id", "NoType/test").unwrap();
+        let request =
+            make_websocket_request(&config("zh-CN"), "connect-id", "NoType/test").unwrap();
         assert_eq!(request.uri(), SERVICE_URL);
         let header = |name: &str| request.headers()[name].to_str().unwrap().to_owned();
         assert_eq!(header("X-Api-App-Key"), "123456789");
@@ -850,7 +937,11 @@ mod tests {
         assert!(!partial.is_definite);
         assert_eq!(partial.error_message, None);
 
-        assert!(parse_server_message(&transcript(2, "你好", true)).unwrap().is_definite);
+        assert!(
+            parse_server_message(&transcript(2, "你好", true))
+                .unwrap()
+                .is_definite
+        );
         assert!(
             parse_server_message(&transcript(-2, "你好", false))
                 .unwrap()
@@ -862,7 +953,10 @@ mod tests {
             serde_json::json!({"result": {"text": "a", "utterances": [{"definite": true}, {"definite": false}]}}),
         );
         assert!(!parse_server_message(&mixed).unwrap().is_definite);
-        let empty = json_response(3, serde_json::json!({"result": {"text": "a", "utterances": []}}));
+        let empty = json_response(
+            3,
+            serde_json::json!({"result": {"text": "a", "utterances": []}}),
+        );
         assert!(!parse_server_message(&empty).unwrap().is_definite);
     }
 
@@ -873,9 +967,15 @@ mod tests {
             serde_json::json!({"code": 1000, "message": "OK", "result": {"text": "hi"}}),
         );
         assert_eq!(parse_server_message(&ok).unwrap().error_message, None);
-        let failed = json_response(1, serde_json::json!({"code": 45000001, "message": "invalid params"}));
+        let failed = json_response(
+            1,
+            serde_json::json!({"code": 45000001, "message": "invalid params"}),
+        );
         assert_eq!(
-            parse_server_message(&failed).unwrap().error_message.as_deref(),
+            parse_server_message(&failed)
+                .unwrap()
+                .error_message
+                .as_deref(),
             Some("invalid params")
         );
         let no_result = parse_server_message(&json_response(1, serde_json::json!({}))).unwrap();
@@ -892,7 +992,10 @@ mod tests {
     #[test]
     fn error_frames_carry_code_and_message() {
         let parsed = parse_server_message(&error_frame(45000081, b"timeout")).unwrap();
-        assert_eq!(parsed.error_message.as_deref(), Some("ASR error 45000081: timeout"));
+        assert_eq!(
+            parsed.error_message.as_deref(),
+            Some("ASR error 45000081: timeout")
+        );
         assert_eq!(parsed.transcript, None);
 
         let invalid_utf8 = parse_server_message(&error_frame(7, &[0xFF, 0xFE])).unwrap();
@@ -903,7 +1006,10 @@ mod tests {
 
         let mut truncated = error_frame(7, b"timeout");
         truncated.truncate(truncated.len() - 1);
-        assert_eq!(parse_server_message(&truncated), Err(AsrError::InvalidResponse));
+        assert_eq!(
+            parse_server_message(&truncated),
+            Err(AsrError::InvalidResponse)
+        );
     }
 
     #[test]
@@ -912,12 +1018,21 @@ mod tests {
         let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
         encoder.write_all(json).unwrap();
         let compressed = encoder.finish().unwrap();
-        let parsed = parse_server_message(&server_response(0x01, Some(1), COMPRESSION_GZIP, &compressed)).unwrap();
+        let parsed = parse_server_message(&server_response(
+            0x01,
+            Some(1),
+            COMPRESSION_GZIP,
+            &compressed,
+        ))
+        .unwrap();
         assert_eq!(parsed.transcript.as_deref(), Some("gzip"));
         assert!(parsed.is_definite);
 
         let corrupt = server_response(0x01, Some(1), COMPRESSION_GZIP, b"not gzip");
-        assert_eq!(parse_server_message(&corrupt), Err(AsrError::InvalidResponse));
+        assert_eq!(
+            parse_server_message(&corrupt),
+            Err(AsrError::InvalidResponse)
+        );
         let unsupported = server_response(0x01, Some(1), 0x2, b"{}");
         assert!(matches!(
             parse_server_message(&unsupported),
@@ -927,7 +1042,10 @@ mod tests {
 
     #[test]
     fn malformed_messages_are_rejected() {
-        assert_eq!(parse_metadata(&[0x11, 0x90, 0x10]), Err(AsrError::InvalidResponse));
+        assert_eq!(
+            parse_metadata(&[0x11, 0x90, 0x10]),
+            Err(AsrError::InvalidResponse)
+        );
         // Sequence flag without room for the payload size.
         assert_eq!(
             parse_metadata(&[0x11, 0x91, 0x10, 0x00, 0, 0, 0, 1]),
@@ -935,11 +1053,20 @@ mod tests {
         );
         let mut short_payload = server_response(0x01, Some(1), COMPRESSION_NONE, b"{}");
         short_payload.pop();
-        assert_eq!(parse_server_message(&short_payload), Err(AsrError::InvalidResponse));
+        assert_eq!(
+            parse_server_message(&short_payload),
+            Err(AsrError::InvalidResponse)
+        );
         let not_json = server_response(0x01, Some(1), COMPRESSION_NONE, b"nope");
-        assert_eq!(parse_server_message(&not_json), Err(AsrError::InvalidResponse));
+        assert_eq!(
+            parse_server_message(&not_json),
+            Err(AsrError::InvalidResponse)
+        );
         let unknown_type = vec![0x11, 0xB0, 0x10, 0x00, 0, 0, 0, 0];
-        assert_eq!(parse_server_message(&unknown_type), Err(AsrError::InvalidResponse));
+        assert_eq!(
+            parse_server_message(&unknown_type),
+            Err(AsrError::InvalidResponse)
+        );
         assert_eq!(
             parse_server_message(b"{\"text\":\"plain\"}"),
             Err(AsrError::InvalidResponse)
@@ -953,7 +1080,10 @@ mod tests {
             progress.on_message(&transcript(1, "你好", true)),
             (Some(AsrEvent::Partial("你好".into())), false)
         );
-        assert_eq!(progress.on_message(&transcript(2, "  ", false)), (None, false));
+        assert_eq!(
+            progress.on_message(&transcript(2, "  ", false)),
+            (None, false)
+        );
         progress.mark_final_audio();
         assert_eq!(
             progress.on_message(&transcript(3, "你好世界", false)),
@@ -997,7 +1127,9 @@ mod tests {
         assert_eq!(
             progress.on_message(b"garbage!"),
             (
-                Some(AsrEvent::Error("ASR service returned an unexpected response.".into())),
+                Some(AsrEvent::Error(
+                    "ASR service returned an unexpected response.".into()
+                )),
                 true
             )
         );
@@ -1045,8 +1177,9 @@ mod tests {
         let url = format!("ws://{}", listener.local_addr().unwrap());
         tokio::spawn(async move {
             let (stream, _) = listener.accept().await.unwrap();
-            let mut socket =
-                tokio_tungstenite::accept_hdr_async(stream, |request: &ServerRequest, response: ServerResponse| {
+            let mut socket = tokio_tungstenite::accept_hdr_async(
+                stream,
+                |request: &ServerRequest, response: ServerResponse| {
                     let headers = request.headers();
                     assert_eq!(headers["X-Api-App-Key"], "123456789");
                     assert_eq!(headers["X-Api-Access-Key"], "token-value");
@@ -1054,9 +1187,10 @@ mod tests {
                     assert_eq!(headers["X-Api-Connect-Id"].len(), 36);
                     assert_eq!(headers["User-Agent"], USER_AGENT);
                     Ok(response)
-                })
-                .await
-                .unwrap();
+                },
+            )
+            .await
+            .unwrap();
             let Some(Ok(Message::Binary(first))) = socket.next().await else {
                 panic!("missing full client request")
             };
@@ -1079,12 +1213,18 @@ mod tests {
     #[tokio::test]
     async fn session_streams_partials_and_final_from_server() {
         let url = mock_server(|mut socket| async move {
-            assert_eq!(next_binary(&mut socket).await, make_audio_request(&[1, 2, 3, 4], false));
+            assert_eq!(
+                next_binary(&mut socket).await,
+                make_audio_request(&[1, 2, 3, 4], false)
+            );
             socket
                 .send(Message::Binary(transcript(1, "你好", false).into()))
                 .await
                 .unwrap();
-            assert_eq!(next_binary(&mut socket).await, make_audio_request(&[], true));
+            assert_eq!(
+                next_binary(&mut socket).await,
+                make_audio_request(&[], true)
+            );
             socket
                 .send(Message::Binary(transcript(-2, "你好。", true).into()))
                 .await
@@ -1094,7 +1234,9 @@ mod tests {
         .await;
 
         let (sender, mut events) = mpsc::unbounded_channel();
-        let session = DoubaoSession::start_at(&url, config("zh-CN"), sender).await.unwrap();
+        let session = DoubaoSession::start_at(&url, config("zh-CN"), sender)
+            .await
+            .unwrap();
         session.send_audio(vec![1, 2, 3, 4], false).await.unwrap();
         assert_eq!(events.recv().await, Some(AsrEvent::Partial("你好".into())));
         session.finish().await.unwrap();
@@ -1130,9 +1272,14 @@ mod tests {
                 .send(Message::Binary(transcript(1, "latest", false).into()))
                 .await
                 .unwrap();
-            assert_eq!(next_binary(&mut socket).await, make_audio_request(&[], true));
+            assert_eq!(
+                next_binary(&mut socket).await,
+                make_audio_request(&[], true)
+            );
             socket
-                .send(Message::Binary(json_response(2, serde_json::json!({})).into()))
+                .send(Message::Binary(
+                    json_response(2, serde_json::json!({})).into(),
+                ))
                 .await
                 .unwrap();
             socket.close(None).await.unwrap();
@@ -1140,8 +1287,13 @@ mod tests {
         .await;
 
         let (sender, mut events) = mpsc::unbounded_channel();
-        let session = DoubaoSession::start_at(&url, config("zh-CN"), sender).await.unwrap();
-        assert_eq!(events.recv().await, Some(AsrEvent::Partial("latest".into())));
+        let session = DoubaoSession::start_at(&url, config("zh-CN"), sender)
+            .await
+            .unwrap();
+        assert_eq!(
+            events.recv().await,
+            Some(AsrEvent::Partial("latest".into()))
+        );
         // Dropping the handle after finish still delivers the final result.
         session.finish().await.unwrap();
         drop(session);
@@ -1156,13 +1308,17 @@ mod tests {
                 if matches!(message, Message::Close(_)) {
                     break;
                 }
-                let _ = socket.send(Message::Binary(transcript(1, "late", false).into())).await;
+                let _ = socket
+                    .send(Message::Binary(transcript(1, "late", false).into()))
+                    .await;
             }
         })
         .await;
 
         let (sender, mut events) = mpsc::unbounded_channel();
-        let session = DoubaoSession::start_at(&url, config("zh-CN"), sender).await.unwrap();
+        let session = DoubaoSession::start_at(&url, config("zh-CN"), sender)
+            .await
+            .unwrap();
         session.cancel();
         assert!(session.send_audio(vec![0], false).await.is_err());
         session.finish().await.unwrap();
@@ -1173,9 +1329,14 @@ mod tests {
     #[tokio::test]
     async fn test_connection_reports_server_errors() {
         let url = mock_server(|mut socket| async move {
-            assert_eq!(next_binary(&mut socket).await, make_audio_request(&[], true));
+            assert_eq!(
+                next_binary(&mut socket).await,
+                make_audio_request(&[], true)
+            );
             socket
-                .send(Message::Binary(error_frame(45000030, b"unauthorized").into()))
+                .send(Message::Binary(
+                    error_frame(45000030, b"unauthorized").into(),
+                ))
                 .await
                 .unwrap();
             let _ = socket.next().await;
@@ -1187,7 +1348,10 @@ mod tests {
         let mut incomplete = config("zh-CN");
         incomplete.access_token = " ".into();
         let error = test_connection(incomplete).await.unwrap_err();
-        assert_eq!(error.downcast::<AsrError>().unwrap(), AsrError::NotConfigured);
+        assert_eq!(
+            error.downcast::<AsrError>().unwrap(),
+            AsrError::NotConfigured
+        );
     }
 
     #[tokio::test]

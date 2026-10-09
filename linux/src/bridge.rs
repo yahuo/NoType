@@ -22,13 +22,19 @@ pub(crate) mod test_support {
     impl TestDir {
         pub fn new() -> Self {
             let name = format!("nt-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
-            let local = Path::new(env!("CARGO_MANIFEST_DIR")).join("target").join(&name);
+            let local = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("target")
+                .join(&name);
             let path = if local.as_os_str().len() + "/bridge.sock".len() < 100 {
                 local
             } else {
                 std::env::temp_dir().join(name)
             };
-            DirBuilder::new().recursive(true).mode(0o700).create(&path).unwrap();
+            DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(&path)
+                .unwrap();
             Self(path)
         }
 

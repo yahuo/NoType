@@ -21,7 +21,10 @@ fn is_newline(character: char) -> bool {
 
 /// Replaces runs of two or more whitespace characters within each line with one space.
 fn collapse_spaces(text: &str) -> String {
-    text.split(is_newline).map(collapse_line).collect::<Vec<_>>().join("\n")
+    text.split(is_newline)
+        .map(collapse_line)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn collapse_line(line: &str) -> String {

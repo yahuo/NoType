@@ -19,7 +19,10 @@ pub(crate) struct RecordedRequest {
 
 impl RecordedRequest {
     pub fn header(&self, name: &str) -> Option<&str> {
-        self.headers.iter().find(|(key, _)| key == name).map(|(_, value)| value.as_str())
+        self.headers
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
     }
 }
 
@@ -36,7 +39,13 @@ pub(crate) struct MockResponse {
 
 impl MockResponse {
     pub fn new(status: u16, content_type: &'static str) -> Self {
-        Self { status, content_type, chunks: Vec::new(), hold_open: false, silent: false }
+        Self {
+            status,
+            content_type,
+            chunks: Vec::new(),
+            hold_open: false,
+            silent: false,
+        }
     }
 
     pub fn body(mut self, body: impl Into<Vec<u8>>) -> Self {
@@ -48,7 +57,10 @@ impl MockResponse {
     pub fn sse<S: AsRef<str>>(events: impl IntoIterator<Item = (u64, S)>) -> Self {
         let mut response = Self::new(200, "text/event-stream");
         for (millis, line) in events {
-            response.chunks.push((Duration::from_millis(millis), format!("{}\n\n", line.as_ref()).into_bytes()));
+            response.chunks.push((
+                Duration::from_millis(millis),
+                format!("{}\n\n", line.as_ref()).into_bytes(),
+            ));
         }
         response
     }
@@ -79,7 +91,11 @@ impl MockServer {
                 });
             }
         });
-        Self { url, requests, task }
+        Self {
+            url,
+            requests,
+            task,
+        }
     }
 
     pub fn requests(&self) -> Vec<RecordedRequest> {
@@ -93,7 +109,11 @@ impl Drop for MockServer {
     }
 }
 
-async fn serve<F>(mut stream: TcpStream, handler: &F, recorded: &Mutex<Vec<RecordedRequest>>) -> std::io::Result<()>
+async fn serve<F>(
+    mut stream: TcpStream,
+    handler: &F,
+    recorded: &Mutex<Vec<RecordedRequest>>,
+) -> std::io::Result<()>
 where
     F: Fn(&RecordedRequest) -> MockResponse,
 {
@@ -133,14 +153,22 @@ where
         body.extend_from_slice(&chunk[..read]);
     }
 
-    let request = RecordedRequest { method, path, headers, body };
+    let request = RecordedRequest {
+        method,
+        path,
+        headers,
+        body,
+    };
     let response = handler(&request);
     recorded.lock().unwrap().push(request.clone());
     if response.silent {
         std::future::pending::<()>().await;
     }
 
-    let mut head = format!("HTTP/1.1 {} Mock\r\nContent-Type: {}\r\n", response.status, response.content_type);
+    let mut head = format!(
+        "HTTP/1.1 {} Mock\r\nContent-Type: {}\r\n",
+        response.status, response.content_type
+    );
     if request.method == "HEAD" || response.status == 302 {
         head.push_str("Content-Length: 0\r\n");
         if response.status == 302 {

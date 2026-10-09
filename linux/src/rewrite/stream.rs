@@ -34,14 +34,22 @@ pub(crate) struct CodexInputContent<'a> {
 }
 
 impl<'a> CodexResponseRequest<'a> {
-    pub fn new(model: &'a str, reasoning_effort: Option<&'a str>, instructions: &'a str, user_message: &'a str) -> Self {
+    pub fn new(
+        model: &'a str,
+        reasoning_effort: Option<&'a str>,
+        instructions: &'a str,
+        user_message: &'a str,
+    ) -> Self {
         Self {
             model,
             reasoning: reasoning_effort.map(|effort| CodexReasoning { effort }),
             instructions,
             input: [CodexInputMessage {
                 role: "user",
-                content: [CodexInputContent { kind: "input_text", text: user_message }],
+                content: [CodexInputContent {
+                    kind: "input_text",
+                    text: user_message,
+                }],
             }],
             stream: true,
             store: false,
@@ -125,7 +133,10 @@ impl LineBuffer {
         self.pending.extend_from_slice(chunk);
         let mut lines = Vec::new();
         let mut start = 0;
-        while let Some(offset) = self.pending[start..].iter().position(|byte| matches!(byte, b'\n' | b'\r')) {
+        while let Some(offset) = self.pending[start..]
+            .iter()
+            .position(|byte| matches!(byte, b'\n' | b'\r'))
+        {
             let end = start + offset;
             // CRLF yields an extra empty line, which every consumer ignores.
             lines.push(String::from_utf8_lossy(&self.pending[start..end]).into_owned());
@@ -153,9 +164,15 @@ mod tests {
     #[test]
     fn accumulator_builds_partial_text_from_sse_chunks() {
         let mut accumulator = CodexResponseStreamAccumulator::default();
-        let first = accumulator.consume(r#"data: {"type":"response.output_text.delta","delta":"你好"}"#).unwrap();
-        let second = accumulator.consume(r#"data: {"type":"response.output_text.delta","delta":"，世界"}"#).unwrap();
-        let done = accumulator.consume(r#"data: {"type":"response.output_text.done","text":"你好，世界"}"#).unwrap();
+        let first = accumulator
+            .consume(r#"data: {"type":"response.output_text.delta","delta":"你好"}"#)
+            .unwrap();
+        let second = accumulator
+            .consume(r#"data: {"type":"response.output_text.delta","delta":"，世界"}"#)
+            .unwrap();
+        let done = accumulator
+            .consume(r#"data: {"type":"response.output_text.done","text":"你好，世界"}"#)
+            .unwrap();
 
         assert_eq!(first.as_deref(), Some("你好"));
         assert_eq!(second.as_deref(), Some("你好，世界"));
@@ -167,21 +184,43 @@ mod tests {
     #[test]
     fn accumulator_ignores_non_data_and_non_text_events() {
         let mut accumulator = CodexResponseStreamAccumulator::default();
-        assert_eq!(accumulator.consume("event: response.created").unwrap(), None);
-        assert_eq!(accumulator.consume(r#"data: {"type":"response.created"}"#).unwrap(), None);
+        assert_eq!(
+            accumulator.consume("event: response.created").unwrap(),
+            None
+        );
+        assert_eq!(
+            accumulator
+                .consume(r#"data: {"type":"response.created"}"#)
+                .unwrap(),
+            None
+        );
         assert_eq!(accumulator.consume("").unwrap(), None);
         assert_eq!(accumulator.consume(": keepalive").unwrap(), None);
-        assert_eq!(accumulator.consume(r#"data: {"type":"response.output_text.delta","delta":""}"#).unwrap(), None);
+        assert_eq!(
+            accumulator
+                .consume(r#"data: {"type":"response.output_text.delta","delta":""}"#)
+                .unwrap(),
+            None
+        );
         assert!(accumulator.accumulated_text().is_empty());
         assert!(!accumulator.is_complete());
-        assert!(matches!(accumulator.consume("data: {not json"), Err(AiError::InvalidResponse)));
+        assert!(matches!(
+            accumulator.consume("data: {not json"),
+            Err(AiError::InvalidResponse)
+        ));
     }
 
     #[test]
     fn failed_and_incomplete_events_end_the_stream() {
-        for kind in ["response.failed", "response.incomplete", "response.completed"] {
+        for kind in [
+            "response.failed",
+            "response.incomplete",
+            "response.completed",
+        ] {
             let mut accumulator = CodexResponseStreamAccumulator::default();
-            accumulator.consume(&format!(r#"data: {{"type":"{kind}"}}"#)).unwrap();
+            accumulator
+                .consume(&format!(r#"data: {{"type":"{kind}"}}"#))
+                .unwrap();
             assert!(accumulator.is_complete());
         }
     }
@@ -190,7 +229,10 @@ mod tests {
     fn line_buffer_handles_split_chunks_crlf_and_trailing_line() {
         let mut buffer = LineBuffer::default();
         assert!(buffer.push(b"data: {\"a\"").is_empty());
-        assert_eq!(buffer.push(b":1}\r\n\r\nda"), vec!["data: {\"a\":1}", "", "", ""]);
+        assert_eq!(
+            buffer.push(b":1}\r\n\r\nda"),
+            vec!["data: {\"a\":1}", "", "", ""]
+        );
         // A multi-byte character split across chunks survives.
         let text = "data: 你好".as_bytes();
         let mut buffer = LineBuffer::default();
@@ -202,7 +244,10 @@ mod tests {
 
     #[test]
     fn request_body_omits_reasoning_unless_requested() {
-        let body = serde_json::to_value(CodexResponseRequest::new("gpt-test", None, "system", "user")).unwrap();
+        let body = serde_json::to_value(CodexResponseRequest::new(
+            "gpt-test", None, "system", "user",
+        ))
+        .unwrap();
         assert_eq!(body["model"], "gpt-test");
         assert_eq!(body["stream"], true);
         assert_eq!(body["store"], false);
@@ -213,7 +258,8 @@ mod tests {
             body["input"],
             serde_json::json!([{"role": "user", "content": [{"type": "input_text", "text": "user"}]}])
         );
-        let body = serde_json::to_value(CodexResponseRequest::new("m", Some("high"), "i", "u")).unwrap();
+        let body =
+            serde_json::to_value(CodexResponseRequest::new("m", Some("high"), "i", "u")).unwrap();
         assert_eq!(body["reasoning"]["effort"], "high");
     }
 }

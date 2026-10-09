@@ -112,11 +112,21 @@ pub struct Outcome {
 
 impl Outcome {
     pub fn passed(message: String) -> Self {
-        Self { ok: true, message: Some(message), warning: None, error: None }
+        Self {
+            ok: true,
+            message: Some(message),
+            warning: None,
+            error: None,
+        }
     }
 
     pub fn failed(error: String) -> Self {
-        Self { ok: false, message: None, warning: None, error: Some(error) }
+        Self {
+            ok: false,
+            message: None,
+            warning: None,
+            error: Some(error),
+        }
     }
 }
 
@@ -137,7 +147,9 @@ pub async fn snapshot() -> Snapshot {
     let codex_logged_in = CodexAuthStore::new(None).has_credentials();
     let speech_ready = match config.speech_provider {
         SpeechProvider::Codex => codex_logged_in,
-        SpeechProvider::Doubao => config.has_valid_doubao_configuration() && access_token != TokenSource::None,
+        SpeechProvider::Doubao => {
+            config.has_valid_doubao_configuration() && access_token != TokenSource::None
+        }
     };
     Snapshot {
         version: env!("CARGO_PKG_VERSION"),
@@ -160,7 +172,9 @@ pub async fn snapshot() -> Snapshot {
 /// Reads one JSON line from stdin. The settings page never closes stdin, so stop at the newline.
 pub async fn read_draft() -> Result<Draft> {
     let mut line = String::new();
-    BufReader::new(tokio::io::stdin().take(MAX_DRAFT_BYTES)).read_line(&mut line).await?;
+    BufReader::new(tokio::io::stdin().take(MAX_DRAFT_BYTES))
+        .read_line(&mut line)
+        .await?;
     if line.trim().is_empty() {
         return Ok(Draft::default());
     }
@@ -225,10 +239,11 @@ async fn save_inner(draft: &Draft) -> Result<(Config, Vec<String>)> {
 
 /// `testASRConnection` on macOS, using the draft instead of the saved values.
 pub async fn test_speech(draft: Draft) -> Outcome {
-    let config = match current_text(&paths::config_file()).and_then(|text| apply(&text, &draft, None)) {
-        Ok((_, config)) => config,
-        Err(error) => return Outcome::failed(format!("{error:#}")),
-    };
+    let config =
+        match current_text(&paths::config_file()).and_then(|text| apply(&text, &draft, None)) {
+            Ok((_, config)) => config,
+            Err(error) => return Outcome::failed(format!("{error:#}")),
+        };
     if config.speech_provider == SpeechProvider::Codex {
         return match CodexTranscriptionService::new(CodexAuthStore::new(None)).check_credentials() {
             Ok(()) => Outcome::passed(config.text(
@@ -255,7 +270,9 @@ pub async fn test_speech(draft: Draft) -> Outcome {
         config.language.clone(),
     );
     match doubao::test_connection(doubao).await {
-        Ok(()) => Outcome::passed(config.text("语音识别连接测试成功。", "Speech connection test passed.")),
+        Ok(()) => {
+            Outcome::passed(config.text("语音识别连接测试成功。", "Speech connection test passed."))
+        }
         Err(error) => Outcome::failed(format!("{error:#}")),
     }
 }
@@ -263,8 +280,14 @@ pub async fn test_speech(draft: Draft) -> Outcome {
 /// `testAIRewriteConnection` on macOS.
 pub async fn test_ai_rewrite() -> Outcome {
     let config = Config::load().unwrap_or_default();
-    match AiRewriteService::new(CodexAuthStore::new(None)).test_connection().await {
-        Ok(()) => Outcome::passed(config.text("AI Rewrite 连接测试成功。", "AI Rewrite connection test passed.")),
+    match AiRewriteService::new(CodexAuthStore::new(None))
+        .test_connection()
+        .await
+    {
+        Ok(()) => Outcome::passed(config.text(
+            "AI Rewrite 连接测试成功。",
+            "AI Rewrite connection test passed.",
+        )),
         Err(error) => Outcome::failed(error.to_string()),
     }
 }
@@ -280,7 +303,9 @@ fn current_text(path: &Path) -> Result<String> {
 /// Applies `draft` to the config text, keeping comments and layout, and validates the result.
 /// `file_token` replaces `doubao.access_token`.
 fn apply(text: &str, draft: &Draft, file_token: Option<&str>) -> Result<(String, Config)> {
-    let mut document: DocumentMut = text.parse().context("config.toml is not valid TOML; fix it by hand first")?;
+    let mut document: DocumentMut = text
+        .parse()
+        .context("config.toml is not valid TOML; fix it by hand first")?;
     let root = document.as_table_mut();
     if let Some(provider) = draft.speech_provider {
         let name = match provider {
@@ -296,7 +321,8 @@ fn apply(text: &str, draft: &Draft, file_token: Option<&str>) -> Result<(String,
         set(root, "ai_rewrite", enabled);
     }
 
-    let touches_doubao = draft.app_id.is_some() || draft.resource_id.is_some() || file_token.is_some();
+    let touches_doubao =
+        draft.app_id.is_some() || draft.resource_id.is_some() || file_token.is_some();
     if touches_doubao {
         let doubao = document
             .entry("doubao")
@@ -341,7 +367,9 @@ fn set(table: &mut dyn TableLike, key: &str, value: impl Into<Value>) {
 /// Replaces the file atomically with mode 0600, following a symlinked config.
 fn write_private(path: &Path, text: &str) -> Result<()> {
     let path = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    let directory = path.parent().context("config path has no parent directory")?;
+    let directory = path
+        .parent()
+        .context("config path has no parent directory")?;
     std::fs::DirBuilder::new()
         .recursive(true)
         .mode(0o700)
@@ -350,7 +378,11 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
     let temporary = directory.join(format!(".config.toml.{}", std::process::id()));
     let _ = std::fs::remove_file(&temporary);
     let result = (|| {
-        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
         std::fs::rename(&temporary, &path)
@@ -363,7 +395,14 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
 
 async fn store_keyring(token: &str) -> Result<()> {
     let mut child = Command::new("secret-tool")
-        .args(["store", "--label=NoType Doubao", "application", SECRET_APPLICATION, "account", SECRET_ACCOUNT])
+        .args([
+            "store",
+            "--label=NoType Doubao",
+            "application",
+            SECRET_APPLICATION,
+            "account",
+            SECRET_ACCOUNT,
+        ])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -378,14 +417,23 @@ async fn store_keyring(token: &str) -> Result<()> {
         .await
         .context("secret-tool timed out")??;
     if !output.status.success() {
-        bail!("secret-tool store failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+        bail!(
+            "secret-tool store failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(())
 }
 
 async fn clear_keyring() {
     let child = Command::new("secret-tool")
-        .args(["clear", "application", SECRET_APPLICATION, "account", SECRET_ACCOUNT])
+        .args([
+            "clear",
+            "application",
+            SECRET_APPLICATION,
+            "account",
+            SECRET_ACCOUNT,
+        ])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -405,7 +453,9 @@ async fn hotkeys() -> Hotkeys {
         .kill_on_drop(true)
         .output();
     match tokio::time::timeout(HYPRCTL_TIMEOUT, output).await {
-        Ok(Ok(output)) if output.status.success() => parse_hotkeys(&output.stdout).unwrap_or_default(),
+        Ok(Ok(output)) if output.status.success() => {
+            parse_hotkeys(&output.stdout).unwrap_or_default()
+        }
         _ => Hotkeys::default(),
     }
 }
@@ -453,7 +503,10 @@ fn shortcut_name(modmask: u32, key: &str) -> String {
         // Bindings written in capitals such as TAB; keep names like XF86AudioMute as written.
         upper if upper == key => {
             let mut chars = key.chars();
-            chars.next().map(|first| first.to_string() + &chars.as_str().to_ascii_lowercase()).unwrap_or_default()
+            chars
+                .next()
+                .map(|first| first.to_string() + &chars.as_str().to_ascii_lowercase())
+                .unwrap_or_default()
         }
         _ => key.to_owned(),
     };
@@ -475,14 +528,20 @@ mod tests {
             ..Default::default()
         };
         let (text, config) = apply(TEMPLATE, &draft, None).unwrap();
-        assert!(text.contains("# \"codex\" uses the Codex CLI login"), "{text}");
+        assert!(
+            text.contains("# \"codex\" uses the Codex CLI login"),
+            "{text}"
+        );
         assert!(text.contains("speech_provider = \"doubao\"\n"), "{text}");
         assert!(text.contains("app_id = \"123\"\n"), "{text}");
         assert!(text.contains("# Prefer the keyring:"), "{text}");
         assert_eq!(config.language, "en-US");
         assert!(config.should_rewrite_dictation());
 
-        let bad = Draft { language: Some("fr-FR".into()), ..Default::default() };
+        let bad = Draft {
+            language: Some("fr-FR".into()),
+            ..Default::default()
+        };
         assert!(apply(TEMPLATE, &bad, None).is_err());
         assert!(apply("speech_provider = ", &Draft::default(), None).is_err());
     }
@@ -494,7 +553,12 @@ mod tests {
         assert!(text.contains("[doubao]"), "{text}");
 
         // A token moved to the keyring blanks an existing fallback but never adds an empty key.
-        let (text, _) = apply("[doubao]\naccess_token = \"old\"\n", &Draft::default(), Some("")).unwrap();
+        let (text, _) = apply(
+            "[doubao]\naccess_token = \"old\"\n",
+            &Draft::default(),
+            Some(""),
+        )
+        .unwrap();
         assert_eq!(text, "[doubao]\naccess_token = \"\"\n");
         let (text, _) = apply("language = \"zh-CN\"\n", &Draft::default(), Some("")).unwrap();
         assert!(!text.contains("access_token"), "{text}");
@@ -502,7 +566,8 @@ mod tests {
 
     #[test]
     fn drafts_reject_unknown_fields() {
-        let draft: Draft = serde_json::from_str(r#"{"speech_provider":"doubao","access_token":"t"}"#).unwrap();
+        let draft: Draft =
+            serde_json::from_str(r#"{"speech_provider":"doubao","access_token":"t"}"#).unwrap();
         assert_eq!(draft.speech_provider, Some(SpeechProvider::Doubao));
         assert!(serde_json::from_str::<Draft>(r#"{"token":"t"}"#).is_err());
     }
@@ -518,7 +583,10 @@ mod tests {
             {"modmask": 64, "submap": "", "key": "RETURN", "description": "Terminal"}
         ]"#;
         assert_eq!(parse_hotkeys(json).unwrap(), Hotkeys::default());
-        let missing = parse_hotkeys(br#"[{"modmask": 72, "submap": "", "key": "F12", "description": "NoType dictation"}]"#).unwrap();
+        let missing = parse_hotkeys(
+            br#"[{"modmask": 72, "submap": "", "key": "F12", "description": "NoType dictation"}]"#,
+        )
+        .unwrap();
         assert_eq!(missing.dictation.as_deref(), Some("Super + Alt + F12"));
         assert_eq!(missing.translation, None);
         assert_eq!(shortcut_name(0, "TAB"), "Tab");

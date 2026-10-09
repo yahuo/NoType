@@ -43,7 +43,16 @@ impl Recorder {
     /// over the receiver finishes after the last chunk.
     pub fn start(events: UnboundedSender<CaptureEvent>) -> Result<Self> {
         let mut child = Command::new("pw-record")
-            .args(["--raw", "--rate", "16000", "--channels", "1", "--format", "s16", "-"])
+            .args([
+                "--raw",
+                "--rate",
+                "16000",
+                "--channels",
+                "1",
+                "--format",
+                "s16",
+                "-",
+            ])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -69,7 +78,11 @@ impl Recorder {
             }
             if !reader_stopping.load(Ordering::SeqCst) {
                 let mut message = String::new();
-                let _ = tokio::time::timeout(Duration::from_millis(200), stderr.read_to_string(&mut message)).await;
+                let _ = tokio::time::timeout(
+                    Duration::from_millis(200),
+                    stderr.read_to_string(&mut message),
+                )
+                .await;
                 let message = message.trim();
                 let _ = events.send(CaptureEvent::Failed(if message.is_empty() {
                     "Microphone capture stopped unexpectedly.".into()
@@ -80,7 +93,11 @@ impl Recorder {
             Ok(stream.finish())
         });
 
-        Ok(Self { child, reader: Some(reader), stopping })
+        Ok(Self {
+            child,
+            reader: Some(reader),
+            stopping,
+        })
     }
 
     /// Stops `pw-record` and drains the pipe so audio captured before the stop is kept.
@@ -137,7 +154,9 @@ impl PcmStream {
         }
 
         while self.pending.len() >= CHUNK_BYTES {
-            events.push(CaptureEvent::Chunk(self.pending.drain(..CHUNK_BYTES).collect()));
+            events.push(CaptureEvent::Chunk(
+                self.pending.drain(..CHUNK_BYTES).collect(),
+            ));
         }
         events
     }
@@ -178,7 +197,14 @@ mod tests {
 
     fn tone(samples: usize, amplitude: i16) -> Vec<u8> {
         (0..samples)
-            .flat_map(|index| if index % 2 == 0 { amplitude } else { -amplitude }.to_le_bytes())
+            .flat_map(|index| {
+                if index % 2 == 0 {
+                    amplitude
+                } else {
+                    -amplitude
+                }
+                .to_le_bytes()
+            })
             .collect()
     }
 

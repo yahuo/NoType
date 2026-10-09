@@ -172,7 +172,11 @@ impl AgentEditorTriggers {
     /// Claude Code or Codex CLI opens `$VISUAL` (the `notype-editor` proxy).
     pub async fn trigger(&self, window: &ActiveWindow) -> anyhow::Result<()> {
         if !window.is_terminal() {
-            let name = if window.class.is_empty() { &window.title } else { &window.class };
+            let name = if window.class.is_empty() {
+                &window.title
+            } else {
+                &window.class
+            };
             return Err(AgentEditorError::UnsupportedTerminal(name.clone()).into());
         }
         let focused = self.desktop.active_window().await.ok().flatten();
@@ -205,7 +209,8 @@ impl AgentEditorTriggers {
     /// Accepts a pending token once. A wrong or stale token leaves the pending trigger intact;
     /// any later failure still consumes it.
     pub async fn consume(&self, token: &str, pid: i32, ppid: i32, terminal: &str) -> bool {
-        self.consume_at(token, pid, ppid, terminal, now_milliseconds()).await
+        self.consume_at(token, pid, ppid, terminal, now_milliseconds())
+            .await
     }
 
     async fn consume_at(&self, token: &str, pid: i32, ppid: i32, terminal: &str, now: i64) -> bool {
@@ -222,7 +227,12 @@ impl AgentEditorTriggers {
             window
         };
 
-        if pid <= 1 || ppid <= 1 || !process_exists(pid) || !process_exists(ppid) || !is_private_terminal(terminal) {
+        if pid <= 1
+            || ppid <= 1
+            || !process_exists(pid)
+            || !process_exists(ppid)
+            || !is_private_terminal(terminal)
+        {
             return false;
         }
         matches!(self.desktop.active_window().await, Ok(Some(focused)) if focused.same_window(&window))
@@ -235,7 +245,10 @@ impl AgentEditorTriggers {
 
     fn clear_if_current(&self, token: &str) {
         let mut pending = self.shared.lock();
-        if pending.as_ref().is_some_and(|pending| pending.trigger.token == token) {
+        if pending
+            .as_ref()
+            .is_some_and(|pending| pending.trigger.token == token)
+        {
             self.shared.clear_locked(&mut pending);
         }
     }
@@ -245,9 +258,14 @@ impl AgentEditorTriggers {
         let expiry = self.expiry;
         tokio::spawn(async move {
             tokio::time::sleep(expiry).await;
-            let Some(shared) = shared.upgrade() else { return };
+            let Some(shared) = shared.upgrade() else {
+                return;
+            };
             let mut pending = shared.lock();
-            if pending.as_ref().is_some_and(|pending| pending.trigger.token == token) {
+            if pending
+                .as_ref()
+                .is_some_and(|pending| pending.trigger.token == token)
+            {
                 // Taking the value drops our own abort handle without aborting this task early.
                 pending.take();
                 let _ = fs::remove_file(&shared.trigger_file);
@@ -258,26 +276,42 @@ impl AgentEditorTriggers {
 
     #[cfg(test)]
     pub(crate) fn pending_token(&self) -> Option<String> {
-        self.shared.lock().as_ref().map(|pending| pending.trigger.token.clone())
+        self.shared
+            .lock()
+            .as_ref()
+            .map(|pending| pending.trigger.token.clone())
     }
 }
 
 /// Writes the trigger atomically with mode `0600` inside a private `0700` directory.
 fn persist(trigger_file: &Path, trigger: &PendingTrigger) -> io::Result<()> {
-    let directory = trigger_file
-        .parent()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "trigger file has no directory"))?;
-    DirBuilder::new().recursive(true).mode(0o700).create(directory)?;
+    let directory = trigger_file.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "trigger file has no directory")
+    })?;
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)?;
     let metadata = fs::symlink_metadata(directory)?;
     if !metadata.is_dir() || metadata.uid() != unsafe { libc::geteuid() } {
-        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "trigger directory is not private"));
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "trigger directory is not private",
+        ));
     }
     fs::set_permissions(directory, fs::Permissions::from_mode(0o700))?;
 
     let data = serde_json::to_vec(trigger)?;
-    let temporary = directory.join(format!(".editor-trigger-{}.tmp", uuid::Uuid::new_v4().simple()));
+    let temporary = directory.join(format!(
+        ".editor-trigger-{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
     let written = (|| {
-        let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&temporary)?;
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&temporary)?;
         file.write_all(&data)?;
         fs::rename(&temporary, trigger_file)?;
         fs::set_permissions(trigger_file, fs::Permissions::from_mode(0o600))
@@ -382,7 +416,9 @@ pub(crate) mod tests {
             assert_eq!(libc::unlockpt(master.as_raw_fd()), 0);
             let name = libc::ptsname(master.as_raw_fd());
             assert!(!name.is_null());
-            let path = std::ffi::CStr::from_ptr(name).to_string_lossy().into_owned();
+            let path = std::ffi::CStr::from_ptr(name)
+                .to_string_lossy()
+                .into_owned();
             (master, path)
         }
     }
@@ -396,13 +432,22 @@ pub(crate) mod tests {
     fn fixture() -> Fixture {
         let dir = TestDir::new();
         let desktop = FakeDesktop::new(Some(terminal_window()));
-        let triggers =
-            AgentEditorTriggers::with_desktop(dir.path("runtime").join("editor-trigger.json"), desktop.clone());
-        Fixture { triggers, desktop, dir }
+        let triggers = AgentEditorTriggers::with_desktop(
+            dir.path("runtime").join("editor-trigger.json"),
+            desktop.clone(),
+        );
+        Fixture {
+            triggers,
+            desktop,
+            dir,
+        }
     }
 
     fn read_trigger(fixture: &Fixture) -> PendingTrigger {
-        serde_json::from_slice(&fs::read(fixture.dir.path("runtime").join("editor-trigger.json")).unwrap()).unwrap()
+        serde_json::from_slice(
+            &fs::read(fixture.dir.path("runtime").join("editor-trigger.json")).unwrap(),
+        )
+        .unwrap()
     }
 
     fn ids() -> (i32, i32) {
@@ -452,7 +497,10 @@ pub(crate) mod tests {
         fixture.triggers.trigger(&terminal_window()).await.unwrap();
         let file = fixture.dir.path("runtime").join("editor-trigger.json");
         assert_eq!(fs::metadata(&file).unwrap().mode() & 0o777, 0o600);
-        assert_eq!(fs::metadata(fixture.dir.path("runtime")).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(
+            fs::metadata(fixture.dir.path("runtime")).unwrap().mode() & 0o777,
+            0o700
+        );
         let trigger = read_trigger(&fixture);
         assert_eq!(trigger.trigger, HOTKEY_TRIGGER);
         assert_eq!(Some(trigger.token), fixture.triggers.pending_token());
@@ -471,8 +519,15 @@ pub(crate) mod tests {
         let mut other = terminal_window();
         other.address = "0x62".into();
         fixture.desktop.focus(Some(other));
-        let error = fixture.triggers.trigger(&terminal_window()).await.unwrap_err();
-        assert!(matches!(error.downcast_ref(), Some(AgentEditorError::TargetChanged)));
+        let error = fixture
+            .triggers
+            .trigger(&terminal_window())
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error.downcast_ref(),
+            Some(AgentEditorError::TargetChanged)
+        ));
         assert_eq!(fixture.desktop.shortcuts(), 0);
         assert!(fixture.triggers.pending_token().is_none());
     }
@@ -481,10 +536,23 @@ pub(crate) mod tests {
     async fn failed_shortcut_clears_the_trigger() {
         let fixture = fixture();
         fixture.desktop.fail_shortcut.store(true, Ordering::SeqCst);
-        let error = fixture.triggers.trigger(&terminal_window()).await.unwrap_err();
-        assert_eq!(error.to_string(), AgentEditorError::ShortcutSynthesisFailed.to_string());
+        let error = fixture
+            .triggers
+            .trigger(&terminal_window())
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            AgentEditorError::ShortcutSynthesisFailed.to_string()
+        );
         assert!(fixture.triggers.pending_token().is_none());
-        assert!(!fixture.dir.path("runtime").join("editor-trigger.json").exists());
+        assert!(
+            !fixture
+                .dir
+                .path("runtime")
+                .join("editor-trigger.json")
+                .exists()
+        );
     }
 
     #[tokio::test]
@@ -496,10 +564,21 @@ pub(crate) mod tests {
         fixture.triggers.trigger(&terminal_window()).await.unwrap();
         let token = fixture.triggers.pending_token().unwrap();
         // A wrong token does not burn the pending trigger.
-        assert!(!fixture.triggers.consume(&uuid::Uuid::new_v4().to_string(), pid, ppid, &terminal).await);
+        assert!(
+            !fixture
+                .triggers
+                .consume(&uuid::Uuid::new_v4().to_string(), pid, ppid, &terminal)
+                .await
+        );
         assert!(fixture.triggers.consume(&token, pid, ppid, &terminal).await);
         assert!(!fixture.triggers.consume(&token, pid, ppid, &terminal).await);
-        assert!(!fixture.dir.path("runtime").join("editor-trigger.json").exists());
+        assert!(
+            !fixture
+                .dir
+                .path("runtime")
+                .join("editor-trigger.json")
+                .exists()
+        );
 
         for (pid, ppid, terminal) in [
             (1, ppid, terminal.as_str()),
@@ -510,7 +589,10 @@ pub(crate) mod tests {
         ] {
             fixture.triggers.trigger(&terminal_window()).await.unwrap();
             let token = fixture.triggers.pending_token().unwrap();
-            assert!(!fixture.triggers.consume(&token, pid, ppid, terminal).await, "{pid} {ppid} {terminal}");
+            assert!(
+                !fixture.triggers.consume(&token, pid, ppid, terminal).await,
+                "{pid} {ppid} {terminal}"
+            );
             // Validation failures after the token matched still consume it.
             assert!(fixture.triggers.pending_token().is_none());
         }
@@ -531,7 +613,12 @@ pub(crate) mod tests {
         fixture.triggers.trigger(&terminal_window()).await.unwrap();
         let trigger = read_trigger(&fixture);
         let stale = trigger.created_at_milliseconds + TRIGGER_LIFETIME_MILLISECONDS + 1;
-        assert!(!fixture.triggers.consume_at(&trigger.token, pid, ppid, &terminal, stale).await);
+        assert!(
+            !fixture
+                .triggers
+                .consume_at(&trigger.token, pid, ppid, &terminal, stale)
+                .await
+        );
         assert!(fixture.triggers.pending_token().is_some());
     }
 
@@ -544,6 +631,12 @@ pub(crate) mod tests {
         assert!(fixture.triggers.pending_token().is_some());
         tokio::time::sleep(Duration::from_millis(400)).await;
         assert!(fixture.triggers.pending_token().is_none());
-        assert!(!fixture.dir.path("runtime").join("editor-trigger.json").exists());
+        assert!(
+            !fixture
+                .dir
+                .path("runtime")
+                .join("editor-trigger.json")
+                .exists()
+        );
     }
 }
