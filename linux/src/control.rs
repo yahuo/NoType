@@ -222,21 +222,29 @@ pub async fn send(request: &ControlRequest) -> Result<()> {
 pub async fn copy_status<W: AsyncWrite + Unpin>(follow: bool, output: &mut W) -> Result<()> {
     let mut stream = connect().await?;
     write_line(&mut stream, &ControlRequest::Status { follow }).await?;
-    copy_lines(stream, output).await?;
-    if follow {
+    let daemon_closed = copy_lines(stream, output).await?;
+    if follow && daemon_closed {
         bail!("NoType stopped");
     }
     Ok(())
 }
 
-async fn copy_lines<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(reader: R, output: &mut W) -> Result<()> {
+/// Returns false when `output` closed first, e.g. `notype status --follow | head -1`.
+async fn copy_lines<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(reader: R, output: &mut W) -> Result<bool> {
     let mut lines = BufReader::new(reader).lines();
     while let Some(line) = lines.next_line().await? {
-        output.write_all(line.as_bytes()).await?;
-        output.write_all(b"\n").await?;
-        output.flush().await?;
+        let written = async {
+            output.write_all(line.as_bytes()).await?;
+            output.write_all(b"\n").await?;
+            output.flush().await
+        };
+        match written.await {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => return Ok(false),
+            Err(error) => return Err(error.into()),
+        }
     }
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]
@@ -252,6 +260,17 @@ mod tests {
             ControlRequest::Status { follow: false }
         );
         assert!(serde_json::from_str::<ControlRequest>(r#"{"command":"rm"}"#).is_err());
+    }
+
+    #[tokio::test]
+    async fn copy_lines_tells_who_closed_first() {
+        let mut copied = Vec::new();
+        assert!(copy_lines(&b"a\nb\n"[..], &mut copied).await.unwrap());
+        assert_eq!(copied, b"a\nb\n");
+
+        let (mut closed, reader) = tokio::io::duplex(64);
+        drop(reader);
+        assert!(!copy_lines(&b"a\n"[..], &mut closed).await.unwrap());
     }
 
     #[tokio::test]

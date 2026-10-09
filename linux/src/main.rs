@@ -1,5 +1,6 @@
 //! `notype`: the Omarchy daemon and the CLI that Hyprland bindings and the shell plugin call.
 
+use std::io::IsTerminal;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::process::ExitCode;
@@ -105,6 +106,8 @@ async fn run_daemon() -> Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "notype=info".into()),
         )
         .with_writer(std::io::stderr)
+        // journald stores escape codes verbatim.
+        .with_ansi(std::io::stderr().is_terminal())
         .init();
 
     let _lock = DaemonLock::acquire()?;
