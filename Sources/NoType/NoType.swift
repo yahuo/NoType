@@ -80,12 +80,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
         let hostingController = NSHostingController(
             rootView: SettingsView(model: model)
-                .frame(width: 580, height: 460)
+                .frame(width: 580, height: 470)
         )
         let window = NSWindow(contentViewController: hostingController)
         window.title = "NoType Settings"
         window.identifier = NSUserInterfaceItemIdentifier("settings")
-        window.setContentSize(NSSize(width: 580, height: 460))
+        window.setContentSize(NSSize(width: 580, height: 470))
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]

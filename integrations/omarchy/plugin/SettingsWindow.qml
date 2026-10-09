@@ -128,13 +128,12 @@ FloatingWindow {
   Tones { id: tones; surface: Color.background }
   WindowFit { id: fit; window: root }
 
-  // macOS grouped Form: a captioned header, rows in a tinted box, a footnote.
+  // macOS grouped Form: a captioned header and rows in a tinted box.
   component FormSection: Column {
     id: section
 
     property string title: ""
     property string icon: ""
-    property string caption: ""
     default property alias rows: box.data
 
     width: parent ? parent.width : 0
@@ -164,17 +163,6 @@ FloatingWindow {
         y: Style.space(4)
         width: parent.width - Style.space(24)
       }
-    }
-
-    Text {
-      width: parent.width
-      visible: section.caption !== ""
-      textFormat: Text.PlainText
-      text: section.caption
-      wrapMode: Text.Wrap
-      color: Util.alpha(Color.foreground, 0.6)
-      font.family: Style.font.family
-      font.pixelSize: Style.font.bodySmall
     }
   }
 
@@ -316,8 +304,6 @@ FloatingWindow {
           visible: root.tab === "speech" && !!root.snapshot
 
           FormSection {
-            caption: "点击 Save 后切换语音服务。"
-
             FormRow {
               label: "Speech Provider"
               first: true
@@ -340,7 +326,6 @@ FloatingWindow {
             visible: root.draftProvider === "codex"
             title: "Codex Dictation"
             icon: tones.glyphMic
-            caption: "复用本机 Codex 登录。结束录音后整段识别，转写结果直接输入，不额外调用 AI Rewrite。"
 
             FormRow {
               label: "Status"
@@ -357,7 +342,6 @@ FloatingWindow {
             visible: root.draftProvider === "doubao"
             title: "Doubao Credentials"
             icon: tones.glyphKey
-            caption: "Access Token is stored securely in the keyring."
 
             FormRow {
               label: "App ID"
@@ -408,7 +392,6 @@ FloatingWindow {
           FormSection {
             title: "Input"
             icon: tones.glyphKeyboard
-            caption: "选中文字后按快捷键，在浮窗查看中文译文，原文保持不变。快捷键在 ~/.config/hypr/bindings.lua 加载的 notype.hyprland 中修改。"
 
             FormRow {
               label: "Dictation Hotkey"
@@ -462,28 +445,15 @@ FloatingWindow {
                 width: parent.width
                 foreground: root.fg
                 label: "Enable AI Rewrite"
-                description: "豆包转写后用 Codex 润色文本。"
                 checked: !!root.snapshot && root.snapshot.ai_rewrite === true
                 enabled: !root.busy
                 onClicked: root.setAiRewrite(!checked)
               }
             }
 
-            Text {
-              width: parent.width
-              visible: root.savedProvider !== "doubao"
-              topPadding: Style.space(8)
-              bottomPadding: Style.space(8)
-              textFormat: Text.PlainText
-              text: "Codex 语音转写直接输入，不经过额外改写。翻译快捷键仍可使用。"
-              wrapMode: Text.Wrap
-              color: root.secondary
-              font.family: Style.font.family
-              font.pixelSize: Style.font.subtitle
-            }
-
             FormRow {
               label: "Provider"
+              first: root.savedProvider !== "doubao"
               ValueText { text: "Codex OAuth" }
             }
 
@@ -500,8 +470,6 @@ FloatingWindow {
           FormSection {
             title: "Agent TUI Translation"
             icon: tones.glyphConsole
-            caption: "在 Codex、Claude Code 等终端 Agent 里按 " + (root.hotkeys.agent ? String(root.hotkeys.agent) : "Alt + Shift + T")
-              + "，NoType 通过 notype-editor（设为 VISUAL / EDITOR）打开草稿并译成英文。Pi 中连按三次空格同样会翻译输入框。"
 
             FormRow {
               label: "Hotkey"
@@ -513,7 +481,6 @@ FloatingWindow {
           FormSection {
             title: "Connection"
             icon: tones.glyphLink
-            caption: "NoType reads the current Codex access token from your local Codex login and never refreshes the refresh token."
 
             FormRow {
               label: "Endpoint"

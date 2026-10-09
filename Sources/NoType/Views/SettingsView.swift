@@ -101,9 +101,6 @@ struct SettingsView: View {
                         Text(provider.displayName).tag(provider)
                     }
                 }
-                Text("点击 Save 后切换语音服务。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
 
             if model.speechProviderDraft == .codex {
@@ -112,10 +109,6 @@ struct SettingsView: View {
                         Text(model.hasCodexOAuthCredentials ? "Logged in" : "Run `codex login` first")
                             .foregroundStyle(model.hasCodexOAuthCredentials ? .green : .secondary)
                     }
-
-                    Text("复用本机 Codex 登录。结束录音后整段识别，转写结果直接输入，不额外调用 AI Rewrite。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 } header: {
                     Label("Codex Dictation", systemImage: "mic.fill")
                 }
@@ -138,10 +131,6 @@ struct SettingsView: View {
                     Text(model.selectionTranslationHotkeyDisplayName)
                         .foregroundStyle(.secondary)
                 }
-
-                Text("选中文字后按快捷键，在浮窗查看中文译文，原文保持不变。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
 
                 Picker(model.speechProviderDraft == .codex ? "Interface Language" : "Language", selection: $model.settings.language) {
                     ForEach(DictationLanguage.allCases) { language in
@@ -166,10 +155,6 @@ struct SettingsView: View {
 
             SecureField("Access Token", text: $model.accessToken)
                 .textFieldStyle(.roundedBorder)
-
-            Text("Access Token is stored securely in Keychain.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
         } header: {
             Label("Doubao Credentials", systemImage: "key.fill")
         }
@@ -188,10 +173,6 @@ struct SettingsView: View {
                             set: { model.setAIRewriteEnabled($0) }
                         )
                     )
-                } else {
-                    Text("Codex 语音转写直接输入，不经过额外改写。翻译快捷键仍可使用。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
 
                 LabeledContent("Provider") {
@@ -215,10 +196,6 @@ struct SettingsView: View {
                         set: { model.setAgentTUITranslationEnabled($0) }
                     )
                 )
-
-                Text("Requires the bundled notype-editor proxy to be configured as VISUAL and EDITOR before starting the agent. Manual external-editor shortcuts continue to open your original editor.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             } header: {
                 Label("Agent TUI Translation", systemImage: "terminal")
             }
@@ -228,10 +205,6 @@ struct SettingsView: View {
                     Text("chatgpt.com/backend-api/codex")
                         .foregroundStyle(.secondary)
                 }
-
-                Text("NoType reads the current Codex access token from your local Codex login and never refreshes the refresh token.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             } header: {
                 Label("Connection", systemImage: "link")
             }
