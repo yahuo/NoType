@@ -372,6 +372,33 @@ class NativeHostTests(unittest.TestCase):
                                        env={**os.environ, "HOME": str(home), "XDG_STATE_HOME": str(home / "state")})
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
+    def test_unpacked_extension_id_matches_chromium(self):
+        # Observed with Chromium 152 loading --load-extension=/tmp/notype-port.SRg976/ext.
+        self.assertEqual(install.extension_id_for("/tmp/notype-port.SRg976/ext"), "obgodaflngiilhnffbhmlenipdodhlam")
+
+    def test_linux_installer_without_id_copies_extension_to_a_stable_folder(self):
+        with tempfile.TemporaryDirectory(prefix="notype install '") as directory:
+            config, data = Path(directory) / "config", Path(directory) / "data"
+            # Chromium hashes the resolved folder, so a symlinked data home must not change the ID.
+            (Path(directory) / "real-data").mkdir()
+            data.symlink_to(Path(directory) / "real-data")
+            source = Path(__file__).resolve().parents[1] / "native_host.py"
+            extension = Path(__file__).resolve().parents[1] / "extension"
+            stable = data / "notype/browser/extension"
+            stable.mkdir(parents=True)
+            (stable / "stale.js").write_text("")
+            installed = install.install_linux(None, config, data, sys.executable, source, extension)
+            self.assertEqual(installed, install.extension_id_for(stable.resolve()))
+            self.assertNotEqual(installed, install.extension_id_for(stable))
+            self.assertEqual((stable / "manifest.json").read_bytes(), (extension / "manifest.json").read_bytes())
+            self.assertFalse((stable / "stale.js").exists())
+            self.assertFalse(stable.with_name("extension.new").exists())
+            # Reinstalling keeps the same ID; an explicit ID adds to the allowed origins without copying.
+            self.assertEqual(install.install_linux(None, config, data, sys.executable, source, extension), installed)
+            self.assertEqual(install.install_linux("b" * 32, config, data, sys.executable, source), "b" * 32)
+            manifest = json.loads((config / "chromium/NativeMessagingHosts/com.opensource.notype.browser.json").read_text())
+            self.assertEqual(manifest["allowed_origins"], [f"chrome-extension://{installed}/", f"chrome-extension://{'b' * 32}/"])
+
     def test_installer_resolves_xdg_homes(self):
         self.environment(XDG_CONFIG_HOME="/srv/config", XDG_DATA_HOME="relative")
         self.assertEqual(install.xdg_home("XDG_CONFIG_HOME", ".config"), Path("/srv/config"))

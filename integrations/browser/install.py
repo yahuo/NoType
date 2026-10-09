@@ -1,5 +1,6 @@
 """Install the local native host for one unpacked extension ID on macOS or Linux."""
 
+import hashlib
 import json
 import os
 import re
@@ -45,9 +46,31 @@ def install(extension_id, support, python, source):
                [support / browser for browser in MACOS_BROWSERS], python, source)
 
 
-def install_linux(extension_id, config_home, data_home, python, source):
-    install_to(extension_id, data_home / "notype/browser",
+def install_linux(extension_id, config_home, data_home, python, source, extension=None):
+    """Without an ID, copies `extension` to a stable folder and allows the ID Chromium derives from it."""
+    destination = data_home / "notype/browser"
+    if extension_id is None:
+        # Chromium resolves symlinks before hashing the folder.
+        extension_id = extension_id_for(os.path.realpath(copy_extension(extension, destination / "extension")))
+    install_to(extension_id, destination,
                [config_home / browser for browser in LINUX_BROWSERS], python, source)
+    return extension_id
+
+
+def copy_extension(source, target):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    staging = target.with_name(target.name + ".new")
+    shutil.rmtree(staging, ignore_errors=True)
+    shutil.copytree(source, staging, ignore=shutil.ignore_patterns(".*", "__pycache__"))
+    shutil.rmtree(target, ignore_errors=True)
+    staging.rename(target)
+    return target
+
+
+def extension_id_for(path):
+    """Chromium's ID for an unpacked extension without a manifest key: SHA-256 of its absolute path, 0-f as a-p."""
+    digest = hashlib.sha256(os.fsencode(path)).hexdigest()[:32]
+    return digest.translate(str.maketrans("0123456789abcdef", "abcdefghijklmnop"))
 
 
 def xdg_home(variable, default):
@@ -56,11 +79,17 @@ def xdg_home(variable, default):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2 or not (sys.platform == "darwin" or sys.platform.startswith("linux")):
-        sys.exit("用法（macOS 或 Linux）：python3 integrations/browser/install.py <扩展ID>")
+    linux = sys.platform.startswith("linux")
+    if not (sys.platform == "darwin" and len(sys.argv) == 2 or linux and len(sys.argv) <= 2):
+        sys.exit("用法：python3 integrations/browser/install.py <扩展ID>（Linux 上可省略扩展 ID）")
     host_source = Path(__file__).with_name("native_host.py")
     if sys.platform == "darwin":
         install(sys.argv[1], Path.home() / "Library/Application Support", sys.executable, host_source)
     else:
-        install_linux(sys.argv[1], xdg_home("XDG_CONFIG_HOME", ".config"),
-                      xdg_home("XDG_DATA_HOME", ".local/share"), sys.executable, host_source)
+        data = xdg_home("XDG_DATA_HOME", ".local/share")
+        given = sys.argv[1] if len(sys.argv) == 2 else None
+        installed = install_linux(given, xdg_home("XDG_CONFIG_HOME", ".config"), data, sys.executable,
+                                  host_source, Path(__file__).with_name("extension"))
+        if given is None:
+            print(f"在 chrome://extensions 开启开发者模式，“加载已解压的扩展程序”选择：{data / 'notype/browser/extension'}")
+            print(f"扩展 ID 应为：{installed}；更新后在该页点扩展的重新加载按钮。")
