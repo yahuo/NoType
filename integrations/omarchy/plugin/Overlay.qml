@@ -6,8 +6,9 @@ import qs.Commons
 import qs.Ui
 
 // Panel entry, kept loaded for the plugin's lifetime. Hosts the dictation HUD
-// and the selection translation card; both follow the service state and never
-// take keyboard focus when they appear.
+// and the selection translation card, which follow the service state and never
+// take keyboard focus when they appear, and the Settings and Setup windows,
+// which `shell summon notype '{"page":"settings"}'` (or "setup") opens.
 Item {
   id: root
 
@@ -15,7 +16,10 @@ Item {
   property var shell: null
   property var manifest: null
   property var service: null
-  property bool opened: false
+  property bool settingsOpen: false
+  property bool setupOpen: false
+  property bool closingFromHost: false
+  readonly property bool opened: settingsOpen || setupOpen
 
   readonly property string pluginId: manifest && manifest.id ? String(manifest.id) : "notype"
 
@@ -84,8 +88,32 @@ Item {
   readonly property bool hudShowsWarning: root.warningText !== ""
   readonly property bool hudHasBody: root.hudShowsTranscript || root.hudShowsError || root.hudShowsWarning
 
-  function open(payloadJson) { root.opened = true }
-  function close() { root.opened = false }
+  function open(payloadJson) {
+    var payload = {}
+    try { payload = JSON.parse(String(payloadJson || "{}")) || {} } catch (e) {}
+    if (payload.page === "setup") root.setupOpen = true
+    else root.settingsOpen = true
+    if (root.service) root.service.refreshSnapshot()
+  }
+
+  // Host-initiated close (`shell hide`); the host already knows.
+  function close() {
+    root.closingFromHost = true
+    root.settingsOpen = false
+    root.setupOpen = false
+    root.closingFromHost = false
+  }
+
+  // The user closed a window. Once none is left, tell the shell so its open
+  // state stays in sync and the next summon opens a window again.
+  function windowClosed(page) {
+    if (root.closingFromHost) return
+    Qt.callLater(function() {
+      if (page === "setup") root.setupOpen = false
+      else root.settingsOpen = false
+      if (!root.opened && root.shell && typeof root.shell.hide === "function") root.shell.hide(root.pluginId)
+    })
+  }
 
   function lookupService() {
     if (root.service) return
@@ -602,6 +630,24 @@ Item {
           mouse.accepted = false
         }
       }
+    }
+  }
+
+  LazyLoader {
+    active: root.settingsOpen
+
+    SettingsWindow {
+      service: root.service
+      onVisibleChanged: if (!visible) root.windowClosed("settings")
+    }
+  }
+
+  LazyLoader {
+    active: root.setupOpen
+
+    SetupWindow {
+      service: root.service
+      onVisibleChanged: if (!visible) root.windowClosed("setup")
     }
   }
 }

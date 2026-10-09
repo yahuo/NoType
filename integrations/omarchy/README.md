@@ -52,7 +52,7 @@ notype doctor
 
 ## 配置
 
-`~/.config/notype/config.toml`，每次开始录音时重新读取，无需重启守护进程：
+`~/.config/notype/config.toml`，每次开始录音时重新读取，无需重启守护进程。可以在状态栏菜单的设置窗口里修改，也可以直接编辑：
 
 ```toml
 speech_provider = "codex"   # 或 "doubao"
