@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Installs the NoType daemon, its systemd user unit, Hyprland bindings and the Omarchy shell plugin.
-# Usage: integrations/omarchy/install.sh [--no-build]
+# Usage: integrations/omarchy/install.sh [--no-build] [--browser] [--pi]
+#   --browser  also install the browser extension folder and its native messaging host
+#   --pi       also install the Pi extension
 
 set -euo pipefail
 
@@ -12,13 +14,30 @@ CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 NOTYPE_CONFIG_DIR="$CONFIG_HOME/notype"
 UNIT_DIR="$CONFIG_HOME/systemd/user"
 PLUGIN_DIR="$CONFIG_HOME/omarchy/plugins/notype"
+PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+PI_EXTENSION_DIR="${PI_AGENT_DIR/#\~/$HOME}/extensions/notype"
+
+build=1
+browser=0
+pi=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-build) build=0 ;;
+    --browser) browser=1 ;;
+    --pi) pi=1 ;;
+    *)
+      echo "Usage: $0 [--no-build] [--browser] [--pi]" >&2
+      exit 2
+      ;;
+  esac
+done
 
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "This installer is for Omarchy (Linux). On macOS use: make install" >&2
   exit 1
 fi
 
-if [[ "${1-}" != "--no-build" ]]; then
+if (( build )); then
   cargo build --release --locked --manifest-path "$ROOT_DIR/linux/Cargo.toml"
 fi
 if [[ ! -x "$BUILT_BINARY" ]]; then
@@ -63,6 +82,15 @@ fi
 systemctl --user daemon-reload
 systemctl --user enable notype.service
 systemctl --user restart notype.service
+
+if (( pi )); then
+  mkdir -p "$PI_EXTENSION_DIR"
+  install -m 0644 "$ROOT_DIR/integrations/pi/notype.ts" "$PI_EXTENSION_DIR/index.ts"
+  echo "Installed the Pi extension: $PI_EXTENSION_DIR/index.ts (run /reload in Pi)"
+fi
+if (( browser )); then
+  python3 "$ROOT_DIR/integrations/browser/install.py"
+fi
 
 cat <<EOF
 Installed NoType for Omarchy:
