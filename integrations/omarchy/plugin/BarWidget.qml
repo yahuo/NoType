@@ -46,20 +46,6 @@ Panel {
   readonly property string selectionKey: hotkeyName("selection", "Alt + Ctrl + Space")
   readonly property string cancelKey: hotkeyName("cancel", "Alt + Esc")
 
-  readonly property string phaseLabel: {
-    if (!root.online) return "Daemon offline"
-    switch (root.phase) {
-    case "idle": return "Idle"
-    case "recording": return "Listening"
-    case "transcribing": return "Transcribing"
-    case "refining": return root.mode === "translation" ? "Translating" : "Refining"
-    case "inserted": return "Inserted"
-    case "copied_to_clipboard": return "Copied to clipboard"
-    case "failed": return "Failed"
-    default: return root.phase
-    }
-  }
-
   readonly property string statusLabel: {
     if (!root.online) return "未运行"
     if (!root.envReady) return "待设置"
@@ -145,11 +131,6 @@ Panel {
     if (!root.snapshot) return fallback
     var value = root.hotkeys[name]
     return value ? String(value) : root.tr("未绑定", "Unbound")
-  }
-
-  function capitalize(value) {
-    var s = String(value || "")
-    return s === "" ? "" : s.charAt(0).toUpperCase() + s.slice(1)
   }
 
   function lookupService() {
@@ -239,11 +220,7 @@ Panel {
         : (root.done ? tones.glyphCheck : tones.glyphMic)))
       active: root.recording || root.failed
       dimmed: root.idle
-      tooltipText: root.online
-        ? "NoType: " + root.phaseLabel + "\n"
-          + (root.provider !== "" ? root.capitalize(root.provider) + " · " : "") + root.capitalize(root.mode)
-          + "\nLeft click: menu · Middle click: record · Right click: cancel"
-        : "NoType: daemon offline"
+      tooltipText: "NoType · " + root.statusLabel
       onPressed: function(b) {
         if (b === Qt.MiddleButton) root.run(["record", "toggle"])
         else if (b === Qt.RightButton) root.run(["cancel"])
