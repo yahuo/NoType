@@ -6,7 +6,10 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
-use crate::protocol::{BridgeRequest, BridgeResponse, FrameError, TRANSLATE_EDITOR_METHOD, VERSION, encode_json_frame, read_frame};
+use crate::protocol::{
+    BridgeRequest, BridgeResponse, FrameError, TRANSLATE_EDITOR_METHOD, VERSION, encode_json_frame,
+    read_frame,
+};
 
 pub const EDITOR_CLIENT: &str = "agent-editor";
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -59,7 +62,10 @@ impl EditorBridgeClient {
         self
     }
 
-    pub async fn translate(&self, translation: &EditorTranslation<'_>) -> Result<String, EditorBridgeError> {
+    pub async fn translate(
+        &self,
+        translation: &EditorTranslation<'_>,
+    ) -> Result<String, EditorBridgeError> {
         let mut request = BridgeRequest::new(TRANSLATE_EDITOR_METHOD);
         request.client = Some(EDITOR_CLIENT.into());
         request.text = Some(translation.source_text.into());
@@ -71,10 +77,14 @@ impl EditorBridgeClient {
 
         let response = tokio::time::timeout(self.timeout, self.send(&request))
             .await
-            .map_err(|_| EditorBridgeError::TransportFailed("timed out waiting for NoType".into()))??;
+            .map_err(|_| {
+                EditorBridgeError::TransportFailed("timed out waiting for NoType".into())
+            })??;
 
         if response.version != VERSION || response.id != request.id {
-            return Err(EditorBridgeError::InvalidResponse("response ID or version mismatch".into()));
+            return Err(EditorBridgeError::InvalidResponse(
+                "response ID or version mismatch".into(),
+            ));
         }
         if !response.ok {
             let message = response.error.map(|error| error.message);
@@ -84,13 +94,17 @@ impl EditorBridgeClient {
         }
         match response.text {
             Some(text) if !text.trim().is_empty() => Ok(text),
-            _ => Err(EditorBridgeError::InvalidResponse("translation is empty".into())),
+            _ => Err(EditorBridgeError::InvalidResponse(
+                "translation is empty".into(),
+            )),
         }
     }
 
     async fn send(&self, request: &BridgeRequest) -> Result<BridgeResponse, EditorBridgeError> {
         if self.socket_path.as_os_str().len() >= MAX_SOCKET_PATH_BYTES {
-            return Err(EditorBridgeError::InvalidRequest("socket path is too long".into()));
+            return Err(EditorBridgeError::InvalidRequest(
+                "socket path is too long".into(),
+            ));
         }
         let frame = encode_json_frame(request)
             .map_err(|_| EditorBridgeError::InvalidRequest("payload is too large".into()))?;
@@ -111,12 +125,18 @@ impl EditorBridgeClient {
                     ));
                 }
                 Err(FrameError::Empty) => {
-                    return Err(EditorBridgeError::InvalidResponse("invalid frame length 0".into()));
+                    return Err(EditorBridgeError::InvalidResponse(
+                        "invalid frame length 0".into(),
+                    ));
                 }
                 Err(FrameError::TooLarge(length)) => {
-                    return Err(EditorBridgeError::InvalidResponse(format!("invalid frame length {length}")));
+                    return Err(EditorBridgeError::InvalidResponse(format!(
+                        "invalid frame length {length}"
+                    )));
                 }
-                Err(FrameError::Io(error)) => return Err(EditorBridgeError::TransportFailed(error.to_string())),
+                Err(FrameError::Io(error)) => {
+                    return Err(EditorBridgeError::TransportFailed(error.to_string()));
+                }
             };
             let response: BridgeResponse = serde_json::from_slice(&payload)
                 .map_err(|error| EditorBridgeError::InvalidResponse(error.to_string()))?;

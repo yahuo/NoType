@@ -27,7 +27,13 @@ static CLIPBOARD: Mutex<()> = Mutex::const_new(());
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
-const TEXT_TYPES: [&str; 5] = ["text/plain;charset=utf-8", "UTF8_STRING", "text/plain", "STRING", "TEXT"];
+const TEXT_TYPES: [&str; 5] = [
+    "text/plain;charset=utf-8",
+    "UTF8_STRING",
+    "text/plain",
+    "STRING",
+    "TEXT",
+];
 
 pub fn should_insert(text: &str) -> bool {
     !text.trim().is_empty()
@@ -50,14 +56,21 @@ async fn insert_now(text: &str, target: Option<&ActiveWindow>) -> Result<InsertO
     set_clipboard_text(text).await?;
 
     let current = hyprland::active_window().await.ok().flatten();
-    let Some(target) = target.filter(|target| current.as_ref().is_some_and(|current| target.same_window(current)))
-    else {
+    let Some(target) = target.filter(|target| {
+        current
+            .as_ref()
+            .is_some_and(|current| target.same_window(current))
+    }) else {
         return Ok(InsertOutcome::CopiedToClipboard);
     };
 
     // Give wl-copy's background process a moment to own the selection before the app asks for it.
     tokio::time::sleep(Duration::from_millis(40)).await;
-    let (mods, key) = if target.is_terminal() { ("SHIFT", "Insert") } else { ("CTRL", "V") };
+    let (mods, key) = if target.is_terminal() {
+        ("SHIFT", "Insert")
+    } else {
+        ("CTRL", "V")
+    };
     if let Err(error) = hyprland::send_shortcut(mods, key).await {
         // The text is already on the clipboard, so the user can still paste it by hand.
         tracing::warn!("paste shortcut failed: {error:#}");
@@ -75,7 +88,10 @@ async fn insert_now(text: &str, target: Option<&ActiveWindow>) -> Result<InsertO
 /// Copies the current selection of `window` without disturbing the user's clipboard.
 pub async fn selected_text(window: &ActiveWindow) -> Option<String> {
     let window = window.clone();
-    tokio::spawn(async move { selected_text_now(&window).await }).await.ok().flatten()
+    tokio::spawn(async move { selected_text_now(&window).await })
+        .await
+        .ok()
+        .flatten()
 }
 
 async fn selected_text_now(window: &ActiveWindow) -> Option<String> {
@@ -86,7 +102,11 @@ async fn selected_text_now(window: &ActiveWindow) -> Option<String> {
         return None;
     }
 
-    let (mods, key) = if window.is_terminal() { ("CTRL", "Insert") } else { ("CTRL", "C") };
+    let (mods, key) = if window.is_terminal() {
+        ("CTRL", "Insert")
+    } else {
+        ("CTRL", "C")
+    };
     let mut copied = None;
     if hyprland::send_shortcut(mods, key).await.is_ok() {
         for _ in 0..10 {
@@ -129,7 +149,10 @@ async fn write_clipboard(mime: Option<&str>, bytes: &[u8]) -> Result<()> {
         .spawn()
         .context("failed to run wl-copy; install wl-clipboard")?;
     let mut stdin = child.stdin.take().context("wl-copy has no stdin")?;
-    stdin.write_all(bytes).await.context("failed to write to wl-copy")?;
+    stdin
+        .write_all(bytes)
+        .await
+        .context("failed to write to wl-copy")?;
     drop(stdin);
     // wl-copy forks a server process and exits once it owns the clipboard.
     let status = tokio::time::timeout(COMMAND_TIMEOUT, child.wait())
@@ -156,7 +179,9 @@ async fn clear_clipboard() {
 
 async fn read_clipboard_text() -> Option<String> {
     let types = list_types().await?;
-    let mime = TEXT_TYPES.iter().find(|candidate| types.iter().any(|mime| mime == *candidate))?;
+    let mime = TEXT_TYPES
+        .iter()
+        .find(|candidate| types.iter().any(|mime| mime == *candidate))?;
     let bytes = run_capture("wl-paste", &["--no-newline", "--type", mime]).await?;
     String::from_utf8(bytes).ok()
 }
@@ -183,7 +208,10 @@ async fn run_capture(program: &str, args: &[&str]) -> Option<Vec<u8>> {
         .kill_on_drop(true)
         .spawn()
         .ok()?;
-    let output = tokio::time::timeout(COMMAND_TIMEOUT, child.wait_with_output()).await.ok()?.ok()?;
+    let output = tokio::time::timeout(COMMAND_TIMEOUT, child.wait_with_output())
+        .await
+        .ok()?
+        .ok()?;
     output.status.success().then_some(output.stdout)
 }
 
@@ -229,8 +257,18 @@ fn preferred_type(types: &[String]) -> Option<String> {
         .iter()
         .find(|mime| has(mime))
         .map(|mime| (*mime).to_owned())
-        .or_else(|| types.iter().find(|mime| mime.as_str() == "image/png").cloned())
-        .or_else(|| types.iter().find(|mime| mime.starts_with("image/")).cloned())
+        .or_else(|| {
+            types
+                .iter()
+                .find(|mime| mime.as_str() == "image/png")
+                .cloned()
+        })
+        .or_else(|| {
+            types
+                .iter()
+                .find(|mime| mime.starts_with("image/"))
+                .cloned()
+        })
         .or_else(|| types.iter().find(|mime| mime.contains('/')).cloned())
 }
 
@@ -245,14 +283,23 @@ mod tests {
     #[test]
     fn snapshot_prefers_text_then_images() {
         assert_eq!(
-            preferred_type(&types(&["TARGETS", "text/html", "text/plain", "UTF8_STRING"])).as_deref(),
+            preferred_type(&types(&[
+                "TARGETS",
+                "text/html",
+                "text/plain",
+                "UTF8_STRING"
+            ]))
+            .as_deref(),
             Some("UTF8_STRING")
         );
         assert_eq!(
             preferred_type(&types(&["image/jpeg", "image/png", "text/uri-list"])).as_deref(),
             Some("image/png")
         );
-        assert_eq!(preferred_type(&types(&["TARGETS", "x-special/gnome-copied-files"])).as_deref(), Some("x-special/gnome-copied-files"));
+        assert_eq!(
+            preferred_type(&types(&["TARGETS", "x-special/gnome-copied-files"])).as_deref(),
+            Some("x-special/gnome-copied-files")
+        );
         assert_eq!(preferred_type(&types(&["TARGETS"])), None);
     }
 

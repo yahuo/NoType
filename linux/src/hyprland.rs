@@ -27,7 +27,9 @@ pub struct ActiveWindow {
 impl ActiveWindow {
     /// Omarchy tags terminals in `default/hypr/apps/terminals.lua`; dynamic tags end in `*`.
     pub fn is_terminal(&self) -> bool {
-        self.tags.iter().any(|tag| tag.trim_end_matches('*') == "terminal")
+        self.tags
+            .iter()
+            .any(|tag| tag.trim_end_matches('*') == "terminal")
     }
 
     /// Same window instance, not just the same application.
@@ -44,13 +46,17 @@ pub async fn active_window() -> Result<Option<ActiveWindow>> {
         .await
         .context("failed to run hyprctl")?;
     if !output.status.success() {
-        bail!("hyprctl activewindow failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+        bail!(
+            "hyprctl activewindow failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     parse_active_window(&output.stdout)
 }
 
 fn parse_active_window(json: &[u8]) -> Result<Option<ActiveWindow>> {
-    let window: ActiveWindow = serde_json::from_slice(json).context("invalid hyprctl activewindow JSON")?;
+    let window: ActiveWindow =
+        serde_json::from_slice(json).context("invalid hyprctl activewindow JSON")?;
     Ok((!window.address.is_empty()).then_some(window))
 }
 
@@ -77,7 +83,11 @@ pub async fn send_shortcut(mods: &str, key: &str) -> Result<()> {
 }
 
 fn shortcut_lua(mods: &str, key: &str) -> Result<String> {
-    let safe = |value: &str| value.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b' ' || byte == b'_');
+    let safe = |value: &str| {
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b' ' || byte == b'_')
+    };
     if key.is_empty() || !safe(mods) || !safe(key) {
         bail!("unsupported shortcut {mods:?} + {key:?}");
     }

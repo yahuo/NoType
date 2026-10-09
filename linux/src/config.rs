@@ -67,8 +67,12 @@ impl Config {
     pub fn load_from(path: &Path) -> Result<Self> {
         let text = match std::fs::read_to_string(path) {
             Ok(text) => text,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
-            Err(error) => return Err(error).with_context(|| format!("failed to read {}", path.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Self::default());
+            }
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to read {}", path.display()));
+            }
         };
         Self::parse(&text).with_context(|| format!("invalid {}", path.display()))
     }
@@ -76,7 +80,11 @@ impl Config {
     pub fn parse(text: &str) -> Result<Self> {
         let mut config: Config = toml::from_str(text)?;
         if !LANGUAGES.contains(&config.language.as_str()) {
-            anyhow::bail!("unsupported language {:?}; use one of {}", config.language, LANGUAGES.join(", "));
+            anyhow::bail!(
+                "unsupported language {:?}; use one of {}",
+                config.language,
+                LANGUAGES.join(", ")
+            );
         }
         if config.doubao.resource_id.trim().is_empty() {
             config.doubao.resource_id = DEFAULT_RESOURCE_ID.into();
@@ -97,7 +105,11 @@ impl Config {
     }
 
     pub fn text(&self, zh: &str, en: &str) -> String {
-        if self.uses_chinese_copy() { zh.into() } else { en.into() }
+        if self.uses_chinese_copy() {
+            zh.into()
+        } else {
+            en.into()
+        }
     }
 }
 
@@ -113,12 +125,21 @@ pub async fn doubao_access_token(config: &Config) -> String {
 /// A locked keyring shows an unlock prompt; give up if nobody answers it.
 pub async fn keyring_token() -> Option<String> {
     let lookup = tokio::process::Command::new("secret-tool")
-        .args(["lookup", "application", SECRET_APPLICATION, "account", SECRET_ACCOUNT])
+        .args([
+            "lookup",
+            "application",
+            SECRET_APPLICATION,
+            "account",
+            SECRET_ACCOUNT,
+        ])
         .stdin(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .kill_on_drop(true)
         .output();
-    let output = tokio::time::timeout(KEYRING_LOOKUP_TIMEOUT, lookup).await.ok()?.ok()?;
+    let output = tokio::time::timeout(KEYRING_LOOKUP_TIMEOUT, lookup)
+        .await
+        .ok()?
+        .ok()?;
     let token = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     (output.status.success() && !token.is_empty()).then_some(token)
 }
@@ -140,7 +161,10 @@ mod tests {
     fn rewrite_applies_only_to_doubao() {
         let config = Config::parse("speech_provider = \"codex\"\nai_rewrite = true").unwrap();
         assert!(!config.should_rewrite_dictation());
-        let config = Config::parse("speech_provider = \"doubao\"\nai_rewrite = true\n[doubao]\napp_id = \"1\"").unwrap();
+        let config = Config::parse(
+            "speech_provider = \"doubao\"\nai_rewrite = true\n[doubao]\napp_id = \"1\"",
+        )
+        .unwrap();
         assert!(config.should_rewrite_dictation());
         assert!(config.has_valid_doubao_configuration());
     }

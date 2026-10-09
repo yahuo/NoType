@@ -18,12 +18,20 @@ pub fn runtime_dir() -> PathBuf {
 /// Creates the runtime directory with mode `0700` and rejects one owned by another user.
 pub fn ensure_private_runtime_dir() -> io::Result<PathBuf> {
     let dir = runtime_dir();
-    fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir)?;
+    fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)?;
     let metadata = fs::symlink_metadata(&dir)?;
-    if !metadata.is_dir() || std::os::unix::fs::MetadataExt::uid(&metadata) != unsafe { libc::geteuid() } {
+    if !metadata.is_dir()
+        || std::os::unix::fs::MetadataExt::uid(&metadata) != unsafe { libc::geteuid() }
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            format!("{} is not a directory owned by the current user", dir.display()),
+            format!(
+                "{} is not a directory owned by the current user",
+                dir.display()
+            ),
         ));
     }
     fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))?;

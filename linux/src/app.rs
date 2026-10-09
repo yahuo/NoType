@@ -13,15 +13,17 @@ use tokio::task::{AbortHandle, JoinHandle};
 use crate::PartialCallback;
 use crate::agent_editor::AgentEditorTriggers;
 use crate::audio::{CaptureEvent, Recorder};
-use crate::codex_transcription::CodexTranscriptionService;
 use crate::bridge::BridgeHooks;
+use crate::codex_transcription::CodexTranscriptionService;
 use crate::config::{self, Config};
 use crate::control::{ControlHandler, ControlRequest};
 use crate::doubao::{AsrEvent, DoubaoConfig, DoubaoSession};
 use crate::hyprland::{self, ActiveWindow};
 use crate::insertion::{self, InsertOutcome};
 use crate::rewrite::{AiError, AiRewriteService};
-use crate::status::{OutputMode, Phase, SelectionSnapshot, SelectionState, SpeechProvider, StatusSnapshot};
+use crate::status::{
+    OutputMode, Phase, SelectionSnapshot, SelectionState, SpeechProvider, StatusSnapshot,
+};
 use crate::transcript;
 
 const COPIED_RESET: Duration = Duration::from_millis(1_800);
@@ -110,11 +112,17 @@ impl App {
         transcription: Arc<CodexTranscriptionService>,
         editor: Arc<AgentEditorTriggers>,
     ) -> Arc<Self> {
-        let provider = Config::load().map(|config| config.speech_provider).unwrap_or_default();
+        let provider = Config::load()
+            .map(|config| config.speech_provider)
+            .unwrap_or_default();
         Arc::new_cyclic(|me| Self {
             me: me.clone(),
             state: Mutex::new(State::default()),
-            status: watch::channel(StatusSnapshot { provider, ..Default::default() }).0,
+            status: watch::channel(StatusSnapshot {
+                provider,
+                ..Default::default()
+            })
+            .0,
             selection: watch::channel(SelectionSnapshot::default()).0,
             ai,
             transcription,
@@ -123,7 +131,9 @@ impl App {
     }
 
     fn arc(&self) -> Arc<Self> {
-        self.me.upgrade().expect("App is alive while handling commands")
+        self.me
+            .upgrade()
+            .expect("App is alive while handling commands")
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -195,7 +205,9 @@ impl App {
         if self.status.borrow().phase != Phase::Recording {
             return;
         }
-        let Some(capture) = state.capture.take() else { return };
+        let Some(capture) = state.capture.take() else {
+            return;
+        };
         self.status.send_modify(|status| {
             status.phase = Phase::Transcribing;
             status.level = 0.0;
@@ -276,7 +288,10 @@ impl App {
     fn begin_session(&self, state: &mut State) -> u64 {
         Self::end_session(state);
         self.status.send_modify(|status| {
-            if matches!(status.phase, Phase::Failed | Phase::Inserted | Phase::CopiedToClipboard) {
+            if matches!(
+                status.phase,
+                Phase::Failed | Phase::Inserted | Phase::CopiedToClipboard
+            ) {
                 status.phase = Phase::Idle;
             }
             status.transcript.clear();
@@ -381,7 +396,9 @@ impl App {
         if mode == OutputMode::Translation
             && let Some(window) = target.as_ref().filter(|window| !window.is_terminal())
         {
-            let selected = insertion::selected_text(window).await.filter(|text| !text.trim().is_empty());
+            let selected = insertion::selected_text(window)
+                .await
+                .filter(|text| !text.trim().is_empty());
             if !self.is_current(session) {
                 return;
             }
@@ -450,7 +467,8 @@ impl App {
                 };
                 let app = self.clone();
                 let pump_plan = plan.clone();
-                let pump = tokio::spawn(async move { app.pump_asr_events(receiver, pump_plan).await });
+                let pump =
+                    tokio::spawn(async move { app.pump_asr_events(receiver, pump_plan).await });
                 let mut state = self.lock();
                 if state.session != session {
                     asr.cancel();
@@ -470,7 +488,8 @@ impl App {
             Err(error) => return self.fail(session, error_message(&error)),
         };
         let app = self.clone();
-        let consumer = tokio::spawn(async move { app.consume_capture(receiver, asr, session).await });
+        let consumer =
+            tokio::spawn(async move { app.consume_capture(receiver, asr, session).await });
 
         let mut state = self.lock();
         if state.session != session {
@@ -479,7 +498,11 @@ impl App {
         }
         state.starting = false;
         let (mode, provider) = (plan.mode, plan.provider);
-        state.capture = Some(Capture { recorder, consumer, plan });
+        state.capture = Some(Capture {
+            recorder,
+            consumer,
+            plan,
+        });
         self.status.send_modify(|status| {
             status.phase = Phase::Recording;
             status.mode = mode;
@@ -517,7 +540,11 @@ impl App {
         }
     }
 
-    async fn pump_asr_events(self: Arc<Self>, mut events: mpsc::UnboundedReceiver<AsrEvent>, plan: Plan) {
+    async fn pump_asr_events(
+        self: Arc<Self>,
+        mut events: mpsc::UnboundedReceiver<AsrEvent>,
+        plan: Plan,
+    ) {
         while let Some(event) = events.recv().await {
             match event {
                 AsrEvent::Partial(text) => {
@@ -538,7 +565,11 @@ impl App {
     }
 
     async fn finish_capture(self: Arc<Self>, capture: Capture) {
-        let Capture { recorder, consumer, plan } = capture;
+        let Capture {
+            recorder,
+            consumer,
+            plan,
+        } = capture;
         let session = plan.session;
         let recording = recorder.stop().await;
         // Every chunk captured before the stop reaches Doubao before the remainder.
@@ -554,7 +585,11 @@ impl App {
         match plan.provider {
             SpeechProvider::Codex => {
                 if recording.pcm.is_empty() {
-                    return self.fail(session, plan.config.text("没有检测到有效语音。", "No speech was detected."));
+                    return self.fail(
+                        session,
+                        plan.config
+                            .text("没有检测到有效语音。", "No speech was detected."),
+                    );
                 }
                 let transcript = self.transcription.transcribe(recording.pcm).await;
                 if !self.is_current(session) {
@@ -566,7 +601,9 @@ impl App {
                 }
             }
             SpeechProvider::Doubao => {
-                let Some(asr) = self.lock().asr.clone() else { return };
+                let Some(asr) = self.lock().asr.clone() else {
+                    return;
+                };
                 let mut result = Ok(());
                 if !recording.remainder.is_empty() {
                     result = asr.send_audio(recording.remainder, false).await;
@@ -603,7 +640,11 @@ impl App {
             });
         }
         if normalized.trim().is_empty() {
-            return self.fail(session, plan.config.text("没有检测到有效语音。", "No speech was detected."));
+            return self.fail(
+                session,
+                plan.config
+                    .text("没有检测到有效语音。", "No speech was detected."),
+            );
         }
 
         let mut final_text = normalized.clone();
@@ -612,7 +653,10 @@ impl App {
                 return self.fail(session, translation_login_message(&plan.config));
             }
             self.update(session, |status| status.phase = Phase::Refining);
-            let translated = self.ai.translate_to_english(&normalized, Some(self.partial_sink(session))).await;
+            let translated = self
+                .ai
+                .translate_to_english(&normalized, Some(self.partial_sink(session)))
+                .await;
             if !self.is_current(session) {
                 return;
             }
@@ -622,7 +666,10 @@ impl App {
             }
         } else if plan.rewrite && self.ai.has_credentials() {
             self.update(session, |status| status.phase = Phase::Refining);
-            let rewritten = self.ai.rewrite(&normalized, Some(self.partial_sink(session))).await;
+            let rewritten = self
+                .ai
+                .rewrite(&normalized, Some(self.partial_sink(session)))
+                .await;
             if !self.is_current(session) {
                 return;
             }
@@ -665,7 +712,10 @@ impl App {
                 status.error = None;
             });
         }
-        let translated = self.ai.translate_to_english(&source, Some(self.partial_sink(session))).await;
+        let translated = self
+            .ai
+            .translate_to_english(&source, Some(self.partial_sink(session)))
+            .await;
         if !self.is_current(session) {
             return;
         }
@@ -791,7 +841,10 @@ impl App {
                 });
             }
         });
-        let result = self.ai.translate_to_chinese(&source, Some(on_partial)).await;
+        let result = self
+            .ai
+            .translate_to_chinese(&source, Some(on_partial))
+            .await;
 
         let state = self.lock();
         if state.selection_request != request {
@@ -866,9 +919,15 @@ mod tests {
     fn hotkey_toggles_like_macos() {
         assert_eq!(hotkey_action(Phase::Idle, false), HotkeyAction::Start);
         assert_eq!(hotkey_action(Phase::Failed, false), HotkeyAction::Start);
-        assert_eq!(hotkey_action(Phase::CopiedToClipboard, false), HotkeyAction::Start);
+        assert_eq!(
+            hotkey_action(Phase::CopiedToClipboard, false),
+            HotkeyAction::Start
+        );
         assert_eq!(hotkey_action(Phase::Recording, false), HotkeyAction::Stop);
-        assert_eq!(hotkey_action(Phase::Transcribing, false), HotkeyAction::Cancel);
+        assert_eq!(
+            hotkey_action(Phase::Transcribing, false),
+            HotkeyAction::Cancel
+        );
         assert_eq!(hotkey_action(Phase::Refining, false), HotkeyAction::Cancel);
         assert_eq!(hotkey_action(Phase::Idle, true), HotkeyAction::Cancel);
     }

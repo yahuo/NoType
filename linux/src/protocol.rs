@@ -36,7 +36,11 @@ pub struct BridgeRequest {
     pub token: Option<String>,
     #[serde(default, rename = "processID", skip_serializing_if = "Option::is_none")]
     pub process_id: Option<i32>,
-    #[serde(default, rename = "parentProcessID", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "parentProcessID",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub parent_process_id: Option<i32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub terminal: Option<String>,
@@ -126,7 +130,9 @@ pub struct Admission {
 impl Admission {
     pub fn acquire(&mut self, browser: bool) -> Option<Uuid> {
         let admitted = self.active.is_empty()
-            || (browser && self.active.len() < 2 && self.active.values().all(|is_browser| *is_browser));
+            || (browser
+                && self.active.len() < 2
+                && self.active.values().all(|is_browser| *is_browser));
         if !admitted {
             return None;
         }
@@ -149,7 +155,10 @@ pub fn utf16_len(text: &str) -> usize {
 }
 
 fn valid_item_id(id: &str) -> bool {
-    (1..=64).contains(&id.len()) && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    (1..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
 }
 
 /// Mirrors `NoTypeBrowserBatch.validate` in the macOS app.
@@ -159,14 +168,24 @@ pub fn validate_browser_batch(items: &[TranslationItem]) -> Result<(), InvalidBa
         && unique_ids.len() == items.len()
         && (items.len() <= 4 || items.iter().all(|item| utf16_len(&item.text) <= 100))
         && items.iter().all(|item| {
-            !item.text.trim().is_empty() && utf16_len(&item.text) <= 12_000 && valid_item_id(&item.id)
+            !item.text.trim().is_empty()
+                && utf16_len(&item.text) <= 12_000
+                && valid_item_id(&item.id)
         })
-        && (items.len() == 1 || items.iter().map(|item| utf16_len(&item.text)).sum::<usize>() <= 6_000);
+        && (items.len() == 1
+            || items
+                .iter()
+                .map(|item| utf16_len(&item.text))
+                .sum::<usize>()
+                <= 6_000);
     if valid { Ok(()) } else { Err(InvalidBatch) }
 }
 
 /// Mirrors `NoTypeBrowserBatch.decode`: JSON Lines output aligned to the input order.
-pub fn decode_browser_batch(text: &str, items: &[TranslationItem]) -> Result<Vec<TranslationItem>, InvalidBatch> {
+pub fn decode_browser_batch(
+    text: &str,
+    items: &[TranslationItem],
+) -> Result<Vec<TranslationItem>, InvalidBatch> {
     let mut result = Vec::new();
     for line in text.split('\n').filter(|line| !line.trim().is_empty()) {
         let item: TranslationItem = serde_json::from_str(line).map_err(|_| InvalidBatch)?;
@@ -174,11 +193,20 @@ pub fn decode_browser_batch(text: &str, items: &[TranslationItem]) -> Result<Vec
     }
     let result_ids: HashSet<&str> = result.iter().map(|item| item.id.as_str()).collect();
     let input_ids: HashSet<&str> = items.iter().map(|item| item.id.as_str()).collect();
-    if result.len() != items.len() || result_ids != input_ids || result.iter().any(|item| item.text.trim().is_empty()) {
+    if result.len() != items.len()
+        || result_ids != input_ids
+        || result.iter().any(|item| item.text.trim().is_empty())
+    {
         return Err(InvalidBatch);
     }
-    let by_id: HashMap<String, TranslationItem> = result.into_iter().map(|item| (item.id.clone(), item)).collect();
-    Ok(items.iter().filter_map(|item| by_id.get(&item.id).cloned()).collect())
+    let by_id: HashMap<String, TranslationItem> = result
+        .into_iter()
+        .map(|item| (item.id.clone(), item))
+        .collect();
+    Ok(items
+        .iter()
+        .filter_map(|item| by_id.get(&item.id).cloned())
+        .collect())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -212,13 +240,19 @@ pub fn encode_json_frame<T: Serialize>(value: &T) -> Result<Vec<u8>, FrameError>
 }
 
 /// Reads one frame. Returns `Ok(None)` on a clean EOF before any header byte.
-pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Option<Vec<u8>>, FrameError> {
+pub async fn read_frame<R: AsyncRead + Unpin>(
+    reader: &mut R,
+) -> Result<Option<Vec<u8>>, FrameError> {
     let mut header = [0u8; 4];
     let mut filled = 0;
     while filled < header.len() {
         let read = reader.read(&mut header[filled..]).await?;
         if read == 0 {
-            return if filled == 0 { Ok(None) } else { Err(FrameError::Truncated) };
+            return if filled == 0 {
+                Ok(None)
+            } else {
+                Err(FrameError::Truncated)
+            };
         }
         filled += read;
     }
@@ -230,10 +264,13 @@ pub async fn read_frame<R: AsyncRead + Unpin>(reader: &mut R) -> Result<Option<V
         return Err(FrameError::TooLarge(length));
     }
     let mut payload = vec![0u8; length];
-    reader.read_exact(&mut payload).await.map_err(|error| match error.kind() {
-        std::io::ErrorKind::UnexpectedEof => FrameError::Truncated,
-        _ => FrameError::Io(error),
-    })?;
+    reader
+        .read_exact(&mut payload)
+        .await
+        .map_err(|error| match error.kind() {
+            std::io::ErrorKind::UnexpectedEof => FrameError::Truncated,
+            _ => FrameError::Io(error),
+        })?;
     Ok(Some(payload))
 }
 
@@ -242,7 +279,10 @@ mod tests {
     use super::*;
 
     fn item(id: &str, text: &str) -> TranslationItem {
-        TranslationItem { id: id.into(), text: text.into() }
+        TranslationItem {
+            id: id.into(),
+            text: text.into(),
+        }
     }
 
     #[test]
@@ -264,18 +304,32 @@ mod tests {
         assert!(validate_browser_batch(&[]).is_err());
         assert!(validate_browser_batch(&[item("p0", "a"), item("p0", "b")]).is_err());
         assert!(validate_browser_batch(&[item("bad id", "a")]).is_err());
-        let short: Vec<_> = (0..12).map(|index| item(&format!("p{index}"), "short")).collect();
+        let short: Vec<_> = (0..12)
+            .map(|index| item(&format!("p{index}"), "short"))
+            .collect();
         assert!(validate_browser_batch(&short).is_ok());
-        let long: Vec<_> = (0..5).map(|index| item(&format!("p{index}"), &"x".repeat(101))).collect();
+        let long: Vec<_> = (0..5)
+            .map(|index| item(&format!("p{index}"), &"x".repeat(101)))
+            .collect();
         assert!(validate_browser_batch(&long).is_err());
         assert!(validate_browser_batch(&[item("p0", &"x".repeat(12_000))]).is_ok());
-        assert!(validate_browser_batch(&[item("p0", &"x".repeat(3_001)), item("p1", &"x".repeat(3_000))]).is_err());
+        assert!(
+            validate_browser_batch(&[
+                item("p0", &"x".repeat(3_001)),
+                item("p1", &"x".repeat(3_000))
+            ])
+            .is_err()
+        );
     }
 
     #[test]
     fn batch_decode_aligns_to_input_order() {
         let input = [item("a", "one"), item("b", "two")];
-        let decoded = decode_browser_batch("{\"id\":\"b\",\"text\":\"二\"}\n\n{\"id\":\"a\",\"text\":\"一\"}\n", &input).unwrap();
+        let decoded = decode_browser_batch(
+            "{\"id\":\"b\",\"text\":\"二\"}\n\n{\"id\":\"a\",\"text\":\"一\"}\n",
+            &input,
+        )
+        .unwrap();
         assert_eq!(decoded, vec![item("a", "一"), item("b", "二")]);
         assert!(decode_browser_batch("{\"id\":\"a\",\"text\":\"一\"}", &input).is_err());
     }
@@ -302,6 +356,9 @@ mod tests {
         assert!(read_frame(&mut reader).await.unwrap().is_none());
         let oversize = ((MAX_FRAME_BYTES + 1) as u32).to_be_bytes();
         let mut reader = &oversize[..];
-        assert!(matches!(read_frame(&mut reader).await, Err(FrameError::TooLarge(_))));
+        assert!(matches!(
+            read_frame(&mut reader).await,
+            Err(FrameError::TooLarge(_))
+        ));
     }
 }

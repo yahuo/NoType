@@ -13,8 +13,8 @@ use reqwest::header::{CONTENT_TYPE, USER_AGENT};
 use tokio::time::Instant;
 
 pub use prompts::{
-    BROWSER_TRANSLATION_PROMPT, CHINESE_TRANSLATION_PROMPT, REWRITE_PROMPT, TRANSLATION_PROMPT, rewrite_user_message,
-    translation_user_message,
+    BROWSER_TRANSLATION_PROMPT, CHINESE_TRANSLATION_PROMPT, REWRITE_PROMPT, TRANSLATION_PROMPT,
+    rewrite_user_message, translation_user_message,
 };
 pub use stream::CodexResponseStreamAccumulator;
 
@@ -37,7 +37,9 @@ pub enum AiError {
     MissingCodexAuth,
     #[error("Codex OAuth credentials are invalid. Run `codex login` again.")]
     InvalidCodexAuth,
-    #[error("Codex OAuth access token is expired. Run `codex login status` or reopen Codex to refresh it.")]
+    #[error(
+        "Codex OAuth access token is expired. Run `codex login status` or reopen Codex to refresh it."
+    )]
     CodexAuthExpired,
     #[error("The Codex rewrite service returned an invalid response.")]
     InvalidResponse,
@@ -86,7 +88,11 @@ pub struct RewriteTimeouts {
 
 impl Default for RewriteTimeouts {
     fn default() -> Self {
-        Self { first_text: Duration::from_secs(30), idle: Duration::from_secs(15), total: Duration::from_secs(120) }
+        Self {
+            first_text: Duration::from_secs(30),
+            idle: Duration::from_secs(15),
+            total: Duration::from_secs(120),
+        }
     }
 }
 
@@ -141,7 +147,11 @@ impl RewriteDeadline {
     async fn wait_until_expired(&self) {
         loop {
             let now = Instant::now();
-            let progress = self.progress.lock().unwrap_or_else(PoisonError::into_inner).0;
+            let progress = self
+                .progress
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .0;
             let deadline = self.total_deadline.min(progress);
             if now >= deadline {
                 return;
@@ -154,7 +164,9 @@ impl RewriteDeadline {
 }
 
 async fn within<F: Future>(timeout: Duration, future: F) -> Result<F::Output, AiError> {
-    tokio::time::timeout(timeout, future).await.map_err(|_| AiError::RequestTimedOut)
+    tokio::time::timeout(timeout, future)
+        .await
+        .map_err(|_| AiError::RequestTimedOut)
 }
 
 fn forward(on_partial: &Option<PartialCallback>, partial: &str) {
@@ -205,7 +217,10 @@ impl AiRewriteService {
     /// The response status is irrelevant; only the pooled connection matters.
     pub async fn prewarm(&self) {
         {
-            let mut last_activity = self.last_connection_activity.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut last_activity = self
+                .last_connection_activity
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             let now = Instant::now();
             if last_activity.is_some_and(|last| now.duration_since(last) < CONNECTION_WARM_WINDOW) {
                 return;
@@ -215,10 +230,19 @@ impl AiRewriteService {
             }
             *last_activity = Some(now);
         }
-        let _ = self.client.head(&self.endpoint).timeout(Duration::from_secs(5)).send().await;
+        let _ = self
+            .client
+            .head(&self.endpoint)
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await;
     }
 
-    pub async fn rewrite(&self, text: &str, on_partial: Option<PartialCallback>) -> Result<String, AiError> {
+    pub async fn rewrite(
+        &self,
+        text: &str,
+        on_partial: Option<PartialCallback>,
+    ) -> Result<String, AiError> {
         let deadline = RewriteDeadline::new(self.timeouts.rewrite);
         let on_text = |partial: &str| {
             deadline.record_text(partial);
@@ -239,17 +263,35 @@ impl AiRewriteService {
         };
 
         let rewritten = rewritten.trim();
-        Ok(if rewritten.is_empty() { text.to_owned() } else { rewritten.to_owned() })
+        Ok(if rewritten.is_empty() {
+            text.to_owned()
+        } else {
+            rewritten.to_owned()
+        })
     }
 
-    pub async fn translate_to_english(&self, text: &str, on_partial: Option<PartialCallback>) -> Result<String, AiError> {
+    pub async fn translate_to_english(
+        &self,
+        text: &str,
+        on_partial: Option<PartialCallback>,
+    ) -> Result<String, AiError> {
         self.translate(text, false, on_partial).await
     }
 
-    pub async fn translate_to_chinese(&self, text: &str, on_partial: Option<PartialCallback>) -> Result<String, AiError> {
-        self.translate(text, true, on_partial).await.map_err(|error| {
-            if error.is_timeout() { AiError::TranslationTimedOut } else { error }
-        })
+    pub async fn translate_to_chinese(
+        &self,
+        text: &str,
+        on_partial: Option<PartialCallback>,
+    ) -> Result<String, AiError> {
+        self.translate(text, true, on_partial)
+            .await
+            .map_err(|error| {
+                if error.is_timeout() {
+                    AiError::TranslationTimedOut
+                } else {
+                    error
+                }
+            })
     }
 
     pub async fn translate_browser_batch(
@@ -278,7 +320,14 @@ impl AiRewriteService {
     /// Settings check: asks the configured Codex model for `OK`.
     pub async fn test_connection(&self) -> Result<(), AiError> {
         let content = self
-            .stream_response("Reply with exactly OK.", "ping", None, None, self.timeouts.request, &|_: &str| {})
+            .stream_response(
+                "Reply with exactly OK.",
+                "ping",
+                None,
+                None,
+                self.timeouts.request,
+                &|_: &str| {},
+            )
             .await?;
         if !content.trim().to_uppercase().contains("OK") {
             return Err(AiError::InvalidResponse);
@@ -286,11 +335,24 @@ impl AiRewriteService {
         Ok(())
     }
 
-    async fn translate(&self, text: &str, to_chinese: bool, on_partial: Option<PartialCallback>) -> Result<String, AiError> {
+    async fn translate(
+        &self,
+        text: &str,
+        to_chinese: bool,
+        on_partial: Option<PartialCallback>,
+    ) -> Result<String, AiError> {
         let (instructions, timeout, request_timeout) = if to_chinese {
-            (CHINESE_TRANSLATION_PROMPT, self.timeouts.selection_translation, self.timeouts.selection_request)
+            (
+                CHINESE_TRANSLATION_PROMPT,
+                self.timeouts.selection_translation,
+                self.timeouts.selection_request,
+            )
         } else {
-            (TRANSLATION_PROMPT, self.timeouts.english_translation, self.timeouts.request)
+            (
+                TRANSLATION_PROMPT,
+                self.timeouts.english_translation,
+                self.timeouts.request,
+            )
         };
         let user_message = translation_user_message(text, to_chinese);
         let on_text = |partial: &str| forward(&on_partial, partial);
@@ -337,7 +399,13 @@ impl AiRewriteService {
             }
         };
 
-        let request = self.codex_request(&credentials, model, reasoning_effort, instructions, user_message);
+        let request = self.codex_request(
+            &credentials,
+            model,
+            reasoning_effort,
+            instructions,
+            user_message,
+        );
         let mut response = within(request_timeout, request.send()).await??;
         let status = response.status();
         let mut lines = LineBuffer::default();
@@ -345,10 +413,16 @@ impl AiRewriteService {
         if !status.is_success() {
             let mut body = String::new();
             while let Some(chunk) = within(request_timeout, response.chunk()).await?? {
-                lines.push(&chunk).iter().for_each(|line| body.push_str(line));
+                lines
+                    .push(&chunk)
+                    .iter()
+                    .for_each(|line| body.push_str(line));
             }
             body.extend(lines.finish());
-            return Err(AiError::RequestFailed(status.as_u16(), body.trim().to_owned()));
+            return Err(AiError::RequestFailed(
+                status.as_u16(),
+                body.trim().to_owned(),
+            ));
         }
 
         let mut accumulator = CodexResponseStreamAccumulator::default();
@@ -371,7 +445,10 @@ impl AiRewriteService {
                 break;
             }
         }
-        *self.last_connection_activity.lock().unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
+        *self
+            .last_connection_activity
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(Instant::now());
 
         if !accumulator.is_complete() {
             return Err(AiError::IncompleteStream);
@@ -394,10 +471,19 @@ impl AiRewriteService {
             .header(CONTENT_TYPE, "application/json")
             .header("originator", "codex_cli_rs")
             .header(USER_AGENT, "codex_cli_rs/0.0.0 (NoType)");
-        if let Some(account_id) = credentials.account_id.as_deref().filter(|id| !id.is_empty()) {
+        if let Some(account_id) = credentials
+            .account_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
+        {
             request = request.header("ChatGPT-Account-ID", account_id);
         }
-        request.json(&CodexResponseRequest::new(model, reasoning_effort, instructions, user_message))
+        request.json(&CodexResponseRequest::new(
+            model,
+            reasoning_effort,
+            instructions,
+            user_message,
+        ))
     }
 }
 
@@ -410,7 +496,10 @@ mod tests {
     use super::*;
 
     fn delta(text: &str) -> String {
-        format!("data: {}", serde_json::json!({"type": "response.output_text.delta", "delta": text}))
+        format!(
+            "data: {}",
+            serde_json::json!({"type": "response.output_text.delta", "delta": text})
+        )
     }
 
     fn event(kind: &str) -> String {
@@ -419,11 +508,21 @@ mod tests {
 
     /// One delta now, a second one plus `response.completed` 200 ms later.
     fn delayed_translation() -> MockResponse {
-        MockResponse::sse([(0, delta("第一段")), (200, delta("第二段")), (200, event("response.completed"))])
+        MockResponse::sse([
+            (0, delta("第一段")),
+            (200, delta("第二段")),
+            (200, event("response.completed")),
+        ])
     }
 
-    fn service(home: &TempCodexHome, server: &MockServer, timeouts: AiTimeouts) -> AiRewriteService {
-        AiRewriteService::new(home.store()).with_endpoint(&server.url).with_timeouts(timeouts)
+    fn service(
+        home: &TempCodexHome,
+        server: &MockServer,
+        timeouts: AiTimeouts,
+    ) -> AiRewriteService {
+        AiRewriteService::new(home.store())
+            .with_endpoint(&server.url)
+            .with_timeouts(timeouts)
     }
 
     fn rewrite_timeouts(first_text: u64, idle: u64, total: u64) -> AiTimeouts {
@@ -443,14 +542,28 @@ mod tests {
             AiError::MissingCodexAuth.to_string(),
             "Codex OAuth is not configured. Run `codex login` in Terminal first."
         );
-        assert_eq!(AiError::RequestFailed(500, String::new()).to_string(), "The Codex rewrite service returned HTTP 500.");
+        assert_eq!(
+            AiError::RequestFailed(500, String::new()).to_string(),
+            "The Codex rewrite service returned HTTP 500."
+        );
         assert_eq!(
             AiError::RequestFailed(400, "bad".into()).to_string(),
             "The Codex rewrite service returned HTTP 400: bad"
         );
-        assert!(AiError::TranslationTimedOut.to_string().contains("翻译超时"));
-        assert!(!AiError::TranslationTimedOut.to_string().contains("AI Rewrite"));
-        assert_eq!(AiTimeouts::default().selection_request, Duration::from_secs(60));
+        assert!(
+            AiError::TranslationTimedOut
+                .to_string()
+                .contains("翻译超时")
+        );
+        assert!(
+            !AiError::TranslationTimedOut
+                .to_string()
+                .contains("AI Rewrite")
+        );
+        assert_eq!(
+            AiTimeouts::default().selection_request,
+            Duration::from_secs(60)
+        );
     }
 
     #[test]
@@ -474,8 +587,14 @@ mod tests {
             account_id: Some("account-id".into()),
             expires_at: Some(SystemTime::now() + Duration::from_secs(3600)),
         };
-        let request = service.codex_request(&credentials, "gpt-test", None, "system", "user").build().unwrap();
-        assert_eq!(request.url().as_str(), "https://chatgpt.com/backend-api/codex/responses");
+        let request = service
+            .codex_request(&credentials, "gpt-test", None, "system", "user")
+            .build()
+            .unwrap();
+        assert_eq!(
+            request.url().as_str(),
+            "https://chatgpt.com/backend-api/codex/responses"
+        );
         assert_eq!(request.method(), reqwest::Method::POST);
         let headers = request.headers();
         assert_eq!(headers["authorization"], "Bearer access-token");
@@ -484,22 +603,36 @@ mod tests {
         assert_eq!(headers["originator"], "codex_cli_rs");
         assert_eq!(headers["user-agent"], "codex_cli_rs/0.0.0 (NoType)");
         assert_eq!(headers["chatgpt-account-id"], "account-id");
-        let body: serde_json::Value = serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
         assert_eq!(body["model"], "gpt-test");
         assert_eq!(body["stream"], true);
         assert_eq!(body["store"], false);
         assert!(body.get("reasoning").is_none());
 
-        let no_account = CodexCredentials { account_id: Some(String::new()), ..credentials.clone() };
+        let no_account = CodexCredentials {
+            account_id: Some(String::new()),
+            ..credentials.clone()
+        };
         let request = service
-            .codex_request(&no_account, REWRITE_MODEL, Some(REWRITE_REASONING_EFFORT), "rewrite", "source")
+            .codex_request(
+                &no_account,
+                REWRITE_MODEL,
+                Some(REWRITE_REASONING_EFFORT),
+                "rewrite",
+                "source",
+            )
             .build()
             .unwrap();
         assert!(request.headers().get("chatgpt-account-id").is_none());
-        let body: serde_json::Value = serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
+        let body: serde_json::Value =
+            serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
         assert_eq!(body["model"], "gpt-5.6-terra");
         assert_eq!(body["reasoning"]["effort"], "high");
-        assert_eq!((TRANSLATION_MODEL, TRANSLATION_REASONING_EFFORT), ("gpt-5.6-luna", "none"));
+        assert_eq!(
+            (TRANSLATION_MODEL, TRANSLATION_REASONING_EFFORT),
+            ("gpt-5.6-luna", "none")
+        );
     }
 
     #[tokio::test]
@@ -511,15 +644,27 @@ mod tests {
         let sink = partials.clone();
         let callback: PartialCallback = Arc::new(move |partial| sink.lock().unwrap().push(partial));
 
-        let result = service.rewrite("第一段第二段", Some(callback)).await.unwrap();
+        let result = service
+            .rewrite("第一段第二段", Some(callback))
+            .await
+            .unwrap();
 
         assert_eq!(result, "第一段第二段");
-        assert_eq!(*partials.lock().unwrap(), vec!["第一段".to_owned(), "第一段第二段".to_owned()]);
+        assert_eq!(
+            *partials.lock().unwrap(),
+            vec!["第一段".to_owned(), "第一段第二段".to_owned()]
+        );
         let request = &server.requests()[0];
-        assert_eq!(request.header("authorization"), Some("Bearer test-only-token"));
+        assert_eq!(
+            request.header("authorization"),
+            Some("Bearer test-only-token")
+        );
         let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
         assert_eq!(body["instructions"], REWRITE_PROMPT);
-        assert_eq!(body["input"][0]["content"][0]["text"], rewrite_user_message("第一段第二段"));
+        assert_eq!(
+            body["input"][0]["content"][0]["text"],
+            rewrite_user_message("第一段第二段")
+        );
     }
 
     fn scripted_rewrite(scenario: &str) -> MockResponse {
@@ -538,8 +683,14 @@ mod tests {
                 .chain([(450, done)])
                 .collect(),
             "slow-first" => vec![(900, delta.clone()), (1200, delta), (1400, done)],
-            "progress" => (0..=5).map(|index| (index * 300, delta.clone())).chain([(1600, done)]).collect(),
-            _ => (0..=5).map(|index| (index * 60, delta.clone())).chain([(320, done)]).collect(),
+            "progress" => (0..=5)
+                .map(|index| (index * 300, delta.clone()))
+                .chain([(1600, done)])
+                .collect(),
+            _ => (0..=5)
+                .map(|index| (index * 60, delta.clone()))
+                .chain([(320, done)])
+                .collect(),
         };
         MockResponse::sse(events)
     }
@@ -553,8 +704,13 @@ mod tests {
         ] {
             let home = TempCodexHome::with_token();
             let server = MockServer::start(move |_| scripted_rewrite(scenario)).await;
-            let result = service(&home, &server, timeouts).rewrite("原始转写", None).await;
-            assert!(matches!(result, Err(AiError::TimedOut)), "{scenario}: {result:?}");
+            let result = service(&home, &server, timeouts)
+                .rewrite("原始转写", None)
+                .await;
+            assert!(
+                matches!(result, Err(AiError::TimedOut)),
+                "{scenario}: {result:?}"
+            );
         }
     }
 
@@ -563,7 +719,9 @@ mod tests {
         for (scenario, first_text, expected) in [("progress", 750, 6), ("slow-first", 1500, 2)] {
             let home = TempCodexHome::with_token();
             let server = MockServer::start(move |_| scripted_rewrite(scenario)).await;
-            let result = service(&home, &server, rewrite_timeouts(first_text, 750, 5000)).rewrite("原始转写", None).await;
+            let result = service(&home, &server, rewrite_timeouts(first_text, 750, 5000))
+                .rewrite("原始转写", None)
+                .await;
             assert_eq!(result.unwrap(), "段".repeat(expected), "{scenario}");
         }
     }
@@ -571,8 +729,13 @@ mod tests {
     #[tokio::test]
     async fn rewrite_falls_back_to_the_transcript_when_output_is_blank() {
         let home = TempCodexHome::with_token();
-        let server = MockServer::start(|_| MockResponse::sse([(0, delta("  ")), (0, event("response.completed"))])).await;
-        let result = service(&home, &server, AiTimeouts::default()).rewrite(" 原始 ", None).await;
+        let server = MockServer::start(|_| {
+            MockResponse::sse([(0, delta("  ")), (0, event("response.completed"))])
+        })
+        .await;
+        let result = service(&home, &server, AiTimeouts::default())
+            .rewrite(" 原始 ", None)
+            .await;
         assert_eq!(result.unwrap(), " 原始 ");
     }
 
@@ -603,7 +766,10 @@ mod tests {
     async fn selection_translation_can_outlast_the_english_translation_deadline() {
         let home = TempCodexHome::with_token();
         let server = MockServer::start(|_| delayed_translation()).await;
-        let timeouts = AiTimeouts { english_translation: Duration::from_millis(40), ..AiTimeouts::default() };
+        let timeouts = AiTimeouts {
+            english_translation: Duration::from_millis(40),
+            ..AiTimeouts::default()
+        };
         let result = service(&home, &server, timeouts)
             .translate_to_chinese(&"Long source text. ".repeat(200), None)
             .await;
@@ -623,16 +789,26 @@ mod tests {
             selection_translation: Duration::from_millis(40),
             ..AiTimeouts::default()
         };
-        let result = service(&home, &server, timeouts).translate_to_chinese("slow source", None).await;
-        assert!(matches!(result, Err(AiError::TranslationTimedOut)), "{result:?}");
+        let result = service(&home, &server, timeouts)
+            .translate_to_chinese("slow source", None)
+            .await;
+        assert!(
+            matches!(result, Err(AiError::TranslationTimedOut)),
+            "{result:?}"
+        );
     }
 
     #[tokio::test]
     async fn english_translation_keeps_its_existing_deadline() {
         let home = TempCodexHome::with_token();
         let server = MockServer::start(|_| delayed_translation()).await;
-        let timeouts = AiTimeouts { english_translation: Duration::from_millis(40), ..AiTimeouts::default() };
-        let result = service(&home, &server, timeouts).translate_to_english("slow source", None).await;
+        let timeouts = AiTimeouts {
+            english_translation: Duration::from_millis(40),
+            ..AiTimeouts::default()
+        };
+        let result = service(&home, &server, timeouts)
+            .translate_to_english("slow source", None)
+            .await;
         assert!(matches!(result, Err(AiError::TimedOut)), "{result:?}");
     }
 
@@ -645,9 +821,17 @@ mod tests {
             response
         })
         .await;
-        let timeouts = AiTimeouts { selection_request: Duration::from_millis(50), ..AiTimeouts::default() };
-        let result = service(&home, &server, timeouts).translate_to_chinese("source", None).await;
-        assert!(matches!(result, Err(AiError::TranslationTimedOut)), "{result:?}");
+        let timeouts = AiTimeouts {
+            selection_request: Duration::from_millis(50),
+            ..AiTimeouts::default()
+        };
+        let result = service(&home, &server, timeouts)
+            .translate_to_chinese("source", None)
+            .await;
+        assert!(
+            matches!(result, Err(AiError::TranslationTimedOut)),
+            "{result:?}"
+        );
     }
 
     #[tokio::test]
@@ -656,14 +840,25 @@ mod tests {
         let server = MockServer::start(|_| {
             let mut response = MockResponse::sse([
                 (0, delta("Hello")),
-                (0, format!("data: {}", serde_json::json!({"type": "response.output_text.done", "text": "Hello"}))),
+                (
+                    0,
+                    format!(
+                        "data: {}",
+                        serde_json::json!({"type": "response.output_text.done", "text": "Hello"})
+                    ),
+                ),
             ]);
             response.hold_open = true;
             response
         })
         .await;
-        let timeouts = AiTimeouts { english_translation: Duration::from_secs(2), ..AiTimeouts::default() };
-        let result = service(&home, &server, timeouts).translate_to_english("你好", None).await;
+        let timeouts = AiTimeouts {
+            english_translation: Duration::from_secs(2),
+            ..AiTimeouts::default()
+        };
+        let result = service(&home, &server, timeouts)
+            .translate_to_english("你好", None)
+            .await;
         assert_eq!(result.unwrap(), "Hello");
     }
 
@@ -685,19 +880,29 @@ mod tests {
             "{failed:?}"
         );
         let truncated = service.translate_to_english("ok", None).await;
-        assert!(matches!(truncated, Err(AiError::IncompleteStream)), "{truncated:?}");
+        assert!(
+            matches!(truncated, Err(AiError::IncompleteStream)),
+            "{truncated:?}"
+        );
     }
 
     #[tokio::test]
     async fn missing_and_expired_login_fail_before_any_request() {
         let server = MockServer::start(|_| delayed_translation()).await;
         let missing = TempCodexHome::new(None);
-        let result = service(&missing, &server, AiTimeouts::default()).rewrite("text", None).await;
+        let result = service(&missing, &server, AiTimeouts::default())
+            .rewrite("text", None)
+            .await;
         assert!(matches!(result, Err(AiError::MissingCodexAuth)));
 
-        let payload = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, r#"{"exp":1}"#);
-        let expired = TempCodexHome::new(Some(&format!(r#"{{"tokens":{{"access_token":"header.{payload}.signature"}}}}"#)));
-        let result = service(&expired, &server, AiTimeouts::default()).translate_to_english("text", None).await;
+        let payload =
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, r#"{"exp":1}"#);
+        let expired = TempCodexHome::new(Some(&format!(
+            r#"{{"tokens":{{"access_token":"header.{payload}.signature"}}}}"#
+        )));
+        let result = service(&expired, &server, AiTimeouts::default())
+            .translate_to_english("text", None)
+            .await;
         assert!(matches!(result, Err(AiError::CodexAuthExpired)));
         assert!(server.requests().is_empty());
     }
@@ -710,7 +915,13 @@ mod tests {
         service.prewarm().await;
         service.prewarm().await;
         let requests = server.requests();
-        assert_eq!(requests.iter().filter(|request| request.method == "HEAD").count(), 1);
+        assert_eq!(
+            requests
+                .iter()
+                .filter(|request| request.method == "HEAD")
+                .count(),
+            1
+        );
         assert_eq!(requests[0].header("authorization"), None);
 
         // No credentials, no prewarm.
@@ -732,21 +943,42 @@ mod tests {
         })
         .await;
         let items = vec![
-            TranslationItem { id: "a".into(), text: "First".into() },
-            TranslationItem { id: "b".into(), text: "Second".into() },
+            TranslationItem {
+                id: "a".into(),
+                text: "First".into(),
+            },
+            TranslationItem {
+                id: "b".into(),
+                text: "Second".into(),
+            },
         ];
-        let result = service(&home, &server, AiTimeouts::default()).translate_browser_batch(&items, None).await;
+        let result = service(&home, &server, AiTimeouts::default())
+            .translate_browser_batch(&items, None)
+            .await;
         let texts: Vec<String> = result.unwrap().into_iter().map(|item| item.text).collect();
         assert_eq!(texts, ["第一段", "第二段"]);
         let body: serde_json::Value = serde_json::from_slice(&server.requests()[0].body).unwrap();
         assert_eq!(body["instructions"], BROWSER_TRANSLATION_PROMPT);
-        assert_eq!(body["input"][0]["content"][0]["text"], r#"[{"id":"a","text":"First"},{"id":"b","text":"Second"}]"#);
+        assert_eq!(
+            body["input"][0]["content"][0]["text"],
+            r#"[{"id":"a","text":"First"},{"id":"b","text":"Second"}]"#
+        );
 
-        let timeouts = AiTimeouts { selection_translation: Duration::from_millis(20), ..AiTimeouts::default() };
-        let timed = service(&home, &server, timeouts).translate_browser_batch(&items, None).await;
-        assert!(matches!(timed, Err(AiError::TranslationTimedOut)), "{timed:?}");
+        let timeouts = AiTimeouts {
+            selection_translation: Duration::from_millis(20),
+            ..AiTimeouts::default()
+        };
+        let timed = service(&home, &server, timeouts)
+            .translate_browser_batch(&items, None)
+            .await;
+        assert!(
+            matches!(timed, Err(AiError::TranslationTimedOut)),
+            "{timed:?}"
+        );
 
-        let invalid = service(&home, &server, AiTimeouts::default()).translate_browser_batch(&[], None).await;
+        let invalid = service(&home, &server, AiTimeouts::default())
+            .translate_browser_batch(&[], None)
+            .await;
         assert!(matches!(invalid, Err(AiError::InvalidResponse)));
         assert_eq!(server.requests().len(), 2);
     }
@@ -757,7 +989,10 @@ mod tests {
     async fn live_translate_to_english() {
         let service = AiRewriteService::new(CodexAuthStore::default());
         let started = std::time::Instant::now();
-        let translated = service.translate_to_english("你好，世界", None).await.unwrap();
+        let translated = service
+            .translate_to_english("你好，世界", None)
+            .await
+            .unwrap();
         println!("live translation ({:?}): {translated}", started.elapsed());
         assert!(translated.to_lowercase().contains("hello"));
     }
