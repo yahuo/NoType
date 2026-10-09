@@ -34,14 +34,19 @@ macOS 上的 Chrome / Edge 扩展。点击工具栏按钮，将页面已加载�
 
 需要 Python 3、Chromium / Chrome / Edge / Brave 119 或更新版本，以及正在运行的 Linux 版 NoType（`linux/` 目录）。扩展本身与 macOS 相同。
 
-1. 打开 `chrome://extensions`（Brave 为 `brave://extensions`，Edge 为 `edge://extensions`），开启开发者模式，加载本目录下的 **extension** 文件夹。
-2. 复制扩展 ID，在仓库根目录执行同一条命令：
+1. 在仓库根目录执行（或 `integrations/omarchy/install.sh --browser`）：
 
    ```sh
-   python3 integrations/browser/install.py <扩展ID>
+   python3 integrations/browser/install.py
    ```
 
-   安装程序把连接程序复制到 `$XDG_DATA_HOME/notype/browser/`（默认 `~/.local/share/notype/browser/`），并在 `$XDG_CONFIG_HOME`（默认 `~/.config`）下为以下浏览器写入清单（未安装的浏览器也会写入，可忽略或按卸载步骤删除）：
+   安装程序把扩展复制到固定目录 `$XDG_DATA_HOME/notype/browser/extension`（默认 `~/.local/share/notype/browser/extension`），按该目录路径算出浏览器会分配的扩展 ID，并打印目录和 ID。
+2. 打开 `chrome://extensions`（Brave 为 `brave://extensions`，Edge 为 `edge://extensions`），开启开发者模式，“加载已解压的扩展程序”选择上一步打印的目录，确认显示的 ID 与打印的一致。不一致时，用页面上的 ID 执行 `python3 integrations/browser/install.py <扩展ID>`。
+3. 更新仓库后重新执行第 1 步，再在扩展页点该扩展的重新加载按钮。
+
+   也可以照旧加载本目录下的 **extension** 文件夹，再执行 `python3 integrations/browser/install.py <扩展ID>`；带 ID 时不复制扩展。
+
+   连接程序复制到 `$XDG_DATA_HOME/notype/browser/`，并在 `$XDG_CONFIG_HOME`（默认 `~/.config`）下为以下浏览器写入清单（未安装的浏览器也会写入，可忽略或按卸载步骤删除）：
    - `google-chrome/NativeMessagingHosts/`
    - `chromium/NativeMessagingHosts/`
    - `microsoft-edge/NativeMessagingHosts/`
