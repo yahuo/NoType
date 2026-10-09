@@ -1,0 +1,48 @@
+name: Linux
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - linux/**
+      - integrations/omarchy/**
+      - .github/workflows/linux.yml
+  pull_request:
+    paths:
+      - linux/**
+      - integrations/omarchy/**
+      - .github/workflows/linux.yml
+  workflow_dispatch:
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    env:
+      CARGO_TERM_COLOR: always
+    defaults:
+      run:
+        working-directory: linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: linux
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Shell Syntax
+        working-directory: .
+        run: bash -n integrations/omarchy/install.sh
