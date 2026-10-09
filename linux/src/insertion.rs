@@ -16,7 +16,8 @@ use crate::hyprland::{self, ActiveWindow};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InsertOutcome {
     Pasted,
-    /// Focus moved away from the window that started the session; the text stays on the clipboard.
+    /// Focus moved away from the window that started the session, or the paste shortcut could not
+    /// be sent; the text stays on the clipboard.
     CopiedToClipboard,
     Skipped,
 }
@@ -57,7 +58,11 @@ async fn insert_now(text: &str, target: Option<&ActiveWindow>) -> Result<InsertO
     // Give wl-copy's background process a moment to own the selection before the app asks for it.
     tokio::time::sleep(Duration::from_millis(40)).await;
     let (mods, key) = if target.is_terminal() { ("SHIFT", "Insert") } else { ("CTRL", "V") };
-    hyprland::send_shortcut(mods, key).await.context("Unable to synthesize the paste command.")?;
+    if let Err(error) = hyprland::send_shortcut(mods, key).await {
+        // The text is already on the clipboard, so the user can still paste it by hand.
+        tracing::warn!("paste shortcut failed: {error:#}");
+        return Ok(InsertOutcome::CopiedToClipboard);
+    }
     // Wayland paste is asynchronous: the target reads the offer after it handles the key.
     tokio::time::sleep(Duration::from_millis(300)).await;
 
