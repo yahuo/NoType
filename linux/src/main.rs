@@ -1,27 +1,23 @@
 //! `notype`: the Omarchy daemon and the CLI that Hyprland bindings and the shell plugin call.
 
 use std::io::IsTerminal;
-use std::os::unix::fs::PermissionsExt;
-use std::path::Path;
 use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::Result;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use notype::agent_editor::AgentEditorTriggers;
 use notype::app::App;
 use notype::bridge::{BridgeHandler, BridgeServer};
+use notype::checks::{self, SESSION_VARIABLES};
 use notype::codex_auth::CodexAuthStore;
 use notype::codex_transcription::CodexTranscriptionService;
-use notype::config::{self, Config};
+use notype::config::Config;
 use notype::control::{self, ControlRequest, ControlServer, DaemonLock};
 use notype::paths;
 use notype::rewrite::AiRewriteService;
-use notype::status::{SpeechProvider, StatusEvent};
+use notype::settings::{self, Outcome};
 use tokio::signal::unix::{SignalKind, signal};
-
-/// Needed by wl-clipboard and hyprctl.
-const SESSION_VARIABLES: [&str; 2] = ["WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE"];
 
 #[derive(Parser)]
 #[command(name = "notype", version, about = "NoType voice input for Omarchy")]
@@ -58,6 +54,27 @@ enum Command {
     },
     /// Check dependencies, configuration, credentials and the daemon.
     Doctor,
+    /// Backend of the Omarchy settings page; prints JSON.
+    Settings {
+        #[command(subcommand)]
+        action: SettingsAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum SettingsAction {
+    /// Print settings, credential state, hotkeys and checks.
+    Get,
+    /// Save one JSON line read from stdin, so the access token stays out of argv.
+    Set,
+    /// Test a connection with the draft settings read as one JSON line from stdin.
+    Test { target: TestTarget },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum TestTarget {
+    Speech,
+    AiRewrite,
 }
 
 #[derive(Subcommand)]
@@ -74,6 +91,7 @@ async fn main() -> ExitCode {
         Command::Daemon => run_daemon().await,
         Command::Status { follow } => control::copy_status(follow, &mut tokio::io::stdout()).await,
         Command::Doctor => doctor().await,
+        Command::Settings { action } => settings_command(action).await,
         command => control::send(&request(command)).await,
     };
     match result {
@@ -96,7 +114,9 @@ fn request(command: Command) -> ControlRequest {
         Command::SelectionChinese => ControlRequest::SelectionChinese,
         Command::SelectionHide => ControlRequest::SelectionHide,
         Command::SelectionCopy => ControlRequest::SelectionCopy,
-        Command::Daemon | Command::Status { .. } | Command::Doctor => unreachable!("handled in main"),
+        Command::Daemon | Command::Status { .. } | Command::Doctor | Command::Settings { .. } => {
+            unreachable!("handled in main")
+        }
     }
 }
 
@@ -161,85 +181,33 @@ async fn run_daemon() -> Result<()> {
 }
 
 async fn doctor() -> Result<()> {
-    let mut healthy = true;
-    let mut report = |ok: bool, required: bool, label: &str, detail: String| {
-        let mark = if ok { "ok  " } else if required { "FAIL" } else { "warn" };
-        println!("{mark} {label}: {detail}");
-        healthy &= ok || !required;
-    };
-
-    for (program, package, required) in [
-        ("pw-record", "pipewire", true),
-        ("wl-copy", "wl-clipboard", true),
-        ("wl-paste", "wl-clipboard", true),
-        ("hyprctl", "hyprland", true),
-        ("secret-tool", "libsecret (Doubao token in the keyring)", false),
-    ] {
-        let found = on_path(program);
-        report(found, required, program, if found { "found".into() } else { format!("missing; install {package}") });
+    let checks = checks::run(&Config::load()).await;
+    for check in &checks {
+        let mark = if check.ok { "ok  " } else if check.required { "FAIL" } else { "warn" };
+        println!("{mark} {}: {}", check.label, check.detail);
     }
-    for variable in SESSION_VARIABLES {
-        let value = std::env::var(variable).unwrap_or_default();
-        report(!value.is_empty(), true, variable, if value.is_empty() { "not set".into() } else { value });
-    }
-
-    let config = match Config::load() {
-        Ok(config) => {
-            let path = paths::config_file();
-            let detail = if path.exists() {
-                path.display().to_string()
-            } else {
-                format!("{} not found, using defaults", path.display())
-            };
-            report(true, true, "config", detail);
-            config
-        }
-        Err(error) => {
-            report(false, true, "config", format!("{error:#}"));
-            Config::default()
-        }
-    };
-    let codex = CodexAuthStore::new(None).load();
-    report(
-        codex.is_ok(),
-        config.speech_provider == SpeechProvider::Codex,
-        "codex login",
-        codex.map(|_| "credentials found".into()).unwrap_or_else(|error| error.to_string()),
-    );
-    if config.speech_provider == SpeechProvider::Doubao {
-        let token = config::doubao_access_token(&config).await;
-        let complete = config.has_valid_doubao_configuration() && !token.is_empty();
-        report(complete, true, "doubao", if complete { "configured".into() } else { "set app_id and the access token".into() });
-    }
-
-    // The service may run with a different environment than this shell, so ask it directly.
-    let mut lines = Vec::new();
-    match control::copy_status(false, &mut lines).await {
-        Ok(()) => {
-            let warning = String::from_utf8_lossy(&lines)
-                .lines()
-                .filter_map(|line| serde_json::from_str::<StatusEvent>(line).ok())
-                .find_map(|event| match event {
-                    StatusEvent::Status(status) => status.warning,
-                    StatusEvent::Selection(_) => None,
-                });
-            match warning {
-                Some(warning) => report(false, true, "daemon", warning),
-                None => report(true, false, "daemon", paths::control_socket().display().to_string()),
-            }
-        }
-        Err(error) => report(false, false, "daemon", format!("{error:#}")),
-    }
-
-    if healthy { Ok(()) } else { anyhow::bail!("some required checks failed") }
+    if checks::ready(&checks) { Ok(()) } else { anyhow::bail!("some required checks failed") }
 }
 
-fn on_path(program: &str) -> bool {
-    std::env::var_os("PATH").is_some_and(|path| {
-        std::env::split_paths(&path).any(|dir| is_executable(&dir.join(program)))
-    })
-}
-
-fn is_executable(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+async fn settings_command(action: SettingsAction) -> Result<()> {
+    let outcome = match action {
+        SettingsAction::Get => {
+            println!("{}", serde_json::to_string(&settings::snapshot().await)?);
+            return Ok(());
+        }
+        SettingsAction::Set => match settings::read_draft().await {
+            Ok(draft) => settings::save(draft).await,
+            Err(error) => Outcome::failed(format!("{error:#}")),
+        },
+        SettingsAction::Test { target: TestTarget::Speech } => match settings::read_draft().await {
+            Ok(draft) => settings::test_speech(draft).await,
+            Err(error) => Outcome::failed(format!("{error:#}")),
+        },
+        SettingsAction::Test { target: TestTarget::AiRewrite } => settings::test_ai_rewrite().await,
+    };
+    println!("{}", serde_json::to_string(&outcome)?);
+    match outcome.error {
+        Some(error) if !outcome.ok => anyhow::bail!(error),
+        _ => Ok(()),
+    }
 }

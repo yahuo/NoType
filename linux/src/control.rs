@@ -43,6 +43,8 @@ pub enum ControlRequest {
     SelectionHide,
     /// Copies the finished Chinese translation to the clipboard.
     SelectionCopy,
+    /// `config.toml` changed; refresh what the status shows from it.
+    ReloadConfig,
     Status {
         #[serde(default)]
         follow: bool,
@@ -259,6 +261,7 @@ mod tests {
             serde_json::from_str::<ControlRequest>(r#"{"command":"status"}"#).unwrap(),
             ControlRequest::Status { follow: false }
         );
+        assert_eq!(serde_json::to_string(&ControlRequest::ReloadConfig).unwrap(), r#"{"command":"reload_config"}"#);
         assert!(serde_json::from_str::<ControlRequest>(r#"{"command":"rm"}"#).is_err());
     }
 

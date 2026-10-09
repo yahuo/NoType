@@ -204,6 +204,20 @@ impl App {
         state.tasks.push(task.abort_handle());
     }
 
+    /// A running session keeps the provider it started with; the next one reads the file again.
+    fn reload_config(&self) {
+        let Ok(config) = Config::load() else { return };
+        let state = self.lock();
+        if state.starting || self.status.borrow().phase.is_busy() {
+            return;
+        }
+        self.status.send_if_modified(|status| {
+            let changed = status.provider != config.speech_provider;
+            status.provider = config.speech_provider;
+            changed
+        });
+    }
+
     fn agent_translate(&self) {
         let app = self.arc();
         let mut state = self.lock();
@@ -830,6 +844,7 @@ impl ControlHandler for App {
             ControlRequest::SelectionChinese => self.selection_chinese(),
             ControlRequest::SelectionHide => self.hide_selection(),
             ControlRequest::SelectionCopy => self.copy_selection(),
+            ControlRequest::ReloadConfig => self.reload_config(),
         }
         Ok(())
     }

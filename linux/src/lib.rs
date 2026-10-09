@@ -4,6 +4,7 @@ pub mod agent_editor;
 pub mod app;
 pub mod audio;
 pub mod bridge;
+pub mod checks;
 pub mod codex_auth;
 pub mod codex_transcription;
 pub mod config;
@@ -15,6 +16,7 @@ pub mod insertion;
 pub mod paths;
 pub mod protocol;
 pub mod rewrite;
+pub mod settings;
 pub mod status;
 pub mod transcript;
 
