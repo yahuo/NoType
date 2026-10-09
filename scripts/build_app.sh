@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="$ROOT_DIR/.build/arm64-apple-macosx/release"
+BUILD_DIR="$(swift build -c release --package-path "$ROOT_DIR" --show-bin-path)"
 APP_NAME="NoType.app"
 DIST_DIR="$ROOT_DIR/dist"
 DIST_APP_DIR="$DIST_DIR/$APP_NAME"
