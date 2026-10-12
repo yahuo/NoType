@@ -18,6 +18,7 @@ use crate::codex_transcription::CodexTranscriptionService;
 use crate::config::{self, Config};
 use crate::control::{ControlHandler, ControlRequest};
 use crate::doubao::{AsrEvent, DoubaoConfig, DoubaoSession};
+use crate::fcitx::{self, CommitOutcome};
 use crate::hyprland::{self, ActiveWindow};
 use crate::insertion::{self, InsertOutcome};
 use crate::rewrite::{AiError, AiRewriteService};
@@ -79,6 +80,8 @@ struct Plan {
     config: Config,
     /// Focused window when the hotkey was pressed; text is pasted only if it still has focus.
     target: Option<ActiveWindow>,
+    /// fcitx5 input context that reported triple Space; the text is committed there first.
+    commit_token: Option<String>,
 }
 
 struct Capture {
@@ -248,15 +251,17 @@ impl App {
         state.tasks.push(task.abort_handle());
     }
 
-    fn triple_space(&self, surrounding_text: bool) {
+    fn triple_space(&self, surrounding_text: bool, commit_token: Option<String>) {
         let app = self.arc();
         let mut state = self.lock();
         if state.starting || self.status.borrow().phase.is_busy() {
             return;
         }
         let session = self.begin_session(&mut state);
-        let task =
-            tokio::spawn(async move { app.run_triple_space(session, surrounding_text).await });
+        let task = tokio::spawn(async move {
+            app.run_triple_space(session, surrounding_text, commit_token)
+                .await
+        });
         state.tasks.push(task.abort_handle());
     }
 
@@ -438,6 +443,7 @@ impl App {
                     rewrite: false,
                     config,
                     target,
+                    commit_token: None,
                 };
                 return self.translate_selection(plan, source).await;
             }
@@ -477,6 +483,7 @@ impl App {
             rewrite: config.should_rewrite_dictation(),
             config,
             target,
+            commit_token: None,
         };
         if plan.mode == OutputMode::Translation || (plan.rewrite && self.ai.has_credentials()) {
             let ai = self.ai.clone();
@@ -769,7 +776,7 @@ impl App {
         if !self.is_current(session) {
             return;
         }
-        let outcome = insertion::insert(&text, plan.target.as_ref()).await;
+        let outcome = self.insert_text(plan, &text).await;
         let mut state = self.lock();
         if state.session != session {
             return;
@@ -801,6 +808,30 @@ impl App {
             Err(error) => {
                 drop(state);
                 self.fail(session, error_message(&error));
+            }
+        }
+    }
+
+    /// Commits through the fcitx5 addon when the plan names its input context, which replaces the
+    /// selected draft without touching the clipboard. Pastes only when the addon took nothing.
+    async fn insert_text(&self, plan: &Plan, text: &str) -> anyhow::Result<InsertOutcome> {
+        let Some(token) = plan
+            .commit_token
+            .as_deref()
+            .filter(|_| insertion::should_insert(text))
+        else {
+            return insertion::insert(text, plan.target.as_ref()).await;
+        };
+        let outcome = fcitx::commit(token, text).await;
+        tracing::info!(?outcome, "fcitx5 commit");
+        match outcome {
+            CommitOutcome::Committed => Ok(InsertOutcome::Pasted),
+            CommitOutcome::Unavailable => insertion::insert(text, plan.target.as_ref()).await,
+            // Focus moved, or the text may already be in the field: pasting could put it in the
+            // wrong place or twice.
+            CommitOutcome::Stale | CommitOutcome::Uncertain => {
+                insertion::copy_text(text).await?;
+                Ok(InsertOutcome::CopiedToClipboard)
             }
         }
     }
@@ -838,7 +869,12 @@ impl App {
 
     /// Three quick Spaces reported by the fcitx5 addon. Port of
     /// `translateFocusedFieldAfterTripleSpace`.
-    async fn run_triple_space(self: Arc<Self>, session: u64, surrounding_text: bool) {
+    async fn run_triple_space(
+        self: Arc<Self>,
+        session: u64,
+        surrounding_text: bool,
+        commit_token: Option<String>,
+    ) {
         // Read focus before waiting: the addon reports the third Space as it is typed.
         let Ok(Some(window)) = hyprland::active_window().await else {
             return;
@@ -865,8 +901,9 @@ impl App {
         }
 
         // macOS only translates fields that publish their text through AX. Fields that keep it
-        // from the input method, such as Zed's editor or XWayland apps, are not drafts.
-        if !surrounding_text {
+        // from the input method, such as Zed's editor or XWayland apps, are not drafts. Chromium
+        // web pages never report their text, so there the copied draft decides instead.
+        if !surrounding_text && !window.is_chromium() {
             tracing::debug!(
                 class = window.class,
                 "triple Space ignored: the field does not report its text"
@@ -919,6 +956,7 @@ impl App {
             rewrite: false,
             config,
             target: Some(window),
+            commit_token,
         };
         // No overlay while translating: the selected draft is the cue. Pasting leaves the
         // status idle, so only a failure or a clipboard fallback shows up.
@@ -1020,7 +1058,10 @@ impl ControlHandler for App {
                 self.cancel();
             }
             ControlRequest::AgentTranslate => self.agent_translate(),
-            ControlRequest::TripleSpace { surrounding_text } => self.triple_space(surrounding_text),
+            ControlRequest::TripleSpace {
+                surrounding_text,
+                commit_token,
+            } => self.triple_space(surrounding_text, commit_token),
             ControlRequest::SelectionChinese => self.selection_chinese(),
             ControlRequest::SelectionHide => self.hide_selection(),
             ControlRequest::SelectionCopy => self.copy_selection(),

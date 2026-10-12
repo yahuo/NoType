@@ -76,7 +76,7 @@ secret-tool store --label='NoType Doubao' application notype account doubao.acce
 
 - Claude Code / Codex 草稿翻译：`integrations/agent-editor/install.sh`，按提示在 shell 配置中 `source ~/.config/notype/agent-editor.sh`。
 - Pi 扩展：`integrations/omarchy/install.sh --pi` 把 `integrations/pi/notype.ts` 安装为 `~/.pi/agent/extensions/notype/index.ts`（遵循 `PI_CODING_AGENT_DIR`），之后在 Pi 中执行 `/reload`。草稿非空时一秒内连按三次空格，翻译成英文后替换草稿；Linux 上自动连接 `$XDG_RUNTIME_DIR/notype/bridge.sock`。
-- 输入框三连空格翻译：`integrations/fcitx5/install.sh` 用 fcitx5 头文件编译 addon，安装到 `~/.local/lib/fcitx5`，为 `omarchy-fcitx5.service` 写入 drop-in 并重启 fcitx5；`--uninstall` 移除。在把文本报告给输入法的输入框（Chromium、Electron 应用等）里一秒内连按三次空格，光标前的草稿会翻译成英文并替换，过程中不弹出状态框。终端里交给 Pi 扩展或 Claude Code / Codex 草稿翻译；密码框和不报告文本的区域（如 Zed 编辑区、XWayland 应用）不触发。
+- 输入框三连空格翻译：`integrations/fcitx5/install.sh` 用 fcitx5 头文件编译 addon，安装到 `~/.local/lib/fcitx5`，为 `omarchy-fcitx5.service` 写入 drop-in 并重启 fcitx5；`--uninstall` 移除。在把文本报告给输入法的输入框（GTK、Electron 应用等）以及 Chrome / Chromium 网页（含 `--app` 网页应用，它们不报告文本，改由复制出的草稿判断）里一秒内连按三次空格，光标前的草稿会翻译成英文并替换，过程中不弹出状态框；三个空格前当前行没有内容（如代码缩进）时不触发。译文由 addon 直接提交到触发的输入框，不经过剪贴板；addon 不可用时退回粘贴，输入框已失焦或提交结果不确定时只复制到剪贴板。终端里交给 Pi 扩展或 Claude Code / Codex 草稿翻译；密码框和不报告文本的区域（如 Zed 编辑区、XWayland 应用）不触发。
 - 浏览器双语翻译：`integrations/omarchy/install.sh --browser` 执行 `python3 integrations/browser/install.py`，把扩展复制到 `~/.local/share/notype/browser/extension`，为 Chrome、Chromium、Edge 和 Brave 写入连接程序清单，并打印扩展 ID。之后在 `chrome://extensions` 开启开发者模式，“加载已解压的扩展程序”选择该目录。详见 `integrations/browser/README.md`。
 - 两个选项可与 `--no-build` 组合，例如 `integrations/omarchy/install.sh --no-build --pi --browser`。不加选项时不写入 `~/.pi` 和浏览器目录。
 

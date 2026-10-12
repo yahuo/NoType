@@ -41,8 +41,12 @@ pub enum ControlRequest {
     /// The fcitx5 addon saw three quick Spaces: translate the focused draft, as on macOS.
     TripleSpace {
         /// Whether the field reports its text to the input method, the counterpart of a
-        /// readable AXValue on macOS. Only such fields are treated as drafts.
+        /// readable AXValue on macOS. Outside Chromium, only such fields are treated as drafts.
         surrounding_text: bool,
+        /// Names the addon's input context so the translation can be committed back through
+        /// the addon; absent when the addon could not open its commit socket.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        commit_token: Option<String>,
     },
     /// Translate the selection to Chinese in the floating panel.
     SelectionChinese,
@@ -324,7 +328,18 @@ mod tests {
             )
             .unwrap(),
             ControlRequest::TripleSpace {
-                surrounding_text: false
+                surrounding_text: false,
+                commit_token: None,
+            }
+        );
+        assert_eq!(
+            serde_json::from_str::<ControlRequest>(
+                r#"{"command":"triple_space","surrounding_text":true,"commit_token":"0123456789abcdef"}"#
+            )
+            .unwrap(),
+            ControlRequest::TripleSpace {
+                surrounding_text: true,
+                commit_token: Some("0123456789abcdef".into()),
             }
         );
         assert!(serde_json::from_str::<ControlRequest>(r#"{"command":"rm"}"#).is_err());
