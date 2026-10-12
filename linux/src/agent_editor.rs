@@ -1,6 +1,7 @@
 //! Claude Code / Codex CLI draft translation trigger (`Ctrl+G` external editor flow).
 //! Port of AgentEditorIntegrationService.swift. Linux has no global key monitoring, so the
-//! trigger is a Hyprland binding (`notype agent-translate`) instead of triple Space.
+//! trigger is a Hyprland binding (`notype agent-translate`) or triple Space reported by the
+//! fcitx5 addon (`integrations/fcitx5`).
 
 use std::fs::{self, DirBuilder, OpenOptions};
 use std::io::{self, Write};
@@ -20,7 +21,7 @@ pub const TRIGGER_VERSION: i64 = 1;
 pub const TRIGGER_LIFETIME_MILLISECONDS: i64 = 5_000;
 /// Linux: the user pressed the NoType Hyprland binding.
 pub const HOTKEY_TRIGGER: &str = "hotkey";
-/// macOS: the user typed three trailing spaces.
+/// The user typed three trailing spaces, seen by the macOS event tap or the fcitx5 addon.
 pub const TRIPLE_SPACE_TRIGGER: &str = "triple-space";
 
 /// Single-use token shared with `notype-editor` through `paths::editor_trigger_file()`.
@@ -169,8 +170,9 @@ impl AgentEditorTriggers {
     }
 
     /// Writes a private single-use token for `window`, then sends `Ctrl+G` so the focused
-    /// Claude Code or Codex CLI opens `$VISUAL` (the `notype-editor` proxy).
-    pub async fn trigger(&self, window: &ActiveWindow) -> anyhow::Result<()> {
+    /// Claude Code or Codex CLI opens `$VISUAL` (the `notype-editor` proxy). `kind` tells the
+    /// proxy how to read the draft: [`HOTKEY_TRIGGER`] or [`TRIPLE_SPACE_TRIGGER`].
+    pub async fn trigger(&self, window: &ActiveWindow, kind: &str) -> anyhow::Result<()> {
         if !window.is_terminal() {
             let name = if window.class.is_empty() {
                 &window.title
@@ -184,7 +186,7 @@ impl AgentEditorTriggers {
             return Err(AgentEditorError::TargetChanged.into());
         }
 
-        let trigger = PendingTrigger::new(window, HOTKEY_TRIGGER, now_milliseconds());
+        let trigger = PendingTrigger::new(window, kind, now_milliseconds());
         {
             let mut pending = self.shared.lock();
             self.shared.clear_locked(&mut pending);
@@ -494,7 +496,11 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn trigger_writes_a_private_token_and_sends_ctrl_g() {
         let fixture = fixture();
-        fixture.triggers.trigger(&terminal_window()).await.unwrap();
+        fixture
+            .triggers
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
+            .await
+            .unwrap();
         let file = fixture.dir.path("runtime").join("editor-trigger.json");
         assert_eq!(fs::metadata(&file).unwrap().mode() & 0o777, 0o600);
         assert_eq!(
@@ -510,18 +516,36 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn trigger_records_its_kind_for_the_editor_proxy() {
+        let fixture = fixture();
+        fixture
+            .triggers
+            .trigger(&terminal_window(), TRIPLE_SPACE_TRIGGER)
+            .await
+            .unwrap();
+        assert_eq!(read_trigger(&fixture).trigger, TRIPLE_SPACE_TRIGGER);
+        fixture.triggers.shutdown();
+    }
+
+    #[tokio::test]
     async fn trigger_rejects_non_terminals_and_focus_changes() {
         let fixture = fixture();
         let mut browser = terminal_window();
         browser.tags.clear();
-        assert!(fixture.triggers.trigger(&browser).await.is_err());
+        assert!(
+            fixture
+                .triggers
+                .trigger(&browser, HOTKEY_TRIGGER)
+                .await
+                .is_err()
+        );
 
         let mut other = terminal_window();
         other.address = "0x62".into();
         fixture.desktop.focus(Some(other));
         let error = fixture
             .triggers
-            .trigger(&terminal_window())
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
             .await
             .unwrap_err();
         assert!(matches!(
@@ -538,7 +562,7 @@ pub(crate) mod tests {
         fixture.desktop.fail_shortcut.store(true, Ordering::SeqCst);
         let error = fixture
             .triggers
-            .trigger(&terminal_window())
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
             .await
             .unwrap_err();
         assert_eq!(
@@ -561,7 +585,11 @@ pub(crate) mod tests {
         let (_master, terminal) = private_terminal();
         let (pid, ppid) = ids();
 
-        fixture.triggers.trigger(&terminal_window()).await.unwrap();
+        fixture
+            .triggers
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
+            .await
+            .unwrap();
         let token = fixture.triggers.pending_token().unwrap();
         // A wrong token does not burn the pending trigger.
         assert!(
@@ -587,7 +615,11 @@ pub(crate) mod tests {
             (pid, ppid, "/dev/null"),
             (pid, ppid, "/etc/hosts"),
         ] {
-            fixture.triggers.trigger(&terminal_window()).await.unwrap();
+            fixture
+                .triggers
+                .trigger(&terminal_window(), HOTKEY_TRIGGER)
+                .await
+                .unwrap();
             let token = fixture.triggers.pending_token().unwrap();
             assert!(
                 !fixture.triggers.consume(&token, pid, ppid, terminal).await,
@@ -597,7 +629,11 @@ pub(crate) mod tests {
             assert!(fixture.triggers.pending_token().is_none());
         }
 
-        fixture.triggers.trigger(&terminal_window()).await.unwrap();
+        fixture
+            .triggers
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
+            .await
+            .unwrap();
         let token = fixture.triggers.pending_token().unwrap();
         let mut other = terminal_window();
         other.pid = 43;
@@ -610,7 +646,11 @@ pub(crate) mod tests {
         let fixture = fixture();
         let (_master, terminal) = private_terminal();
         let (pid, ppid) = ids();
-        fixture.triggers.trigger(&terminal_window()).await.unwrap();
+        fixture
+            .triggers
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
+            .await
+            .unwrap();
         let trigger = read_trigger(&fixture);
         let stale = trigger.created_at_milliseconds + TRIGGER_LIFETIME_MILLISECONDS + 1;
         assert!(
@@ -627,7 +667,11 @@ pub(crate) mod tests {
         let mut fixture = fixture();
         assert_eq!(fixture.triggers.expiry, Duration::from_secs(5));
         fixture.triggers.expiry = Duration::from_millis(100);
-        fixture.triggers.trigger(&terminal_window()).await.unwrap();
+        fixture
+            .triggers
+            .trigger(&terminal_window(), HOTKEY_TRIGGER)
+            .await
+            .unwrap();
         assert!(fixture.triggers.pending_token().is_some());
         tokio::time::sleep(Duration::from_millis(400)).await;
         assert!(fixture.triggers.pending_token().is_none());

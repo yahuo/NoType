@@ -5,13 +5,13 @@
 //! The state mutex is never held across an await; lock order is always state, then status.
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
 use tokio::task::{AbortHandle, JoinHandle};
 
 use crate::PartialCallback;
-use crate::agent_editor::AgentEditorTriggers;
+use crate::agent_editor::{AgentEditorTriggers, HOTKEY_TRIGGER, TRIPLE_SPACE_TRIGGER};
 use crate::audio::{CaptureEvent, Recorder};
 use crate::bridge::BridgeHooks;
 use crate::codex_transcription::CodexTranscriptionService;
@@ -28,6 +28,11 @@ use crate::transcript;
 
 const COPIED_RESET: Duration = Duration::from_millis(1_800);
 const FAILED_RESET: Duration = Duration::from_millis(2_000);
+/// The fcitx5 addon reports the third Space before the app has received it.
+const TRIPLE_SPACE_SETTLE: Duration = Duration::from_millis(100);
+/// Pi's extension translates its own draft after the same third Space; as long as on macOS.
+const PI_CLAIM_WAIT: Duration = Duration::from_millis(150);
+const PI_CLAIM_WINDOW: Duration = Duration::from_secs(2);
 const SELECTION_EMPTY: &str = "未读取到选中文字。请先选中一段文本，再按 Alt + Ctrl + Space。";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -94,6 +99,8 @@ struct State {
     asr: Option<Arc<DoubaoSession>>,
     selection_request: u64,
     selection_task: Option<AbortHandle>,
+    /// When Pi's extension last asked to translate its draft.
+    last_pi_translation: Option<Instant>,
 }
 
 pub struct App {
@@ -239,6 +246,24 @@ impl App {
         let session = self.begin_session(&mut state);
         let task = tokio::spawn(async move { app.run_agent_translate(session).await });
         state.tasks.push(task.abort_handle());
+    }
+
+    fn triple_space(&self, surrounding_text: bool) {
+        let app = self.arc();
+        let mut state = self.lock();
+        if state.starting || self.status.borrow().phase.is_busy() {
+            return;
+        }
+        let session = self.begin_session(&mut state);
+        let task =
+            tokio::spawn(async move { app.run_triple_space(session, surrounding_text).await });
+        state.tasks.push(task.abort_handle());
+    }
+
+    fn pi_translated_recently(&self) -> bool {
+        self.lock()
+            .last_pi_translation
+            .is_some_and(|at| at.elapsed() < PI_CLAIM_WINDOW)
     }
 
     fn selection_chinese(&self) {
@@ -712,10 +737,18 @@ impl App {
                 status.error = None;
             });
         }
-        let translated = self
-            .ai
-            .translate_to_english(&source, Some(self.partial_sink(session)))
-            .await;
+        let partial = self.partial_sink(session);
+        self.translate_and_insert(plan, source, Some(partial)).await;
+    }
+
+    async fn translate_and_insert(
+        &self,
+        plan: Plan,
+        source: String,
+        partial: Option<PartialCallback>,
+    ) {
+        let session = plan.session;
+        let translated = self.ai.translate_to_english(&source, partial).await;
         if !self.is_current(session) {
             return;
         }
@@ -798,9 +831,98 @@ impl App {
         if !self.is_current(session) {
             return;
         }
-        if let Err(error) = self.editor.trigger(&window).await {
+        if let Err(error) = self.editor.trigger(&window, HOTKEY_TRIGGER).await {
             self.fail(session, error_message(&error));
         }
+    }
+
+    /// Three quick Spaces reported by the fcitx5 addon. Port of
+    /// `translateFocusedFieldAfterTripleSpace`.
+    async fn run_triple_space(self: Arc<Self>, session: u64, surrounding_text: bool) {
+        // Read focus before waiting: the addon reports the third Space as it is typed.
+        let Ok(Some(window)) = hyprland::active_window().await else {
+            return;
+        };
+        let config = match Config::load() {
+            Ok(config) => config,
+            Err(error) => return self.fail(session, error_message(&error)),
+        };
+
+        if window.is_terminal() {
+            // Pi's extension receives the same Space and translates its own draft. Give it a
+            // moment to claim it before opening the external editor of Claude Code or Codex.
+            tokio::time::sleep(PI_CLAIM_WAIT).await;
+            if !self.is_current(session) || self.pi_translated_recently() {
+                return;
+            }
+            if !self.ai.has_credentials() {
+                return self.fail(session, translation_login_message(&config));
+            }
+            if let Err(error) = self.editor.trigger(&window, TRIPLE_SPACE_TRIGGER).await {
+                self.fail(session, error_message(&error));
+            }
+            return;
+        }
+
+        // macOS only translates fields that publish their text through AX. Fields that keep it
+        // from the input method, such as Zed's editor or XWayland apps, are not drafts.
+        if !surrounding_text {
+            tracing::debug!(
+                class = window.class,
+                "triple Space ignored: the field does not report its text"
+            );
+            return;
+        }
+        if !self.ai.has_credentials() {
+            return self.fail(session, translation_login_message(&config));
+        }
+        tokio::time::sleep(TRIPLE_SPACE_SETTLE).await;
+        let focused = hyprland::active_window().await.ok().flatten();
+        if !self.is_current(session) || !focused.is_some_and(|focused| focused.same_window(&window))
+        {
+            return;
+        }
+        let copied = insertion::select_to_field_start(&window).await;
+        let Some(source) = copied.as_deref().and_then(insertion::triple_space_source) else {
+            // Only the shape of the draft is logged, never its text.
+            let trailing_spaces = copied.as_deref().map_or(0, |text| {
+                text.chars()
+                    .rev()
+                    .take_while(|&character| character == ' ' || character == '\u{a0}')
+                    .count()
+            });
+            tracing::info!(
+                copied = copied.is_some(),
+                copied_chars = copied.as_deref().map_or(0, |text| text.chars().count()),
+                trailing_spaces,
+                "triple Space ignored: the text before the cursor does not end with three spaces"
+            );
+            if copied.is_some()
+                && let Err(error) = insertion::collapse_selection().await
+            {
+                tracing::warn!("failed to restore the cursor after triple Space: {error:#}");
+            }
+            return;
+        };
+        let source = source.to_owned();
+        tracing::info!(
+            source_chars = source.chars().count(),
+            "triple Space: translating the text before the cursor"
+        );
+        if !self.is_current(session) {
+            return;
+        }
+        let plan = Plan {
+            session,
+            mode: OutputMode::Translation,
+            provider: config.speech_provider,
+            rewrite: false,
+            config,
+            target: Some(window),
+        };
+        // No overlay while translating: the selected draft is the cue. Pasting leaves the
+        // status idle, so only a failure or a clipboard fallback shows up.
+        self.translate_and_insert(plan, source, None).await;
     }
 
     async fn run_selection_chinese(self: Arc<Self>, request: u64) {
@@ -879,6 +1001,10 @@ impl BridgeHooks for App {
         let state = self.lock();
         state.starting || self.status.borrow().phase.is_busy()
     }
+
+    fn direct_translation_requested(&self) {
+        self.lock().last_pi_translation = Some(Instant::now());
+    }
 }
 
 impl ControlHandler for App {
@@ -894,6 +1020,7 @@ impl ControlHandler for App {
                 self.cancel();
             }
             ControlRequest::AgentTranslate => self.agent_translate(),
+            ControlRequest::TripleSpace { surrounding_text } => self.triple_space(surrounding_text),
             ControlRequest::SelectionChinese => self.selection_chinese(),
             ControlRequest::SelectionHide => self.hide_selection(),
             ControlRequest::SelectionCopy => self.copy_selection(),
