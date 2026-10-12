@@ -11,6 +11,7 @@ pub mod config;
 pub mod control;
 pub mod doubao;
 pub mod editor;
+pub mod fcitx;
 pub mod hyprland;
 pub mod insertion;
 pub mod paths;

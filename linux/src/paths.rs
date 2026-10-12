@@ -61,6 +61,11 @@ pub fn control_socket() -> PathBuf {
     runtime_dir().join("control.sock")
 }
 
+/// Commit socket of the NoType fcitx5 addon, which binds it inside this directory.
+pub fn fcitx_socket() -> PathBuf {
+    runtime_dir().join("fcitx5.sock")
+}
+
 /// Single-use trigger written before the daemon asks a terminal agent to open `$VISUAL`.
 pub fn editor_trigger_file() -> PathBuf {
     runtime_dir().join("editor-trigger.json")

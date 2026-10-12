@@ -32,6 +32,12 @@ impl ActiveWindow {
             .any(|tag| tag.trim_end_matches('*') == "terminal")
     }
 
+    /// Chrome or Chromium, including web apps opened with `--app` (class `chrome-<site>-<profile>`).
+    pub fn is_chromium(&self) -> bool {
+        matches!(self.class.as_str(), "google-chrome" | "chromium")
+            || self.class.starts_with("chrome-")
+    }
+
     /// Same window instance, not just the same application.
     pub fn same_window(&self, other: &ActiveWindow) -> bool {
         !self.address.is_empty() && self.address == other.address && self.pid == other.pid
@@ -108,6 +114,19 @@ mod tests {
         let window = parse_active_window(json).unwrap().unwrap();
         assert!(window.is_terminal());
         assert!(window.same_window(&window.clone()));
+    }
+
+    #[test]
+    fn recognizes_chromium_windows_and_web_apps() {
+        let window = |class: &str| ActiveWindow {
+            class: class.into(),
+            ..ActiveWindow::default()
+        };
+        assert!(window("google-chrome").is_chromium());
+        assert!(window("chromium").is_chromium());
+        assert!(window("chrome-chatgpt.com__-Default").is_chromium());
+        assert!(!window("grok-bot").is_chromium());
+        assert!(!window("dev.zed.Zed").is_chromium());
     }
 
     #[test]

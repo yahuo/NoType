@@ -112,7 +112,8 @@ pub async fn collapse_selection() -> Result<()> {
 }
 
 /// The draft before three trailing trigger Spaces, like macOS `tripleSpaceTranslationSource`.
-/// Chromium can copy the trailing spaces of rich editors as no-break spaces.
+/// Chromium can copy the trailing spaces of rich editors as no-break spaces. Spaces that only
+/// indent a new line, as in a code editor, are not a trigger.
 pub fn triple_space_source(copied: &str) -> Option<&str> {
     let mut end = copied.len();
     for _ in 0..3 {
@@ -123,7 +124,8 @@ pub fn triple_space_source(copied: &str) -> Option<&str> {
         end -= last.len_utf8();
     }
     let source = &copied[..end];
-    (!source.trim().is_empty()).then_some(source)
+    let current_line = source.rsplit('\n').next().unwrap_or(source);
+    (!current_line.trim().is_empty()).then_some(source)
 }
 
 async fn copy_selection(window: &ActiveWindow, select: Option<(&str, &str)>) -> Option<String> {
@@ -353,6 +355,8 @@ mod tests {
         assert_eq!(triple_space_source("draft  "), None);
         assert_eq!(triple_space_source("draft   \n"), None);
         assert_eq!(triple_space_source(" \n    "), None);
+        assert_eq!(triple_space_source("fn main() {\n   "), None);
+        assert_eq!(triple_space_source("fn main() {\n      "), None);
         assert_eq!(triple_space_source(""), None);
     }
 
