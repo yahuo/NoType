@@ -7,11 +7,13 @@ on:
     paths:
       - linux/**
       - integrations/omarchy/**
+      - integrations/fcitx5/**
       - .github/workflows/linux.yml
   pull_request:
     paths:
       - linux/**
       - integrations/omarchy/**
+      - integrations/fcitx5/**
       - .github/workflows/linux.yml
   workflow_dispatch:
 
@@ -48,4 +50,10 @@ jobs:
 
       - name: Shell Syntax
         working-directory: .
-        run: bash -n integrations/omarchy/install.sh
+        run: |
+          bash -n integrations/omarchy/install.sh
+          bash -n integrations/fcitx5/install.sh
+
+      - name: fcitx5 Addon Detector
+        working-directory: .
+        run: make -C integrations/fcitx5 test
