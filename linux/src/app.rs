@@ -913,6 +913,9 @@ impl App {
         if !self.ai.has_credentials() {
             return self.fail(session, translation_login_message(&config));
         }
+        // Open the connection while the draft is selected and copied.
+        let ai = self.ai.clone();
+        tokio::spawn(async move { ai.prewarm().await });
         tokio::time::sleep(TRIPLE_SPACE_SETTLE).await;
         let focused = hyprland::active_window().await.ok().flatten();
         if !self.is_current(session) || !focused.is_some_and(|focused| focused.same_window(&window))
