@@ -20,6 +20,9 @@ use crate::rewrite::AiRewriteService;
 pub trait BridgeHooks: Send + Sync + 'static {
     /// True while dictation is recording, transcribing or refining.
     fn dictation_busy(&self) -> bool;
+
+    /// Pi's extension asked to translate its draft; it handles triple Space on its own.
+    fn direct_translation_requested(&self) {}
 }
 
 pub struct BridgeHandler {
@@ -82,7 +85,12 @@ impl BridgeHandler {
         }
 
         match request.method.as_str() {
-            TRANSLATE_CHINESE_METHOD | TRANSLATE_CHINESE_BATCH_METHOD | TRANSLATE_METHOD => {}
+            TRANSLATE_CHINESE_METHOD | TRANSLATE_CHINESE_BATCH_METHOD => {}
+            TRANSLATE_METHOD => {
+                if request.client.as_deref() == Some("pi") {
+                    self.hooks.direct_translation_requested();
+                }
+            }
             TRANSLATE_EDITOR_METHOD => {
                 if !self.consume_editor_trigger(&request).await {
                     return BridgeResponse::failure(
@@ -210,7 +218,7 @@ impl BridgeHandler {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
     use crate::agent_editor::tests::{FakeDesktop, private_terminal, terminal_window};
@@ -218,11 +226,18 @@ mod tests {
     use crate::codex_auth::CodexAuthStore;
     use crate::protocol::TranslationItem;
 
-    struct Hooks(AtomicBool);
+    struct Hooks {
+        busy: AtomicBool,
+        direct_requests: AtomicUsize,
+    }
 
     impl BridgeHooks for Hooks {
         fn dictation_busy(&self) -> bool {
-            self.0.load(Ordering::SeqCst)
+            self.busy.load(Ordering::SeqCst)
+        }
+
+        fn direct_translation_requested(&self) {
+            self.direct_requests.fetch_add(1, Ordering::SeqCst);
         }
     }
 
@@ -230,6 +245,7 @@ mod tests {
         handler: BridgeHandler,
         editor: Arc<AgentEditorTriggers>,
         desktop: Arc<FakeDesktop>,
+        hooks: Arc<Hooks>,
         _dir: TestDir,
     }
 
@@ -241,15 +257,20 @@ mod tests {
             dir.path("editor-trigger.json"),
             desktop.clone(),
         ));
+        let hooks = Arc::new(Hooks {
+            busy: AtomicBool::new(busy),
+            direct_requests: AtomicUsize::new(0),
+        });
         let handler = BridgeHandler::new(
             Arc::new(AiRewriteService::new(CodexAuthStore::new(None))),
             editor.clone(),
-            Arc::new(Hooks(AtomicBool::new(busy))),
+            hooks.clone(),
         );
         Fixture {
             handler,
             editor,
             desktop,
+            hooks,
             _dir: dir,
         }
     }
@@ -337,11 +358,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_pi_english_requests_are_reported_as_direct() {
+        let fixture = fixture(true);
+        let with_client = |method: &str, client: Option<&str>| {
+            let mut request = request(method);
+            request.client = client.map(str::to_owned);
+            request
+        };
+        for request in [
+            with_client(TRANSLATE_METHOD, None),
+            with_client(TRANSLATE_METHOD, Some("browser")),
+            with_client(TRANSLATE_CHINESE_METHOD, Some("pi")),
+        ] {
+            assert_eq!(code(&fixture.handler, request).await, "busy");
+        }
+        assert_eq!(fixture.hooks.direct_requests.load(Ordering::SeqCst), 0);
+
+        let pi = with_client(TRANSLATE_METHOD, Some("pi"));
+        assert_eq!(code(&fixture.handler, pi).await, "busy");
+        assert_eq!(fixture.hooks.direct_requests.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
     async fn editor_requests_need_a_valid_single_use_trigger() {
         let fixture = fixture(true);
         let (_master, terminal) = private_terminal();
         let window = terminal_window();
-        fixture.editor.trigger(&window).await.unwrap();
+        fixture
+            .editor
+            .trigger(&window, HOTKEY_TRIGGER)
+            .await
+            .unwrap();
         let token = fixture.editor.pending_token().unwrap();
 
         let editor_request = |client: &str, trigger: &str| {

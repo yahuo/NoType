@@ -88,17 +88,56 @@ async fn insert_now(text: &str, target: Option<&ActiveWindow>) -> Result<InsertO
 /// Copies the current selection of `window` without disturbing the user's clipboard.
 pub async fn selected_text(window: &ActiveWindow) -> Option<String> {
     let window = window.clone();
-    tokio::spawn(async move { selected_text_now(&window).await })
+    tokio::spawn(async move { copy_selection(&window, None).await })
+        .await
+        .ok()
+        .flatten()
+        .filter(|text| !text.trim().is_empty())
+}
+
+/// Triple-Space trigger in a normal window: selects from the start of the focused field to the
+/// cursor and copies it. The selection stays, so a paste replaces only the draft before the
+/// cursor; [`collapse_selection`] puts the cursor back instead.
+pub async fn select_to_field_start(window: &ActiveWindow) -> Option<String> {
+    let window = window.clone();
+    tokio::spawn(async move { copy_selection(&window, Some(("CTRL SHIFT", "Home"))).await })
         .await
         .ok()
         .flatten()
 }
 
-async fn selected_text_now(window: &ActiveWindow) -> Option<String> {
+/// Undoes [`select_to_field_start`]: Right collapses the selection to its end, the old cursor.
+pub async fn collapse_selection() -> Result<()> {
+    hyprland::send_shortcut("", "Right").await
+}
+
+/// The draft before three trailing trigger Spaces, like macOS `tripleSpaceTranslationSource`.
+/// Chromium can copy the trailing spaces of rich editors as no-break spaces.
+pub fn triple_space_source(copied: &str) -> Option<&str> {
+    let mut end = copied.len();
+    for _ in 0..3 {
+        let last = copied[..end].chars().next_back()?;
+        if last != ' ' && last != '\u{a0}' {
+            return None;
+        }
+        end -= last.len_utf8();
+    }
+    let source = &copied[..end];
+    (!source.trim().is_empty()).then_some(source)
+}
+
+async fn copy_selection(window: &ActiveWindow, select: Option<(&str, &str)>) -> Option<String> {
     let _clipboard = CLIPBOARD.lock().await;
     let snapshot = ClipboardSnapshot::capture().await;
     let sentinel = format!("notype-selection-probe-{}", uuid::Uuid::new_v4());
     if set_clipboard_text(&sentinel).await.is_err() {
+        return None;
+    }
+    if let Some((mods, key)) = select
+        && let Err(error) = hyprland::send_shortcut(mods, key).await
+    {
+        tracing::warn!("selection shortcut failed: {error:#}");
+        snapshot.restore().await;
         return None;
     }
 
@@ -121,7 +160,7 @@ async fn selected_text_now(window: &ActiveWindow) -> Option<String> {
         }
     }
     snapshot.restore().await;
-    copied.filter(|text| !text.trim().is_empty())
+    copied
 }
 
 pub async fn copy_text(text: &str) -> Result<()> {
@@ -301,6 +340,20 @@ mod tests {
             Some("x-special/gnome-copied-files")
         );
         assert_eq!(preferred_type(&types(&["TARGETS"])), None);
+    }
+
+    #[test]
+    fn triple_space_source_drops_exactly_three_trailing_spaces() {
+        assert_eq!(triple_space_source("你好   "), Some("你好"));
+        assert_eq!(
+            triple_space_source("第一段\n\n第二段    "),
+            Some("第一段\n\n第二段 ")
+        );
+        assert_eq!(triple_space_source("draft \u{a0}\u{a0}"), Some("draft"));
+        assert_eq!(triple_space_source("draft  "), None);
+        assert_eq!(triple_space_source("draft   \n"), None);
+        assert_eq!(triple_space_source(" \n    "), None);
+        assert_eq!(triple_space_source(""), None);
     }
 
     #[test]
