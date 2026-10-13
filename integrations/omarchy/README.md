@@ -85,7 +85,7 @@ secret-tool store --label='NoType Doubao' application notype account doubao.acce
 - 查看日志：`journalctl --user -u notype -f`。
 - `notype doctor` 提示守护进程缺少 `WAYLAND_DISPLAY` 或 `HYPRLAND_INSTANCE_SIGNATURE`：服务启动时会话环境尚未导入。运行 `systemctl --user import-environment WAYLAND_DISPLAY HYPRLAND_INSTANCE_SIGNATURE`，再 `systemctl --user restart notype`。
 - 翻译选中文字依赖向窗口发送 `Ctrl+C` 读取选区。VS Code 等编辑器在没有选区时会复制整行，此时会把当前行当成选中文字；macOS 版本有同样的限制。
-- 终端窗口按 Omarchy 的 `terminal` 标签识别（`default/hypr/apps/terminals.lua`），终端里不会尝试读取选区。
+- 终端窗口按 Omarchy 的 `terminal` 标签识别（`default/hypr/apps/terminals.lua`）。`notype translate` 在终端里不读取选区；`notype selection-chinese` 用 `Ctrl+Insert` 复制终端选区。Herdr 等多路复用器自己绘制鼠标选区，终端没有可复制的内容；此时直接使用剪贴板中的文字（Herdr 默认 `copy_on_select = true`，拖选即写入剪贴板）。因此在终端里没有选中文字时，会翻译剪贴板中的已有内容。
 
 ## 卸载
 

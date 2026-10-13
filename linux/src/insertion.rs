@@ -27,6 +27,8 @@ static CLIPBOARD: Mutex<()> = Mutex::const_new(());
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const MAX_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
+/// Clipboard sync tools can echo a probe back after it was restored; it is never a selection.
+const SELECTION_PROBE_PREFIX: &str = "notype-selection-probe-";
 const TEXT_TYPES: [&str; 5] = [
     "text/plain;charset=utf-8",
     "UTF8_STRING",
@@ -88,11 +90,26 @@ async fn insert_now(text: &str, target: Option<&ActiveWindow>) -> Result<InsertO
 /// Copies the current selection of `window` without disturbing the user's clipboard.
 pub async fn selected_text(window: &ActiveWindow) -> Option<String> {
     let window = window.clone();
-    tokio::spawn(async move { copy_selection(&window, None).await })
-        .await
-        .ok()
-        .flatten()
-        .filter(|text| !text.trim().is_empty())
+    tokio::spawn(async move {
+        let copied = copy_selection(&window, None)
+            .await
+            .filter(|text| !text.trim().is_empty());
+        match copied {
+            Some(text) => Some(text),
+            // Multiplexers such as Herdr draw their own mouse selection, so the terminal has
+            // nothing to copy, but their copy-on-select already put the text on the clipboard.
+            None if window.is_terminal() => {
+                let _clipboard = CLIPBOARD.lock().await;
+                read_clipboard_text().await.filter(|text| {
+                    !text.trim().is_empty() && !text.starts_with(SELECTION_PROBE_PREFIX)
+                })
+            }
+            None => None,
+        }
+    })
+    .await
+    .ok()
+    .flatten()
 }
 
 /// Triple-Space trigger in a normal window: selects from the start of the focused field to the
@@ -131,7 +148,7 @@ pub fn triple_space_source(copied: &str) -> Option<&str> {
 async fn copy_selection(window: &ActiveWindow, select: Option<(&str, &str)>) -> Option<String> {
     let _clipboard = CLIPBOARD.lock().await;
     let snapshot = ClipboardSnapshot::capture().await;
-    let sentinel = format!("notype-selection-probe-{}", uuid::Uuid::new_v4());
+    let sentinel = format!("{SELECTION_PROBE_PREFIX}{}", uuid::Uuid::new_v4());
     if set_clipboard_text(&sentinel).await.is_err() {
         return None;
     }
