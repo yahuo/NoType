@@ -109,6 +109,29 @@ Claude temporarily switches to its external-editor screen while translation is r
 
 Claude's optional `externalEditorContext` block is preserved. The proxy recognizes Claude's `# ─── Write your reply below this line` marker and translates only the reply below it. If the token, path, TTY, translation, or socket validation fails, the original temp file remains unchanged.
 
+## Claude Code mod
+
+The Claude Code mod at [`integrations/claude-code`](../integrations/claude-code) translates the draft in Claude Code's own prompt box, as the Pi extension does in Pi: no `Ctrl+G` and no external-editor screen. It needs a Claude Code build with the plugin hooks API (mods) and a `notype-editor` that supports `--translate`. Reinstall the app and rerun `./integrations/agent-editor/install.sh` if yours predates it.
+
+Install it from this checkout once; the plugin is read from the folder, so `/reload-plugins` picks up later changes:
+
+```bash
+claude plugin marketplace add "$PWD/integrations/claude-code"
+claude plugin install notype@notype
+```
+
+For a single session, `claude --plugin-dir integrations/claude-code` loads it without installing.
+
+With NoType running, enter a non-empty draft and press Space three times within one second. The mod removes only the trigger spaces, shows `NoType: translating…` in the status line, and replaces the draft only if it has not changed while the request was running. Spaces typed while waiting are kept. A held Space does not trigger. A translation that loses a `[Pasted text #N …]` or `[Image #N]` placeholder is not applied, because Claude Code expands those placeholders when the prompt is sent.
+
+The mod sends the draft through `notype-editor --translate`, which reads the draft on stdin and writes the translation to stdout. It uses the first helper it finds: `$NOTYPE_EDITOR_HELPER`, then `~/.local/bin/notype-editor`, then the helper bundled in `/Applications/NoType.app`. Without a helper, three Spaces are typed as usual. The helper sends a plain `translate` request with `client: "claude-code"`. NoType treats it as the claim on the triple Space, the same as Pi's request, so it does not also synthesize `Ctrl+G`. When the mod is not loaded, the external-editor flow above still handles Claude Code. Codex CLI has no comparable hook and keeps using `Ctrl+G`.
+
+Run the mod's tests with:
+
+```bash
+claude plugin test integrations/claude-code
+```
+
 ## Pi integration
 
 The native Pi extension is at [`integrations/pi/notype.ts`](../integrations/pi/notype.ts). It listens to terminal input without replacing Pi's editor component, so it remains compatible with custom Pi editors.
