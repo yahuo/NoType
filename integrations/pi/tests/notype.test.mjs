@@ -4,7 +4,7 @@ import { createServer } from "node:net";
 import { test } from "node:test";
 import notype from "../notype.ts";
 
-async function harness(t, source = "请检查这段代码") {
+async function harness(t, triggerChunks = ["   "], source = "请检查这段代码") {
 	const socketPath = `/tmp/notype-pi-test-${randomUUID().slice(0, 8)}.sock`;
 	const previousSocket = process.env.NOTYPE_BRIDGE_SOCKET;
 	process.env.NOTYPE_BRIDGE_SOCKET = socketPath;
@@ -49,8 +49,11 @@ async function harness(t, source = "请检查这段代码") {
 	notype({ on: (event, handler) => { handlers[event] = handler; } });
 	handlers.session_start({}, ctx);
 	// Pi dispatches terminal listeners before inserting the same chunk in its editor.
-	terminalInput("   ");
-	text += "   ";
+	// The editor only inserts the text; kitty key-release sequences never reach it.
+	for (const chunk of triggerChunks) {
+		terminalInput(chunk);
+		text += chunk.replace(/\x1b\[[0-9;:]*u/g, "");
+	}
 	const { socket, request } = await requestReceived;
 	assert.equal(request.text, source);
 	assert.equal(text, source);
@@ -79,6 +82,20 @@ test("three spaces replace an unchanged Pi draft", async (t) => {
 	assert.equal(h.text, "Please review this code.");
 	assert.deepEqual(h.notifications, []);
 });
+
+const SPACE_RELEASE = "\x1b[32;1:3u";
+
+for (const [name, chunks] of [
+	["separate", [" ", SPACE_RELEASE, " ", SPACE_RELEASE, " ", SPACE_RELEASE]],
+	["coalesced", Array(3).fill(" " + SPACE_RELEASE)],
+]) {
+	test(`kitty key-release events between ${name} spaces do not reset the trigger`, { timeout: 2_000 }, async (t) => {
+		const h = await harness(t, chunks);
+		await h.respond();
+		assert.equal(h.text, "Please review this code.");
+		assert.deepEqual(h.notifications, []);
+	});
+}
 
 for (const spaces of [" ", "  ", "   "]) {
 	test(`extra ${spaces.length} trailing spaces preserve the translation and spacing`, async (t) => {
