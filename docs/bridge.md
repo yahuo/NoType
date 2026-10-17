@@ -100,7 +100,7 @@ The shell environment saves the prior `$VISUAL` and `$EDITOR` as `$NOTYPE_REAL_V
 
 For an automatic translation, NoType does the following:
 
-1. Detects triple-Space in a supported terminal without reading or selecting the terminal's rendered `AXValue`.
+1. Detects triple-Space in a supported terminal without reading or selecting the terminal's rendered `AXValue`. With a Chinese input method, the Space that commits a candidate does not count, so English typed in the input method's ASCII mode needs a fourth Space right after it.
 2. Writes a private, single-use trigger token with a five-second lifetime and synthesizes `Ctrl+G`.
 3. The proxy accepts only a user-owned Claude/Codex Markdown temp buffer from an inherited user-owned TTY, verifies that its editable draft ends in three spaces, and sends the draft plus token to NoType.
 4. On success, the proxy replaces only the draft and exits, returning control to the TUI without submitting it.
