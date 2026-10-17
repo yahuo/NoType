@@ -6,10 +6,18 @@ import NoTypeEditorCore
 struct NoTypeEditorMain {
     private static let maximumBufferBytes = 1_048_576
     private static let triggerLifetimeMilliseconds: Int64 = 5_000
+    /// `notype-editor --translate`: the Claude Code mod sends its draft on stdin and reads the
+    /// English translation from stdout.
+    private static let translateArgument = "--translate"
+    private static let claudeCodeClient = "claude-code"
 
     static func main() {
         let arguments = Array(CommandLine.arguments.dropFirst())
         let environment = ProcessInfo.processInfo.environment
+
+        if arguments == [translateArgument] {
+            Darwin.exit(translateStandardInput(environment: environment))
+        }
 
         guard let fileURL = editableFileURL(from: arguments),
               let trigger = loadPendingTrigger(environment: environment)
@@ -46,6 +54,28 @@ struct NoTypeEditorMain {
         } catch {
             // A failed automatic translation must leave the agent's temporary file untouched.
             writeError("NoType: \(error.localizedDescription)\n")
+        }
+    }
+
+    private static func translateStandardInput(environment: [String: String]) -> Int32 {
+        let data = FileHandle.standardInput.readData(ofLength: maximumBufferBytes + 1)
+        guard data.count <= maximumBufferBytes,
+              let sourceText = String(data: data, encoding: .utf8),
+              !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            writeError("NoType: the draft is empty, too large, or not UTF-8.\n")
+            return 1
+        }
+
+        do {
+            let translated = try NoTypeEditorBridgeClient(
+                socketURL: bridgeSocketURL(environment: environment)
+            ).translate(sourceText: sourceText, client: claudeCodeClient)
+            FileHandle.standardOutput.write(Data(translated.utf8))
+            return 0
+        } catch {
+            writeError("NoType: \(error.localizedDescription)\n")
+            return 1
         }
     }
 
@@ -132,8 +162,24 @@ struct NoTypeEditorMain {
     }
 
     private static func runtimeDirectory() -> URL {
-        FileManager.default.temporaryDirectory
+        userTemporaryDirectory()
             .appendingPathComponent("com.opensource.notype", isDirectory: true)
+    }
+
+    /// A terminal can inherit a stale TMPDIR; ask for the per-user directory NoType itself uses.
+    private static func userTemporaryDirectory() -> URL {
+        let length = confstr(_CS_DARWIN_USER_TEMP_DIR, nil, 0)
+        if length > 0 {
+            var buffer = [CChar](repeating: 0, count: length)
+            if confstr(_CS_DARWIN_USER_TEMP_DIR, &buffer, length) > 0 {
+                let bytes = buffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+                let path = String(decoding: bytes, as: UTF8.self)
+                if path.hasPrefix("/") {
+                    return URL(fileURLWithPath: path, isDirectory: true)
+                }
+            }
+        }
+        return FileManager.default.temporaryDirectory
     }
 
     private static func terminalPath() -> String? {

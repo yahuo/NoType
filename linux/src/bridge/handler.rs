@@ -10,9 +10,9 @@ use crate::agent_editor::{
     AgentEditorTriggers, HOTKEY_TRIGGER, TRIPLE_SPACE_TRIGGER, is_uuid_string,
 };
 use crate::protocol::{
-    Admission, BridgeRequest, BridgeResponse, PING_METHOD, TRANSLATE_CHINESE_BATCH_METHOD,
-    TRANSLATE_CHINESE_METHOD, TRANSLATE_EDITOR_METHOD, TRANSLATE_METHOD, VERSION,
-    validate_browser_batch,
+    Admission, BridgeRequest, BridgeResponse, DIRECT_DRAFT_CLIENTS, PING_METHOD,
+    TRANSLATE_CHINESE_BATCH_METHOD, TRANSLATE_CHINESE_METHOD, TRANSLATE_EDITOR_METHOD,
+    TRANSLATE_METHOD, VERSION, validate_browser_batch,
 };
 use crate::rewrite::AiRewriteService;
 
@@ -21,7 +21,8 @@ pub trait BridgeHooks: Send + Sync + 'static {
     /// True while dictation is recording, transcribing or refining.
     fn dictation_busy(&self) -> bool;
 
-    /// Pi's extension asked to translate its draft; it handles triple Space on its own.
+    /// The Pi extension or the Claude Code mod asked to translate its draft; it handles triple
+    /// Space on its own.
     fn direct_translation_requested(&self) {}
 }
 
@@ -87,7 +88,11 @@ impl BridgeHandler {
         match request.method.as_str() {
             TRANSLATE_CHINESE_METHOD | TRANSLATE_CHINESE_BATCH_METHOD => {}
             TRANSLATE_METHOD => {
-                if request.client.as_deref() == Some("pi") {
+                if request
+                    .client
+                    .as_deref()
+                    .is_some_and(|client| DIRECT_DRAFT_CLIENTS.contains(&client))
+                {
                     self.hooks.direct_translation_requested();
                 }
             }
@@ -358,7 +363,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_pi_english_requests_are_reported_as_direct() {
+    async fn only_direct_client_english_requests_are_reported_as_direct() {
         let fixture = fixture(true);
         let with_client = |method: &str, client: Option<&str>| {
             let mut request = request(method);
@@ -374,9 +379,14 @@ mod tests {
         }
         assert_eq!(fixture.hooks.direct_requests.load(Ordering::SeqCst), 0);
 
-        let pi = with_client(TRANSLATE_METHOD, Some("pi"));
-        assert_eq!(code(&fixture.handler, pi).await, "busy");
-        assert_eq!(fixture.hooks.direct_requests.load(Ordering::SeqCst), 1);
+        for (index, client) in ["pi", "claude-code"].into_iter().enumerate() {
+            let direct = with_client(TRANSLATE_METHOD, Some(client));
+            assert_eq!(code(&fixture.handler, direct).await, "busy");
+            assert_eq!(
+                fixture.hooks.direct_requests.load(Ordering::SeqCst),
+                index + 1
+            );
+        }
     }
 
     #[tokio::test]
