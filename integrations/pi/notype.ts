@@ -12,6 +12,10 @@ const TRIGGER_WINDOW_MS = 1_000;
 const KEY_REPEAT_INITIAL_GAP_MS = 120;
 const KEY_REPEAT_FAST_GAP_MS = 80;
 const STATUS_KEY = "notype-translation";
+// Same release-event shapes as pi-tui's isKeyRelease, inlined so the extension
+// keeps no runtime dependency on Pi's packages.
+const KITTY_KEY_RELEASE = /\x1b\[[0-9;:]*:3[u~ABCDHF]/g;
+const BRACKETED_PASTE_START = "\x1b[200~";
 
 type BridgeResponse = {
 	version: number;
@@ -25,6 +29,12 @@ type BridgeResponse = {
 };
 
 const execFileAsync = promisify(execFile);
+
+function withoutKeyReleases(data: string): string {
+	// Pasted text is literal input, even when it contains something like ":3F".
+	if (data.includes(BRACKETED_PASTE_START)) return data;
+	return data.replace(KITTY_KEY_RELEASE, "");
+}
 
 export async function socketPath(): Promise<string> {
 	if (process.env.NOTYPE_BRIDGE_SOCKET) return process.env.NOTYPE_BRIDGE_SOCKET;
@@ -199,7 +209,9 @@ export default function (pi: ExtensionAPI) {
 
 			// stdin can coalesce several fast key presses into one chunk. Process every
 			// character instead of requiring each callback to contain exactly one Space.
-			for (const character of data) {
+			// With the kitty keyboard protocol, releasing a key sends its own escape
+			// sequence; a release is not a new key press, so it must not reset the trigger.
+			for (const character of withoutKeyReleases(data)) {
 				if (character !== " ") {
 					resetTrigger();
 					continue;
