@@ -11,6 +11,9 @@ enum NoTypeBridgeProtocol {
     static let translateChineseMethod = "translate_chinese"
     static let translateChineseBatchMethod = "translate_chinese_batch"
     static let translateEditorMethod = "translate_editor"
+    /// Clients that replace the agent draft themselves (the Pi extension, the Claude Code mod);
+    /// their `translate` request claims a triple-Space before NoType opens the external editor.
+    static let directDraftClients: Set<String> = ["pi", "claude-code"]
 }
 
 struct NoTypeTranslationItem: Codable, Equatable, Sendable {

@@ -7,8 +7,8 @@ use tokio::io::AsyncWriteExt;
 use tokio::net::UnixStream;
 
 use crate::protocol::{
-    BridgeRequest, BridgeResponse, FrameError, TRANSLATE_EDITOR_METHOD, VERSION, encode_json_frame,
-    read_frame,
+    BridgeRequest, BridgeResponse, FrameError, TRANSLATE_EDITOR_METHOD, TRANSLATE_METHOD, VERSION,
+    encode_json_frame, read_frame,
 };
 
 pub const EDITOR_CLIENT: &str = "agent-editor";
@@ -74,7 +74,23 @@ impl EditorBridgeClient {
         request.parent_process_id = Some(translation.parent_process_id);
         request.terminal = Some(translation.terminal.into());
         request.trigger = Some(translation.trigger.into());
+        self.exchange(request).await
+    }
 
+    /// A plain `translate` request, as Pi sends it. NoType takes a direct client's request as
+    /// the claim on the draft, so it does not also open the external editor.
+    pub async fn translate_text(
+        &self,
+        source_text: &str,
+        client: &str,
+    ) -> Result<String, EditorBridgeError> {
+        let mut request = BridgeRequest::new(TRANSLATE_METHOD);
+        request.client = Some(client.into());
+        request.text = Some(source_text.into());
+        self.exchange(request).await
+    }
+
+    async fn exchange(&self, request: BridgeRequest) -> Result<String, EditorBridgeError> {
         let response = tokio::time::timeout(self.timeout, self.send(&request))
             .await
             .map_err(|_| {

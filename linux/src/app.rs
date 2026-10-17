@@ -31,9 +31,10 @@ const COPIED_RESET: Duration = Duration::from_millis(1_800);
 const FAILED_RESET: Duration = Duration::from_millis(2_000);
 /// The fcitx5 addon reports the third Space before the app has received it.
 const TRIPLE_SPACE_SETTLE: Duration = Duration::from_millis(100);
-/// Pi's extension translates its own draft after the same third Space; as long as on macOS.
-const PI_CLAIM_WAIT: Duration = Duration::from_millis(150);
-const PI_CLAIM_WINDOW: Duration = Duration::from_secs(2);
+/// The Pi extension and the Claude Code mod translate their own draft after the same third
+/// Space; as long as on macOS.
+const DIRECT_CLAIM_WAIT: Duration = Duration::from_millis(150);
+const DIRECT_CLAIM_WINDOW: Duration = Duration::from_secs(2);
 const SELECTION_EMPTY: &str = "未读取到选中文字。请先选中一段文本，再按 Alt + Ctrl + Space。";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,8 +103,8 @@ struct State {
     asr: Option<Arc<DoubaoSession>>,
     selection_request: u64,
     selection_task: Option<AbortHandle>,
-    /// When Pi's extension last asked to translate its draft.
-    last_pi_translation: Option<Instant>,
+    /// When the Pi extension or the Claude Code mod last asked to translate its draft.
+    last_direct_translation: Option<Instant>,
 }
 
 pub struct App {
@@ -265,10 +266,10 @@ impl App {
         state.tasks.push(task.abort_handle());
     }
 
-    fn pi_translated_recently(&self) -> bool {
+    fn direct_translated_recently(&self) -> bool {
         self.lock()
-            .last_pi_translation
-            .is_some_and(|at| at.elapsed() < PI_CLAIM_WINDOW)
+            .last_direct_translation
+            .is_some_and(|at| at.elapsed() < DIRECT_CLAIM_WINDOW)
     }
 
     fn selection_chinese(&self) {
@@ -885,10 +886,10 @@ impl App {
         };
 
         if window.is_terminal() {
-            // Pi's extension receives the same Space and translates its own draft. Give it a
-            // moment to claim it before opening the external editor of Claude Code or Codex.
-            tokio::time::sleep(PI_CLAIM_WAIT).await;
-            if !self.is_current(session) || self.pi_translated_recently() {
+            // The Pi extension and the Claude Code mod receive the same Space and translate their
+            // own draft. Give them a moment to claim it before opening the external editor.
+            tokio::time::sleep(DIRECT_CLAIM_WAIT).await;
+            if !self.is_current(session) || self.direct_translated_recently() {
                 return;
             }
             if !self.ai.has_credentials() {
@@ -1044,7 +1045,7 @@ impl BridgeHooks for App {
     }
 
     fn direct_translation_requested(&self) {
-        self.lock().last_pi_translation = Some(Instant::now());
+        self.lock().last_direct_translation = Some(Instant::now());
     }
 }
 

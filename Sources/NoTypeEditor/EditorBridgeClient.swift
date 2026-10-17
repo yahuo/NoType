@@ -4,6 +4,7 @@ import Foundation
 private enum EditorBridgeProtocol {
     static let version = 1
     static let maximumFrameBytes = 1_048_576
+    static let translateMethod = "translate"
     static let translateEditorMethod = "translate_editor"
 }
 
@@ -21,11 +22,12 @@ private struct EditorBridgeRequest: Encodable {
     let method: String
     let client: String
     let text: String
-    let token: String
-    let processID: Int32
-    let parentProcessID: Int32
-    let terminal: String
-    let trigger: String
+    // Only `translate_editor` carries the trigger proof; nil fields are left out of the JSON.
+    var token: String?
+    var processID: Int32?
+    var parentProcessID: Int32?
+    var terminal: String?
+    var trigger: String?
 }
 
 private struct EditorBridgeResponse: Decodable {
@@ -80,10 +82,9 @@ struct NoTypeEditorBridgeClient {
         parentProcessID: Int32,
         terminal: String
     ) throws -> String {
-        let requestID = UUID().uuidString
-        let request = EditorBridgeRequest(
+        try translate(EditorBridgeRequest(
             version: EditorBridgeProtocol.version,
-            id: requestID,
+            id: UUID().uuidString,
             method: EditorBridgeProtocol.translateEditorMethod,
             client: "agent-editor",
             text: sourceText,
@@ -92,11 +93,26 @@ struct NoTypeEditorBridgeClient {
             parentProcessID: parentProcessID,
             terminal: terminal,
             trigger: "triple-space"
-        )
+        ))
+    }
+
+    /// A plain `translate` request, as Pi sends it. NoType takes a direct client's request as
+    /// the claim on the draft, so it does not also open the external editor.
+    func translate(sourceText: String, client: String) throws -> String {
+        try translate(EditorBridgeRequest(
+            version: EditorBridgeProtocol.version,
+            id: UUID().uuidString,
+            method: EditorBridgeProtocol.translateMethod,
+            client: client,
+            text: sourceText
+        ))
+    }
+
+    private func translate(_ request: EditorBridgeRequest) throws -> String {
         let response = try send(request)
 
         guard response.version == EditorBridgeProtocol.version,
-              response.id == requestID
+              response.id == request.id
         else {
             throw NoTypeEditorBridgeError.invalidResponse("response ID or version mismatch")
         }

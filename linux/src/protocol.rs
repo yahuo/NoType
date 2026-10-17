@@ -16,6 +16,9 @@ pub const TRANSLATE_METHOD: &str = "translate";
 pub const TRANSLATE_CHINESE_METHOD: &str = "translate_chinese";
 pub const TRANSLATE_CHINESE_BATCH_METHOD: &str = "translate_chinese_batch";
 pub const TRANSLATE_EDITOR_METHOD: &str = "translate_editor";
+/// Clients that replace the agent draft themselves (the Pi extension, the Claude Code mod);
+/// their `translate` request claims a triple Space before the daemon opens the external editor.
+pub const DIRECT_DRAFT_CLIENTS: [&str; 2] = ["pi", "claude-code"];
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TranslationItem {

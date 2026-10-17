@@ -725,9 +725,9 @@ final class NoTypeAppModel: ObservableObject {
 
         let target = DictationTargetContext.currentFrontmost()
         if AgentEditorIntegrationService.supportsTerminal(target) {
-            // Never treat a terminal's rendered AXValue as an editable field. Pi's native
-            // adapter receives the same third Space just after this event tap, so give it
-            // a brief chance to claim the draft before opening an external editor.
+            // Never treat a terminal's rendered AXValue as an editable field. The Pi extension
+            // and the Claude Code mod receive the same third Space just after this event tap,
+            // so give them a brief chance to claim the draft before opening an external editor.
             guard settings.agentTUITranslationEnabled else { return }
             try? await Task.sleep(for: .milliseconds(150))
             guard !hasRecentDirectBridgeRequest(for: target) else { return }
@@ -791,7 +791,8 @@ final class NoTypeAppModel: ObservableObject {
         case NoTypeBridgeProtocol.translateChineseMethod, NoTypeBridgeProtocol.translateChineseBatchMethod:
             break
         case NoTypeBridgeProtocol.translateMethod:
-            if request.client == "pi" {
+            if let client = request.client,
+               NoTypeBridgeProtocol.directDraftClients.contains(client) {
                 let target = DictationTargetContext.currentFrontmost()
                 lastDirectBridgeRequest = (
                     timestamp: Date.timeIntervalSinceReferenceDate,

@@ -19,6 +19,10 @@ use crate::paths;
 
 const MAX_BUFFER_BYTES: u64 = 1_048_576;
 const MAX_TRIGGER_BYTES: u64 = 4_096;
+/// `notype-editor --translate`: the Claude Code mod sends its draft on stdin and reads the
+/// English translation from stdout.
+const TRANSLATE_ARGUMENT: &str = "--translate";
+const CLAUDE_CODE_CLIENT: &str = "claude-code";
 
 /// The environment the proxy reads, captured once so tests can supply their own.
 #[derive(Clone, Debug, Default)]
@@ -49,6 +53,10 @@ impl EditorEnvironment {
 pub fn run() -> ExitCode {
     let arguments: Vec<OsString> = std::env::args_os().skip(1).collect();
     let environment = EditorEnvironment::from_process();
+
+    if arguments == [TRANSLATE_ARGUMENT] {
+        return translate_standard_input(&environment);
+    }
 
     let Some(file) = editable_file(&arguments) else {
         return exec_fallback_editor(&arguments, &environment);
@@ -85,6 +93,45 @@ pub fn run() -> ExitCode {
         write_error(&format!("NoType: {error}\n"));
     }
     ExitCode::SUCCESS
+}
+
+fn translate_standard_input(environment: &EditorEnvironment) -> ExitCode {
+    let mut data = Vec::new();
+    let read = io::stdin()
+        .lock()
+        .take(MAX_BUFFER_BYTES + 1)
+        .read_to_end(&mut data);
+    let Some(source) = read
+        .ok()
+        .filter(|_| data.len() as u64 <= MAX_BUFFER_BYTES)
+        .and_then(|_| String::from_utf8(data).ok())
+        .filter(|source| !source.trim().is_empty())
+    else {
+        write_error("NoType: the draft is empty, too large, or not UTF-8.\n");
+        return ExitCode::FAILURE;
+    };
+
+    let client = EditorBridgeClient::new(environment.bridge_socket.clone());
+    let translated = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(anyhow::Error::from)
+        .and_then(|runtime| runtime.block_on(translate_draft(&client, &source)));
+    match translated {
+        Ok(translated) if io::stdout().write_all(translated.as_bytes()).is_ok() => {
+            ExitCode::SUCCESS
+        }
+        Ok(_) => ExitCode::FAILURE,
+        Err(error) => {
+            write_error(&format!("NoType: {error}\n"));
+            ExitCode::FAILURE
+        }
+    }
+}
+
+/// Translates a draft for the Claude Code mod, which replaces its prompt itself.
+pub async fn translate_draft(client: &EditorBridgeClient, source: &str) -> anyhow::Result<String> {
+    Ok(client.translate_text(source, CLAUDE_CODE_CLIENT).await?)
 }
 
 pub async fn translate_file(
@@ -477,6 +524,27 @@ mod tests {
             format!("{prefix}Please continue.\n")
         );
         assert_eq!(fs::metadata(&draft.file).unwrap().mode() & 0o777, 0o640);
+    }
+
+    #[tokio::test]
+    async fn translates_a_claude_code_draft_as_a_direct_client() {
+        let dir = TestDir::new();
+        let socket = dir.path("bridge.sock");
+        let server = fake_bridge(socket.clone(), |request| {
+            BridgeResponse::success(&request.id, Some("Please continue.".into()))
+        })
+        .await;
+
+        let client = EditorBridgeClient::new(socket);
+        let translated = translate_draft(&client, "请继续").await.unwrap();
+
+        let request = server.await.unwrap();
+        assert_eq!(translated, "Please continue.");
+        assert_eq!(request.method, "translate");
+        assert_eq!(request.client.as_deref(), Some("claude-code"));
+        assert_eq!(request.text.as_deref(), Some("请继续"));
+        assert_eq!(request.token, None);
+        assert_eq!(request.trigger, None);
     }
 
     #[tokio::test]

@@ -11,5 +11,5 @@ pub use client::{
 };
 pub use proxy::{
     EditorEnvironment, editable_file, fallback_command, is_editor_proxy_command,
-    load_pending_trigger, read_editor_buffer, run, terminal_path, translate_file,
+    load_pending_trigger, read_editor_buffer, run, terminal_path, translate_draft, translate_file,
 };
