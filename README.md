@@ -289,6 +289,7 @@ scripts/                   构建、图标、Xcode 工程生成脚本
 packaging/                 App bundle 资源与图标
 Tests/NoTypeTests          测试
 integrations/pi            Pi TUI 的 NoType bridge 扩展
+integrations/claude-code   Claude Code 输入框内三连空格翻译的 mod
 integrations/agent-editor  Claude Code / Codex CLI 的 external-editor 安装脚本
 ```
 

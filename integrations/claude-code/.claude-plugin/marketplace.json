@@ -1,0 +1,6 @@
+{
+  "name": "notype",
+  "owner": { "name": "NoType" },
+  "description": "NoType integrations for Claude Code.",
+  "plugins": [{ "name": "notype", "source": "./" }]
+}
