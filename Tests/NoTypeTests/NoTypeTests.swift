@@ -49,25 +49,86 @@ func appSettingsDefaultLanguageUsesSimplifiedChinese() {
 func tripleSpaceDetectorTriggersOnlyWhenThreePlainSpacesArriveWithinOneSecond() {
     var detector = TripleSpaceSequenceDetector()
 
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.0) == .pending)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.4) == .armed)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 10.9) == .triggered)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 10.0) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 10.4) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 10.9) == .triggered)
 }
 
 @Test
 func tripleSpaceDetectorResetsAfterTimeoutOtherKeysAndKeyRepeat() {
     var detector = TripleSpaceSequenceDetector()
 
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.0) == .pending)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 20.5) == .armed)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.1) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 20.0) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 20.5) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 21.1) == .pending)
 
-    #expect(detector.consume(isPlainSpace: false, isRepeat: false, timestamp: 21.2) == .pending)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.3) == .pending)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: true, timestamp: 21.4) == .pending)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.5) == .pending)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.7) == .armed)
-    #expect(detector.consume(isPlainSpace: true, isRepeat: false, timestamp: 21.9) == .triggered)
+    #expect(detector.consume(key: .other, isRepeat: false, timestamp: 21.2) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 21.3) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: true, timestamp: 21.4) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 21.5) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 21.7) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 21.9) == .triggered)
+}
+
+@Test
+func tripleSpaceDetectorSkipsTheSpaceThatCommitsAnInputMethodCandidate() {
+    var detector = TripleSpaceSequenceDetector()
+
+    #expect(detector.consume(key: .letter, isRepeat: false, timestamp: 30.0) == .pending)
+    #expect(detector.consume(key: .letter, isRepeat: false, timestamp: 30.1) == .pending)
+    #expect(detector.consume(key: .backspace, isRepeat: false, timestamp: 30.2) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 30.3, spaceCommitsComposition: true) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 30.4, spaceCommitsComposition: true) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 30.5, spaceCommitsComposition: true) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 30.6, spaceCommitsComposition: true) == .triggered)
+}
+
+@Test
+func tripleSpaceDetectorCountsTheSpaceAfterLettersWithoutAnInputMethod() {
+    var detector = TripleSpaceSequenceDetector()
+    var inputSourceQueries = 0
+    func spaceCommitsComposition() -> Bool {
+        inputSourceQueries += 1
+        return false
+    }
+
+    #expect(detector.consume(key: .letter, isRepeat: false, timestamp: 40.0) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 40.1, spaceCommitsComposition: spaceCommitsComposition()) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 40.2, spaceCommitsComposition: spaceCommitsComposition()) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 40.3, spaceCommitsComposition: spaceCommitsComposition()) == .triggered)
+    #expect(inputSourceQueries == 1)
+}
+
+@Test
+func tripleSpaceDetectorCountsSpacesOnceTheCompositionEndsAnotherWay() {
+    var detector = TripleSpaceSequenceDetector()
+
+    // A digit picks a candidate.
+    #expect(detector.consume(key: .letter, isRepeat: false, timestamp: 50.0) == .pending)
+    #expect(detector.consume(key: .other, isRepeat: false, timestamp: 50.1) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 50.2, spaceCommitsComposition: true) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 50.3, spaceCommitsComposition: true) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 50.4, spaceCommitsComposition: true) == .triggered)
+
+    // A click elsewhere resets the detector.
+    #expect(detector.consume(key: .letter, isRepeat: false, timestamp: 51.0) == .pending)
+    detector.reset()
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 51.2, spaceCommitsComposition: true) == .pending)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 51.3, spaceCommitsComposition: true) == .armed)
+    #expect(detector.consume(key: .space, isRepeat: false, timestamp: 51.4, spaceCommitsComposition: true) == .triggered)
+}
+
+@Test
+func onlyChineseInputMethodsCommitCompositionWithSpace() {
+    let inputMode = kTISTypeKeyboardInputMode as String
+    let layout = kTISTypeKeyboardLayout as String
+
+    #expect(InputSourceService.commitsCompositionWithSpace(sourceType: inputMode, languages: ["zh-Hans"]))
+    #expect(InputSourceService.commitsCompositionWithSpace(sourceType: inputMode, languages: ["zh-Hant"]))
+    #expect(!InputSourceService.commitsCompositionWithSpace(sourceType: layout, languages: ["zh-Hant", "en"]))
+    #expect(!InputSourceService.commitsCompositionWithSpace(sourceType: layout, languages: ["en"]))
+    #expect(!InputSourceService.commitsCompositionWithSpace(sourceType: inputMode, languages: ["ko"]))
+    #expect(!InputSourceService.commitsCompositionWithSpace(sourceType: inputMode, languages: ["ja"]))
 }
 
 @Test

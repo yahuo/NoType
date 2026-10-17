@@ -66,6 +66,28 @@ final class InputSourceService {
         return markers.contains { descriptor.contains($0) }
     }
 
+    /// Whether the current input source consumes the Space that commits a candidate,
+    /// as Chinese input methods do. Korean inserts that Space and Japanese uses it to
+    /// convert, so neither is included.
+    static func currentSourceCommitsCompositionWithSpace() -> Bool {
+        guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue() else {
+            return false
+        }
+
+        return commitsCompositionWithSpace(
+            sourceType: stringProperty(kTISPropertyInputSourceType, from: current),
+            languages: arrayProperty(kTISPropertyInputSourceLanguages, from: current)
+        )
+    }
+
+    static func commitsCompositionWithSpace(sourceType: String?, languages: [String]) -> Bool {
+        // Keyboard layouts type directly, even Chinese ones such as Cangjie or Zhuyin.
+        guard sourceType != kTISTypeKeyboardLayout as String else {
+            return false
+        }
+        return languages.contains { $0.lowercased().hasPrefix("zh") }
+    }
+
     static func isCJKLanguage(_ languageCode: String) -> Bool {
         let normalized = languageCode.lowercased()
         return normalized.hasPrefix("zh") || normalized.hasPrefix("ja") || normalized.hasPrefix("ko")
