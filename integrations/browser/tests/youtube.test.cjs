@@ -52,12 +52,42 @@ test('does not merge separate lines that happen to be short', () => {
   const same = yt.buildCues([{ start: 0, duration: 1000, text: '中文' }, { start: 100, duration: 1000, text: '字幕' }]);
   assert.deepEqual(plain(same), [{ start: 0, end: 1100, text: '中文字幕' }]);
 });
+test('sentences cross caption lines, split inside a line and get interpolated times', () => {
+  const yt = load();
+  const sentences = yt.buildSentences([
+    { start: 0, end: 2000, text: 'One of my favorite tools that' },
+    { start: 2000, end: 4000, text: 'I use is Herder. It is great' },
+    { start: 4000, end: 5000, text: 'and fast.' },
+    { start: 8000, end: 9000, text: 'After a pause' },
+    { start: 11000, end: 12000, text: '这是中文。第二句' },
+  ]);
+  assert.deepEqual(plain(sentences.map((s) => s.text)), [
+    'One of my favorite tools that I use is Herder.', 'It is great and fast.', 'After a pause', '这是中文。', '第二句']);
+  assert.equal(sentences[0].start, 0);
+  // "I use is Herder." is 16 of the 27 non-space characters of its line.
+  assert.equal(Math.round(sentences[0].end), Math.round(2000 + 2000 * 16 / 27));
+  assert.equal(sentences[1].start, sentences[0].end);
+  assert.equal(sentences[1].end, 5000);
+  assert.equal(sentences[2].end, 9000);
+  assert.equal(yt.findCue(sentences, 3500), 1);
+  assert.equal(yt.findCue(sentences, 6000), -1);
+});
+test('unpunctuated speech is cut at a clause mark after 100 characters or before 200', () => {
+  const yt = load();
+  const line = (n, text) => ({ start: n * 1000, end: n * 1000 + 1000, text });
+  const clauses = yt.buildSentences(Array.from({ length: 6 }, (_, n) => line(n, `part ${n} of a long run of words without a stop,`)));
+  assert.ok(clauses.length > 1 && clauses.every((s) => s.text.length <= 200));
+  assert.ok(clauses.slice(0, -1).every((s) => s.text.length >= 100 && s.text.endsWith(',')));
+  const words = yt.buildSentences(Array.from({ length: 12 }, (_, n) => line(n, `word ${n} keeps going and going on`)));
+  assert.ok(words.length > 1 && words.every((s) => s.text.length <= 200));
+});
 test('accepts only same-origin timed text bound to a video', () => {
   const yt = load();
   const text = JSON.stringify({ events: [{ tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: 'Hi' }] }] });
   const message = (url, extra = {}) => ({ source: 'notype-youtube', type: 'timedtext', url, text, ...extra });
   const track = yt.capture(message('/api/timedtext?v=abc&lang=en&fmt=json3'), href);
   assert.equal(track.video, 'abc'); assert.equal(track.translated, false); assert.equal(track.cues.length, 1);
+  assert.equal(track.sentences.length, 1);
   assert.equal(yt.capture(message('/api/timedtext?v=abc&tlang=zh-Hans'), href).translated, true);
   assert.equal(yt.capture(message('https://evil.example/api/timedtext?v=abc'), href), null);
   assert.equal(yt.capture(message('/api/other?v=abc'), href), null);
