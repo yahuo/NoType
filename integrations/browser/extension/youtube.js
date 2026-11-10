@@ -184,7 +184,7 @@
     let videoId = null, track = null, videoSince = 0, refetched = false, clickedFor = "";
     let lastPressed = null, captionsWanted = true, scheduledAt = -Infinity, scheduledTime = NaN;
     let host, box, original, translated, pill, sheet, layoutKey = "", player = null;
-    let results = 0, failuresKey = "", failures = 0;
+    let results = 0, failuresKey = "", failures = 0, failureReason = "";
 
     function stop() {
       stopped = true;
@@ -367,8 +367,9 @@
       line.textContent = "";
       if (text) { const span = document.createElement("span"); span.textContent = text; line.append(span); }
     }
-    function setStatus(text, actionable = false) {
+    function setStatus(text, actionable = false, reason = "") {
       if (pill.textContent !== text) pill.textContent = text;
+      if (pill.title !== reason) pill.title = reason;
       pill.hidden = !text;
       pill.disabled = !actionable;
     }
@@ -423,11 +424,13 @@
       // Count only this video's failures; earlier videos keep theirs for a later retry.
       const key = showing ? `${results}:${track.url}` : "";
       if (key !== failuresKey) {
-        failuresKey = key; failures = 0;
-        if (showing) for (const entry of translations.values()) if (entry.status === "failed" && track.texts.has(entry.text)) failures++;
+        failuresKey = key; failures = 0; failureReason = "";
+        if (showing) for (const entry of translations.values()) {
+          if (entry.status === "failed" && track.texts.has(entry.text)) { failures++; failureReason = entry.error || failureReason; }
+        }
       }
       if (errorMessage) setStatus(`NoType 字幕翻译已停止：${errorMessage} 再次点击插件按钮可关闭。`);
-      else if (showing && failures) setStatus(`NoType：${failures} 条字幕翻译失败，点击重试。`, !requests.size);
+      else if (showing && failures) setStatus(`NoType：${failures} 条字幕翻译失败，点击重试。`, !requests.size, failureReason);
       else if (!track && !ad) {
         const settled = performance.now() - videoSince > 1500;
         setStatus(pressed ? (settled ? "NoType：正在读取字幕…（若一直无字幕，请刷新页面）" : "") :

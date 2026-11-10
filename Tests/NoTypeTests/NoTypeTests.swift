@@ -756,6 +756,32 @@ func browserBatchValidatesLimitsAndMapsOutOfOrderResults() throws {
 }
 
 @Test
+func browserBatchDecodeReportsWhyOutputWasRejected() {
+    let items = ["a", "b", "c"].map { NoTypeTranslationItem(id: $0, text: "Hello") }
+    func line(_ id: String, _ text: String = "你好") -> String { "{\"id\":\"\(id)\",\"text\":\"\(text)\"}" }
+
+    #expect(throws: NoTypeBrowserBatchError.unparsableLine(line: 2, lines: 3)) {
+        try NoTypeBrowserBatch.decode([line("a"), "```", line("c")].joined(separator: "\n"), for: items)
+    }
+    #expect(throws: NoTypeBrowserBatchError.mismatch(expected: 3, returned: 2, missing: [2], unexpected: 0, duplicates: 0)) {
+        try NoTypeBrowserBatch.decode([line("a"), line("c")].joined(separator: "\n"), for: items)
+    }
+    #expect(throws: NoTypeBrowserBatchError.mismatch(expected: 3, returned: 3, missing: [3], unexpected: 1, duplicates: 0)) {
+        try NoTypeBrowserBatch.decode([line("a"), line("b"), line("x")].joined(separator: "\n"), for: items)
+    }
+    #expect(throws: NoTypeBrowserBatchError.mismatch(expected: 3, returned: 3, missing: [3], unexpected: 0, duplicates: 1)) {
+        try NoTypeBrowserBatch.decode([line("a"), line("b"), line("b")].joined(separator: "\n"), for: items)
+    }
+    #expect(throws: NoTypeBrowserBatchError.emptyText(positions: [1, 3])) {
+        try NoTypeBrowserBatch.decode([line("a", " "), line("b"), line("c", "")].joined(separator: "\n"), for: items)
+    }
+    let message = NoTypeBrowserBatchError.mismatch(expected: 12, returned: 11, missing: [4, 5], unexpected: 1, duplicates: 0).errorDescription
+    #expect(message == "译文与原文不对应：期望 12 条，返回 11 条，缺第 4,5 条，多余 1 条，重复 0 条。")
+    #expect(AIRewriteService.diagnosticName(AIRewriteError.incompleteStream) == "AIRewriteError.incompleteStream")
+    #expect(AIRewriteService.diagnosticName(AIRewriteError.requestFailed(500, "secret body")) == "AIRewriteError.requestFailed(500)")
+}
+
+@Test
 func browserBatchExpandsOnlyShortTexts() throws {
     let short = (0..<12).map { NoTypeTranslationItem(id: "p\($0)", text: String(repeating: "😀", count: 50)) }
     try NoTypeBrowserBatch.validate(short)
