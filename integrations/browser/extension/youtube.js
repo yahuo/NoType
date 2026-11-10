@@ -174,11 +174,11 @@
   }
 
   // A long sentence's translation is shown about one line at a time. Above 36 full-width characters
-  // (Latin counts half), clauses cut after Chinese punctuation are grouped up to 28, and the group
-  // shown follows the share of the sentence's time already played, weighted by width.
+  // (Latin counts half), clauses cut after Chinese punctuation are grouped up to 28, with at most one
+  // group per 1.5 s of the sentence so each stays long enough to read.
   const width = (text) => Array.from(text).reduce((sum, char) => sum + (char.codePointAt(0) >= 0x2e80 ? 1 : 0.5), 0);
-  function translationAt(text, progress) {
-    if (width(text) <= 36) return text;
+  function translationGroups(text, duration) {
+    if (width(text) <= 36) return [{ text, width: width(text) }];
     const groups = [];
     for (const clause of text.match(/[^，。！？；：]+(?:[，。！？；：]+[”’」』）)]*|$)/gu) || []) {
       const piece = clause.trim();
@@ -187,13 +187,39 @@
       if (last && last.width + width(piece) <= 28) { last.text += piece; last.width += width(piece); }
       else groups.push({ text: piece, width: width(piece) });
     }
-    const total = groups.reduce((sum, group) => sum + group.width, 0);
-    let covered = 0;
-    for (const group of groups) {
-      covered += group.width;
-      if (progress * total < covered) return group.text;
+    const most = Math.max(1, Math.floor(duration / 1500));
+    while (groups.length > most) {
+      let pair = 0;
+      for (let i = 1; i < groups.length - 1; i++) {
+        if (groups[i].width + groups[i + 1].width < groups[pair].width + groups[pair + 1].width) pair = i;
+      }
+      groups.splice(pair, 2, { text: groups[pair].text + groups[pair + 1].text, width: groups[pair].width + groups[pair + 1].width });
     }
-    return groups.at(-1)?.text ?? text;
+    return groups.length ? groups : [{ text, width: width(text) }];
+  }
+  // Groups switch together with the original line: each group belongs to the caption line playing
+  // at its midpoint (sentence time maps to width), and shows while that line does. A line holding
+  // several groups shares its time among them by width; a line holding none keeps the group around it.
+  function translationAt(text, sentence, cue, time) {
+    const duration = sentence.end - sentence.start;
+    const groups = translationGroups(text, duration);
+    if (groups.length === 1) return groups[0].text;
+    const total = groups.reduce((sum, group) => sum + group.width, 0);
+    const at = (moment) => duration > 0 ? Math.min(1, Math.max(0, (moment - sentence.start) / duration)) * total : 0;
+    let edge = 0;
+    const spans = groups.map((group) => ({ ...group, middle: (edge += group.width) - group.width / 2, end: edge }));
+    const now = at(time);
+    const from = cue ? at(Math.max(cue.start, sentence.start)) : now;
+    const to = cue ? at(Math.min(cue.end, sentence.end)) : now;
+    const owned = spans.filter((span) => span.middle >= from && span.middle < to);
+    if (!owned.length) return (spans.find((span) => (from + to) / 2 < span.end) ?? spans.at(-1)).text;
+    const share = (now - from) / (to - from) * owned.reduce((sum, span) => sum + span.width, 0);
+    let covered = 0;
+    for (const span of owned) {
+      covered += span.width;
+      if (share < covered) return span.text;
+    }
+    return owned.at(-1).text;
   }
 
   function findCue(cues, time) {
@@ -253,11 +279,11 @@
     "font:500 var(--notype-size,20px)/1.35 'YouTube Noto',Roboto,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;text-align:center;transition:bottom .2s}" +
     ".box[hidden],.line:empty{display:none}.line{max-width:100%;overflow-wrap:anywhere}" +
     ".line>span{background:#080808b8;padding:.06em .4em;border-radius:.2em;-webkit-box-decoration-break:clone;box-decoration-break:clone}" +
-    ".src{font-size:.82em;color:#e6e6e6}.dst{color:#fff}" +
+    ".src{font-size:.82em;color:#e6e6e6}.dst{color:#fff}.line>span{animation:notype-in .15s ease-out}@keyframes notype-in{from{opacity:0}}" +
     ".pill{all:unset;position:absolute;top:12px;left:12px;max-width:min(70%,420px);padding:6px 10px;border-radius:8px;background:#20272fe6;color:#fff;" +
     "font:13px/1.5 system-ui,sans-serif;box-shadow:0 4px 16px #0004;pointer-events:auto;cursor:default}" +
     ".pill[hidden]{display:none}.pill:not(:disabled){cursor:pointer;background:#8a5a00e6}.pill:focus-visible{outline:2px solid #ffb340}" +
-    "@media (prefers-reduced-motion:reduce){.box{transition:none}}";
+    "@media (prefers-reduced-motion:reduce){.box{transition:none}.line>span{animation:none}}";
   const nativeStyle = "#movie_player[data-notype-subtitles] .ytp-caption-window-container{opacity:0!important}";
 
   function start() {
@@ -504,8 +530,7 @@
         const sentence = track.sentences[findCue(track.sentences, time)];
         const entry = sentence && needsTranslation(sentence.text) ? translations.get(sentence.text) : null;
         setLine(original, cue?.text || "");
-        const progress = sentence && sentence.end > sentence.start ? (time - sentence.start) / (sentence.end - sentence.start) : 0;
-        setLine(translated, entry?.status === "done" ? translationAt(entry.result, progress) : "");
+        setLine(translated, entry?.status === "done" ? translationAt(entry.result, sentence, cue, time) : "");
         waiting = !!entry && ["pending", "waiting"].includes(entry.status) && !stopped;
         schedule(time, video.playbackRate);
       }
