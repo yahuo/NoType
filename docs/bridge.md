@@ -68,7 +68,7 @@ The `ping` method returns `pong` in the response `text` field.
 
 Chrome / Edge 使用 `translate_chinese_batch`，请求包含 `items: [{"id":"p0","text":"Hello"}]`，无需 `text` 字段。每批 1–4 段，段落 ID 唯一，总长度最多 6000 UTF-16 字符；若每条均不超过 100 UTF-16 字符，则允许最多 12 条（总计最多 1200 字符）；单段可独立请求至 12000 字符。扩展 0.3.3 使用扩大的短文本批次，需要同步更新 NoType 和浏览器连接程序。
 
-批次复用模型请求方法、现有登录态和 180 秒总时限。响应均有相同 `version`、请求 `id` 和 `ok`；`partial: true` 的进度帧在 `text` 中携带累计 JSON Lines 输出。最终成功帧包含完整的 `items`，按输入 ID 对齐；失败沿用 `error`。客户端不能把进度帧当成最终成功，断开 socket 会取消处理任务。
+批次复用模型请求方法、现有登录态和 180 秒总时限。响应均有相同 `version`、请求 `id` 和 `ok`；`partial: true` 的进度帧在 `text` 中携带累计 JSON Lines 输出。最终成功帧包含完整的 `items`，按输入 ID 对齐；单条失败（如模型返回空译文）时该条为 `{"id","error"}`，其余条目照常返回，整批失败沿用 `error`。客户端不能把进度帧当成最终成功，断开 socket 会取消处理任务。
 
 Native Messaging 连接程序只转发中文单段/批次方法，并设置 `client: "browser"`。它在本机字节序和 socket 大端长度前缀之间转换，逐帧输出、复用进程和 socket。扩展 0.4.0 的所有标签页共享两个工作槽位，每个槽位复用一条 Native Messaging 连接和一个 socket；连接内仍逐批请求，最终响应只结束本批次。NoType 同时接纳最多两个 `client: "browser"` 的批次，其他桥接翻译操作仍独占通道，因此 0.4.0 需同步更新应用，0.3.3 连接程序可继续复用。关闭翻译或标签页时取消其任务，其他标签页继续；池内全部任务处理完后释放连接，应用退出时关闭全部连接。桥接器最多保留 16 个同时存活的连接，关闭后释放名额，不限制累计连接次数。0.4.1 将模型错误限制在对应批次，连接不可用等通道错误仍停止当前标签页；不自动重发结果未知的请求。安装与边界见 [浏览器集成说明](../integrations/browser/README.md)。
 
