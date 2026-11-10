@@ -61,11 +61,16 @@ enum NoTypeBrowserBatch {
     /// Throws when the reply as a whole cannot be trusted; an empty translation fails only its own item.
     static func decode(_ text: String, for items: [NoTypeTranslationItem]) throws -> [NoTypeTranslationResult] {
         let lines = text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        let result = try lines.enumerated().map { index, line in
-            guard let item = try? JSONDecoder().decode(NoTypeTranslationItem.self, from: Data(line.utf8)) else {
+        let decoder = JSONDecoder()
+        let result = try lines.enumerated().flatMap { index, line -> [NoTypeTranslationItem] in
+            if let item = try? decoder.decode(NoTypeTranslationItem.self, from: Data(line.utf8)) { return [item] }
+            // The model sometimes puts every object on one line, comma separated or as an array.
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let array = trimmed.hasPrefix("[") ? trimmed : "[\(trimmed.hasSuffix(",") ? String(trimmed.dropLast()) : trimmed)]"
+            guard let items = try? decoder.decode([NoTypeTranslationItem].self, from: Data(array.utf8)) else {
                 throw NoTypeBrowserBatchError.unparsableLine(line: index + 1, lines: lines.count)
             }
-            return item
+            return items
         }
         let returned = Set(result.map(\.id))
         let expected = Set(items.map(\.id))

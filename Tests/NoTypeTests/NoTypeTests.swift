@@ -778,6 +778,10 @@ func browserBatchDecodeReportsWhyOutputWasRejected() {
     let empty = try? NoTypeBrowserBatch.decode([line("a", " "), line("b"), line("c", "")].joined(separator: "\n"), for: items)
     #expect(empty?.map(\.error) == [NoTypeBrowserBatch.emptyTextError, nil, NoTypeBrowserBatch.emptyTextError])
     #expect(empty?[1].text == "你好")
+    let joined = try? NoTypeBrowserBatch.decode([line("a"), line("b"), line("c")].joined(separator: ","), for: items)
+    #expect(joined?.map(\.text) == ["你好", "你好", "你好"])
+    let array = try? NoTypeBrowserBatch.decode("[" + [line("a"), line("b")].joined(separator: ",") + "]\n" + line("c") + ",", for: items)
+    #expect(array?.map(\.id) == ["a", "b", "c"])
     let message = NoTypeBrowserBatchError.mismatch(expected: 12, returned: 11, missing: [4, 5], unexpected: 1, duplicates: 0).errorDescription
     #expect(message == "译文与原文不对应：期望 12 条，返回 11 条，缺第 4,5 条，多余 1 条，重复 0 条。")
     #expect(AIRewriteService.diagnosticName(AIRewriteError.incompleteStream) == "AIRewriteError.incompleteStream")
