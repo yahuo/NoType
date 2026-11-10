@@ -72,22 +72,31 @@ test('sentences cross caption lines, split inside a line and get interpolated ti
   assert.equal(yt.findCue(sentences, 3500), 1);
   assert.equal(yt.findCue(sentences, 6000), -1);
 });
-test('a long translation is shown a line-sized clause group at a time, following playback', () => {
+test('a long translation is shown a line-sized clause group at a time, switching with the original line', () => {
   const yt = load();
   const text = '我们可以看到，就在这里，我有一个漂亮的窗格，里面列出了我所有的空间，下方则是我的所有代理，而且我还能获得一直以来从 tmux 之类的工具中享受的所有便利功能。';
   const first = '我们可以看到，就在这里，我有一个漂亮的窗格，';
   const second = '里面列出了我所有的空间，下方则是我的所有代理，';
   const third = '而且我还能获得一直以来从 tmux 之类的工具中享受的所有便利功能。';
   assert.equal(first + second + third, text);
-  assert.equal(yt.translationAt(text, 0), first);
-  assert.equal(yt.translationAt(text, 0.2), first);
-  assert.equal(yt.translationAt(text, 0.4), second);
-  assert.equal(yt.translationAt(text, 0.9), third);
-  assert.equal(yt.translationAt(text, 1.5), third);
-  assert.equal(yt.translationAt('短句，不用切。', 0.9), '短句，不用切。');
-  assert.equal(yt.translationAt('译文：vid1 line 0 explains the topic.', 0.9), '译文：vid1 line 0 explains the topic.');
+  const sentence = { start: 0, end: 9000 };
+  const at = (time, ...cues) => yt.translationAt(text, sentence, cues.find((cue) => cue.start <= time && time < cue.end), time);
+  // One group per line: each switches exactly when its line appears.
+  const lines = [{ start: 0, end: 3000 }, { start: 3000, end: 6000 }, { start: 6000, end: 9000 }];
+  assert.deepEqual([0, 2900, 3000, 5900, 6000, 8900].map((time) => at(time, ...lines)), [first, first, second, second, third, third]);
+  // A line holding two groups shares its time by width; a line holding none keeps the group around it.
+  const uneven = [{ start: 0, end: 900 }, { start: 900, end: 2000 }, { start: 2000, end: 9000 }];
+  assert.deepEqual([0, 1000, 2000, 4000, 6000, 8900].map((time) => at(time, ...uneven)), [first, first, second, second, third, third]);
+  // Without a caption line (a gap), the sentence time decides.
+  assert.equal(at(4500), second);
+  // A 3 s sentence holds at most two groups: the narrowest adjacent pair merges.
+  const short = { start: 0, end: 3000 }, whole = { start: 0, end: 3000 };
+  assert.equal(yt.translationAt(text, short, whole, 0), first + second);
+  assert.equal(yt.translationAt(text, short, whole, 2900), third);
+  assert.equal(yt.translationAt('短句，不用切。', sentence, lines[0], 100), '短句，不用切。');
+  assert.equal(yt.translationAt('译文：vid1 line 0 explains the topic.', sentence, lines[0], 100), '译文：vid1 line 0 explains the topic.');
   const plainLong = '没有标点的一整段很长很长的译文'.repeat(3);
-  assert.equal(yt.translationAt(plainLong, 0.5), plainLong);
+  assert.equal(yt.translationAt(plainLong, sentence, lines[1], 4000), plainLong);
 });
 test('titles, initials and decimals do not end a sentence; quotes and ?! runs stay with it', () => {
   const yt = load();
