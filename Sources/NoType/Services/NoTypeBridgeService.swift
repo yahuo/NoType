@@ -50,14 +50,48 @@ enum NoTypeBrowserBatch {
     }
 
     static func decode(_ text: String, for items: [NoTypeTranslationItem]) throws -> [NoTypeTranslationItem] {
-        let result = try text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            .map { try JSONDecoder().decode(NoTypeTranslationItem.self, from: Data($0.utf8)) }
-        guard result.count == items.count,
-              Set(result.map(\.id)) == Set(items.map(\.id)),
-              result.allSatisfy({ !$0.text.trimmed.isEmpty })
-        else { throw AIRewriteError.invalidResponse }
+        let lines = text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let result = try lines.enumerated().map { index, line in
+            guard let item = try? JSONDecoder().decode(NoTypeTranslationItem.self, from: Data(line.utf8)) else {
+                throw NoTypeBrowserBatchError.unparsableLine(line: index + 1, lines: lines.count)
+            }
+            return item
+        }
+        let returned = Set(result.map(\.id))
+        let expected = Set(items.map(\.id))
+        let missing = items.indices.filter { !returned.contains(items[$0].id) }.map { $0 + 1 }
+        let unexpected = result.filter { !expected.contains($0.id) }.count
+        let duplicates = result.count - returned.count
+        guard missing.isEmpty, unexpected == 0, duplicates == 0 else {
+            throw NoTypeBrowserBatchError.mismatch(
+                expected: items.count, returned: result.count,
+                missing: missing, unexpected: unexpected, duplicates: duplicates
+            )
+        }
         let byID = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0) })
+        let empty = items.indices.filter { byID[items[$0].id]?.text.trimmed.isEmpty ?? true }.map { $0 + 1 }
+        guard empty.isEmpty else { throw NoTypeBrowserBatchError.emptyText(positions: empty) }
         return items.compactMap { byID[$0.id] }
+    }
+}
+
+/// Why a batch reply was rejected. Descriptions carry only counts and 1-based positions,
+/// never source or translated text, so they are safe to log and to show in the page.
+enum NoTypeBrowserBatchError: LocalizedError, Equatable {
+    case unparsableLine(line: Int, lines: Int)
+    case mismatch(expected: Int, returned: Int, missing: [Int], unexpected: Int, duplicates: Int)
+    case emptyText(positions: [Int])
+
+    var errorDescription: String? {
+        switch self {
+        case .unparsableLine(let line, let lines):
+            return "译文格式错误：第 \(line)/\(lines) 行不是合法 JSON。"
+        case .mismatch(let expected, let returned, let missing, let unexpected, let duplicates):
+            let list = missing.isEmpty ? "无" : missing.map(String.init).joined(separator: ",")
+            return "译文与原文不对应：期望 \(expected) 条，返回 \(returned) 条，缺第 \(list) 条，多余 \(unexpected) 条，重复 \(duplicates) 条。"
+        case .emptyText(let positions):
+            return "译文为空：第 \(positions.map(String.init).joined(separator: ",")) 条。"
+        }
     }
 }
 

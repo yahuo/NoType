@@ -1,4 +1,5 @@
 import Foundation
+import OSLog
 
 enum AIRewriteError: LocalizedError {
     case missingCodexAuth
@@ -80,6 +81,7 @@ private final class RewriteDeadline: @unchecked Sendable {
 }
 
 actor AIRewriteService {
+    private static let browserLogger = Logger(subsystem: "com.opensource.notype", category: "BrowserBridge")
     static let rewriteModel = "gpt-5.6-terra"
     static let rewriteReasoningEffort = "high"
     static let translationModel = "gpt-5.6-luna"
@@ -172,25 +174,53 @@ actor AIRewriteService {
         try NoTypeBrowserBatch.validate(items)
         let input = String(decoding: try JSONEncoder().encode(items), as: UTF8.self)
         let timeout = selectionTranslationTimeout
-        let output = try await withThrowingTaskGroup(of: String.self) { group in
-            defer { group.cancelAll() }
-            group.addTask {
-                try await self.performStreamingCodexResponse(
-                    instructions: Self.browserTranslationPrompt,
-                    userMessage: input,
-                    model: Self.translationModel,
-                    reasoningEffort: Self.translationReasoningEffort,
-                    requestTimeout: 60,
-                    onPartial: onPartial
-                )
-            }
-            group.addTask {
-                try await Task.sleep(for: timeout)
-                throw AIRewriteError.translationTimedOut
-            }
-            return try await group.next() ?? ""
+        let started = Date()
+        let chars = items.reduce(0) { $0 + $1.text.count }
+        func logFailure(_ error: Error, output: String? = nil) {
+            let reason = (error as? NoTypeBrowserBatchError)?.errorDescription ?? Self.diagnosticName(error)
+            let shape = output.map { "output_chars=\($0.count) output_lines=\($0.split(separator: "\n").count)" } ?? "output=none"
+            Self.browserLogger.error("batch_failed items=\(items.count) chars=\(chars) \(shape, privacy: .public) elapsed_ms=\(Int(Date().timeIntervalSince(started) * 1000)) reason=\(reason, privacy: .public)")
         }
-        return try NoTypeBrowserBatch.decode(output, for: items)
+        let output: String
+        do {
+            output = try await withThrowingTaskGroup(of: String.self) { group in
+                defer { group.cancelAll() }
+                group.addTask {
+                    try await self.performStreamingCodexResponse(
+                        instructions: Self.browserTranslationPrompt,
+                        userMessage: input,
+                        model: Self.translationModel,
+                        reasoningEffort: Self.translationReasoningEffort,
+                        requestTimeout: 60,
+                        onPartial: onPartial
+                    )
+                }
+                group.addTask {
+                    try await Task.sleep(for: timeout)
+                    throw AIRewriteError.translationTimedOut
+                }
+                return try await group.next() ?? ""
+            }
+        } catch {
+            logFailure(error)
+            throw error
+        }
+        do {
+            return try NoTypeBrowserBatch.decode(output, for: items)
+        } catch {
+            logFailure(error, output: output)
+            throw error
+        }
+    }
+
+    /// A log-safe error label: the error's type and case, without payloads such as HTTP bodies.
+    static func diagnosticName(_ error: Error) -> String {
+        if let error = error as? URLError { return "URLError(\(error.code.rawValue))" }
+        if case AIRewriteError.requestFailed(let status, _) = error { return "AIRewriteError.requestFailed(\(status))" }
+        if error is CancellationError { return "CancellationError" }
+        let label = String(describing: error)
+        let name = label.prefix { $0 != "(" }
+        return "\(type(of: error)).\(name)"
     }
 
     static let browserTranslationPrompt = """
