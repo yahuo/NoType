@@ -72,6 +72,18 @@ test('sentences cross caption lines, split inside a line and get interpolated ti
   assert.equal(yt.findCue(sentences, 3500), 1);
   assert.equal(yt.findCue(sentences, 6000), -1);
 });
+test('titles, initials and decimals do not end a sentence; quotes and ?! runs stay with it', () => {
+  const yt = load();
+  const texts = (text) => plain(yt.buildSentences([{ start: 0, end: 1000, text }]).map((s) => s.text));
+  assert.deepEqual(texts('Mr. Smith moved to the U.S. in 2020. Growth was 3.5 percent. "Really?!" she asked'),
+    ['Mr. Smith moved to the U.S. in 2020.', 'Growth was 3.5 percent.', '"Really?!"', 'she asked']);
+  assert.deepEqual(plain(yt.buildSentences([{ start: 0, end: 1000, text: 'Talk to Dr.' }, { start: 1000, end: 2000, text: 'Lee today.' }])
+    .map((s) => s.text)), ['Talk to Dr. Lee today.']);
+  assert.deepEqual(texts("It isn't. Use plan B. Then go"), ["It isn't.", 'Use plan B.', 'Then go']);
+  const started = Date.now();
+  yt.buildSentences([{ start: 0, end: 1000, text: `a${'.'.repeat(50000)}${'"'.repeat(50000)}b` }]);
+  assert.ok(Date.now() - started < 200);
+});
 test('unpunctuated speech is cut at a clause mark after 100 characters or before 200', () => {
   const yt = load();
   const line = (n, text) => ({ start: n * 1000, end: n * 1000 + 1000, text });
