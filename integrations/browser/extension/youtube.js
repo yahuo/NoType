@@ -110,6 +110,36 @@
     });
   }
 
+  // Translation units. Captions (ASR especially) break lines mid-sentence, and a model asked to
+  // translate those fragments one by one reorders words across them and drifts. So sentences are
+  // cut at their own punctuation, wherever it falls inside a cue, and timed by interpolating
+  // character offsets over that cue. Long or unpunctuated runs end at a clause mark after 100
+  // characters, before 200 characters, or at a pause of more than 1.5 s.
+  const sentenceBreak = /(?<=[.!?…]["'’”)\]]*)\s+(?=\S)|(?<=[。！？]["'’”)\]]*)/u;
+  const clause = /[,;:，；：、]["'’”)\]]*$/u;
+  function buildSentences(cues) {
+    const sentences = [];
+    let current = null, previousEnd = -Infinity;
+    const close = (end) => { if (current) { current.end = end; sentences.push(current); current = null; } };
+    for (const cue of cues) {
+      if (cue.start - previousEnd > 1500) close(previousEnd);
+      const pieces = cue.text.split(sentenceBreak).filter(Boolean);
+      const total = pieces.reduce((sum, piece) => sum + piece.length, 0);
+      const at = (offset) => cue.start + (cue.end - cue.start) * offset / total;
+      let offset = 0;
+      for (const piece of pieces) {
+        const start = at(offset);
+        offset += piece.length;
+        if (current && (current.text.length + piece.length > 200 || (current.text.length >= 100 && clause.test(current.text)))) close(start);
+        if (current) current.text = joinText(current.text, piece); else current = { start, text: piece };
+        if (terminal.test(piece)) close(at(offset));
+      }
+      previousEnd = cue.end;
+    }
+    close(previousEnd);
+    return sentences;
+  }
+
   function findCue(cues, time) {
     let low = 0, high = cues.length;
     while (low < high) {
@@ -139,7 +169,7 @@
     if (!video) return null;
     const cues = buildCues(parseTimedText(data.text));
     if (!cues.length || cues.length > maxCues) return null;
-    return { video, url: url.href, translated: url.searchParams.has("tlang"), cues };
+    return { video, url: url.href, translated: url.searchParams.has("tlang"), cues, sentences: buildSentences(cues) };
   }
   function remember(track) {
     const current = tracks.get(track.video);
@@ -252,9 +282,9 @@
       connect().postMessage({ id, items: group.map(({ id, text, priority }) => ({ id, text, priority })) });
     }
 
-    // Translate the current cue and the next 90 s (scaled by playback rate);
-    // the next 20 s go first. During playback cues enter the window one by one, so
-    // later cues wait until 12 can share a batch or less than 45 s of lead is left.
+    // Translate the current sentence and the next 90 s (scaled by playback rate);
+    // the next 20 s go first. During playback sentences enter the window one by one, so
+    // later ones wait until 12 can share a batch or less than 45 s of lead is left.
     // The background pool shares slots with other tabs.
     function schedule(time, rate) {
       const now = performance.now();
@@ -262,15 +292,15 @@
       scheduledAt = now; scheduledTime = time;
       const speed = Math.max(1, rate || 1);
       const pending = [], changed = [], inWindow = new Set();
-      for (let i = firstFrom(track.cues, time - 1000); i < track.cues.length; i++) {
-        const cue = track.cues[i];
-        if (cue.start > time + 90000 * speed) break;
-        if (!needsTranslation(cue.text) || inWindow.has(cue.text)) continue;
-        inWindow.add(cue.text);
-        const priority = cue.start <= time + 20000 * speed ? 0 : 1;
-        let entry = translations.get(cue.text);
-        if (!entry) { entry = { text: cue.text, status: "pending" }; translations.set(cue.text, entry); }
-        if (entry.status === "pending") { entry.priority = priority; entry.at = cue.start; pending.push(entry); }
+      for (let i = firstFrom(track.sentences, time - 1000); i < track.sentences.length; i++) {
+        const sentence = track.sentences[i];
+        if (sentence.start > time + 90000 * speed) break;
+        if (!needsTranslation(sentence.text) || inWindow.has(sentence.text)) continue;
+        inWindow.add(sentence.text);
+        const priority = sentence.start <= time + 20000 * speed ? 0 : 1;
+        let entry = translations.get(sentence.text);
+        if (!entry) { entry = { text: sentence.text, status: "pending" }; translations.set(sentence.text, entry); }
+        if (entry.status === "pending") { entry.priority = priority; entry.at = sentence.start; pending.push(entry); }
         else if (entry.status === "waiting" && entry.priority !== priority) { entry.priority = priority; changed.push(entry); }
       }
       // After a seek, cues left behind wait behind everything else.
@@ -393,7 +423,7 @@
       if (!id || !target || !video) { detach(); return; }
       attach(target);
       const captured = tracks.get(id);
-      if (captured && captured !== track) { track = captured; track.texts ??= new Set(track.cues.map((cue) => cue.text)); scheduledTime = NaN; }
+      if (captured && captured !== track) { track = captured; track.texts ??= new Set(track.sentences.map((sentence) => sentence.text)); scheduledTime = NaN; }
       const button = target.querySelector(".ytp-subtitles-button");
       const usable = !!button && button.getClientRects().length > 0 && button.getAttribute("aria-disabled") !== "true";
       const pressed = button?.getAttribute("aria-pressed") === "true";
@@ -413,8 +443,10 @@
       if (showing) {
         layout(target);
         const time = video.currentTime * 1000;
+        // The original follows the caption line; the translation follows its whole sentence.
         const cue = track.cues[findCue(track.cues, time)];
-        const entry = cue && needsTranslation(cue.text) ? translations.get(cue.text) : null;
+        const sentence = track.sentences[findCue(track.sentences, time)];
+        const entry = sentence && needsTranslation(sentence.text) ? translations.get(sentence.text) : null;
         setLine(original, cue?.text || "");
         setLine(translated, entry?.status === "done" ? entry.result : "");
         waiting = !!entry && ["pending", "waiting"].includes(entry.status) && !stopped;
@@ -448,5 +480,5 @@
     tick();
   }
 
-  globalThis.__noTypeYouTubeSubtitles = { applies, start, parseTimedText, buildCues, findCue, capture };
+  globalThis.__noTypeYouTubeSubtitles = { applies, start, parseTimedText, buildCues, buildSentences, findCue, capture };
 })();
