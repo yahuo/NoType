@@ -26,6 +26,16 @@ pub struct TranslationItem {
     pub text: String,
 }
 
+/// One entry of a batch reply: `{id,text}`, or `{id,error}` when only that item failed.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TranslationResult {
+    pub id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BridgeRequest {
     pub version: i64,
@@ -90,7 +100,7 @@ pub struct BridgeResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<BridgeFailure>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub items: Option<Vec<TranslationItem>>,
+    pub items: Option<Vec<TranslationResult>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub partial: Option<bool>,
 }
@@ -184,31 +194,105 @@ pub fn validate_browser_batch(items: &[TranslationItem]) -> Result<(), InvalidBa
     if valid { Ok(()) } else { Err(InvalidBatch) }
 }
 
+pub const EMPTY_TRANSLATION_ERROR: &str = "模型返回了空译文。";
+
+/// Why a batch reply was rejected. Messages carry only counts and 1-based positions,
+/// never source or translated text, so they are safe to log and to show in the page.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum BatchError {
+    #[error("译文格式错误：第 {line}/{lines} 行不是合法 JSON。")]
+    UnparsableLine { line: usize, lines: usize },
+    #[error(
+        "译文与原文不对应：期望 {expected} 条，返回 {returned} 条，缺第 {} 条，多余 {unexpected} 条，重复 {duplicates} 条。",
+        positions(missing)
+    )]
+    Mismatch {
+        expected: usize,
+        returned: usize,
+        missing: Vec<usize>,
+        unexpected: usize,
+        duplicates: usize,
+    },
+}
+
+fn positions(list: &[usize]) -> String {
+    if list.is_empty() {
+        return "无".into();
+    }
+    list.iter()
+        .map(usize::to_string)
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 /// Mirrors `NoTypeBrowserBatch.decode`: JSON Lines output aligned to the input order.
+/// Errors when the reply as a whole cannot be trusted; an empty translation fails only its own item.
 pub fn decode_browser_batch(
     text: &str,
     items: &[TranslationItem],
-) -> Result<Vec<TranslationItem>, InvalidBatch> {
+) -> Result<Vec<TranslationResult>, BatchError> {
+    let lines: Vec<&str> = text
+        .split('\n')
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     let mut result = Vec::new();
-    for line in text.split('\n').filter(|line| !line.trim().is_empty()) {
-        let item: TranslationItem = serde_json::from_str(line).map_err(|_| InvalidBatch)?;
-        result.push(item);
+    for (index, line) in lines.iter().enumerate() {
+        if let Ok(item) = serde_json::from_str::<TranslationItem>(line) {
+            result.push(item);
+            continue;
+        }
+        // The model sometimes puts every object on one line, comma separated or as an array.
+        let trimmed = line.trim();
+        let array = if trimmed.starts_with('[') {
+            trimmed.to_owned()
+        } else {
+            format!("[{}]", trimmed.strip_suffix(',').unwrap_or(trimmed))
+        };
+        let joined: Vec<TranslationItem> =
+            serde_json::from_str(&array).map_err(|_| BatchError::UnparsableLine {
+                line: index + 1,
+                lines: lines.len(),
+            })?;
+        result.extend(joined);
     }
-    let result_ids: HashSet<&str> = result.iter().map(|item| item.id.as_str()).collect();
-    let input_ids: HashSet<&str> = items.iter().map(|item| item.id.as_str()).collect();
-    if result.len() != items.len()
-        || result_ids != input_ids
-        || result.iter().any(|item| item.text.trim().is_empty())
-    {
-        return Err(InvalidBatch);
+    let returned: HashSet<&str> = result.iter().map(|item| item.id.as_str()).collect();
+    let expected: HashSet<&str> = items.iter().map(|item| item.id.as_str()).collect();
+    let missing: Vec<usize> = (0..items.len())
+        .filter(|&index| !returned.contains(items[index].id.as_str()))
+        .map(|index| index + 1)
+        .collect();
+    let unexpected = result
+        .iter()
+        .filter(|item| !expected.contains(item.id.as_str()))
+        .count();
+    let duplicates = result.len() - returned.len();
+    if !missing.is_empty() || unexpected > 0 || duplicates > 0 {
+        return Err(BatchError::Mismatch {
+            expected: items.len(),
+            returned: result.len(),
+            missing,
+            unexpected,
+            duplicates,
+        });
     }
-    let by_id: HashMap<String, TranslationItem> = result
+    let mut by_id: HashMap<String, String> = result
         .into_iter()
-        .map(|item| (item.id.clone(), item))
+        .map(|item| (item.id, item.text))
         .collect();
     Ok(items
         .iter()
-        .filter_map(|item| by_id.get(&item.id).cloned())
+        .map(|item| match by_id.remove(&item.id) {
+            Some(text) if !text.trim().is_empty() => TranslationResult {
+                id: item.id.clone(),
+                text: Some(text),
+                error: None,
+            },
+            _ => TranslationResult {
+                id: item.id.clone(),
+                text: None,
+                error: Some(EMPTY_TRANSLATION_ERROR.into()),
+            },
+        })
         .collect())
 }
 
@@ -325,6 +409,14 @@ mod tests {
         );
     }
 
+    fn ok(id: &str, text: &str) -> TranslationResult {
+        TranslationResult {
+            id: id.into(),
+            text: Some(text.into()),
+            error: None,
+        }
+    }
+
     #[test]
     fn batch_decode_aligns_to_input_order() {
         let input = [item("a", "one"), item("b", "two")];
@@ -333,8 +425,60 @@ mod tests {
             &input,
         )
         .unwrap();
-        assert_eq!(decoded, vec![item("a", "一"), item("b", "二")]);
-        assert!(decode_browser_batch("{\"id\":\"a\",\"text\":\"一\"}", &input).is_err());
+        assert_eq!(decoded, vec![ok("a", "一"), ok("b", "二")]);
+        let missing = decode_browser_batch("{\"id\":\"a\",\"text\":\"一\"}", &input).unwrap_err();
+        assert_eq!(
+            missing.to_string(),
+            "译文与原文不对应：期望 2 条，返回 1 条，缺第 2 条，多余 0 条，重复 0 条。"
+        );
+    }
+
+    #[test]
+    fn batch_decode_fails_only_the_empty_item() {
+        let input = [item("a", "[Music]"), item("b", "two")];
+        let decoded = decode_browser_batch(
+            "{\"id\":\"a\",\"text\":\" \"}\n{\"id\":\"b\",\"text\":\"二\"}",
+            &input,
+        )
+        .unwrap();
+        assert_eq!(decoded[1], ok("b", "二"));
+        assert_eq!(decoded[0].text, None);
+        assert_eq!(decoded[0].error.as_deref(), Some(EMPTY_TRANSLATION_ERROR));
+        assert_eq!(
+            serde_json::to_string(&decoded).unwrap(),
+            r#"[{"id":"a","error":"模型返回了空译文。"},{"id":"b","text":"二"}]"#
+        );
+    }
+
+    #[test]
+    fn batch_decode_accepts_objects_joined_on_one_line() {
+        let input = [item("a", "one"), item("b", "two"), item("c", "three")];
+        let expected = vec![ok("a", "一"), ok("b", "二"), ok("c", "三")];
+        for text in [
+            "{\"id\":\"a\",\"text\":\"一\"},{\"id\":\"b\",\"text\":\"二\"},\n{\"id\":\"c\",\"text\":\"三\"}",
+            "[{\"id\":\"a\",\"text\":\"一\"},{\"id\":\"b\",\"text\":\"二\"},{\"id\":\"c\",\"text\":\"三\"}]",
+        ] {
+            assert_eq!(decode_browser_batch(text, &input).unwrap(), expected);
+        }
+        assert_eq!(
+            decode_browser_batch("{\"id\":\"a\",\"text\":\"一\"}\nnot json", &input),
+            Err(BatchError::UnparsableLine { line: 2, lines: 2 })
+        );
+        let mismatch = decode_browser_batch(
+            "{\"id\":\"a\",\"text\":\"一\"}\n{\"id\":\"a\",\"text\":\"一\"}\n{\"id\":\"x\",\"text\":\"三\"}",
+            &input,
+        )
+        .unwrap_err();
+        assert_eq!(
+            mismatch,
+            BatchError::Mismatch {
+                expected: 3,
+                returned: 3,
+                missing: vec![2, 3],
+                unexpected: 1,
+                duplicates: 1,
+            }
+        );
     }
 
     #[test]
