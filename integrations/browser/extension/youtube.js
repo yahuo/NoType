@@ -115,24 +115,57 @@
   // cut at their own punctuation, wherever it falls inside a cue, and timed by interpolating
   // character offsets over that cue. Long or unpunctuated runs end at a clause mark after 100
   // characters, before 200 characters, or at a pause of more than 1.5 s.
-  const sentenceBreak = /(?<=[.!?…]["'’”)\]]*)\s+(?=\S)|(?<=[。！？]["'’”)\]]*)/u;
   const clause = /[,;:，；：、]["'’”)\]]*$/u;
+  // Initials (U.S., e.g.) and common titles end in a period without ending the sentence. A lone
+  // letter (plan B., leader C., isn't.) does.
+  const titles = new Set(["mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "etc"]);
+  function abbreviation(text, dot) {
+    let from = dot;
+    while (from > 0 && /[A-Za-z.]/.test(text[from - 1])) from--;
+    if (from > 0 && /[\p{L}\p{N}'’]/u.test(text[from - 1])) return false;
+    const word = text.slice(from, dot).toLowerCase();
+    return titles.has(word) || /^(?:[a-z]\.)+[a-z]$/.test(word);
+  }
+  // One linear pass: a run of end marks plus closing quotes ends a sentence; Latin marks also need
+  // a following space (3.5, example.com) or the end of the line.
+  function splitSentences(text) {
+    const pieces = [];
+    let from = 0;
+    for (let i = 0; i < text.length; i++) {
+      if (!".!?…。！？".includes(text[i])) continue;
+      let run = i + 1;
+      while (run < text.length && ".!?…。！？".includes(text[run])) run++;
+      let stop = run;
+      while (stop < text.length && `"'’”)]`.includes(text[stop])) stop++;
+      const wide = "。！？".includes(text[run - 1]);
+      const open = !wide && stop < text.length && !/\s/.test(text[stop]);
+      if (!open && !(run === i + 1 && text[i] === "." && abbreviation(text, i))) {
+        const piece = text.slice(from, stop).trim();
+        if (piece) pieces.push({ text: piece, ended: true });
+        from = stop;
+      }
+      i = stop - 1;
+    }
+    const rest = text.slice(from).trim();
+    if (rest) pieces.push({ text: rest, ended: false });
+    return pieces;
+  }
   function buildSentences(cues) {
     const sentences = [];
     let current = null, previousEnd = -Infinity;
     const close = (end) => { if (current) { current.end = end; sentences.push(current); current = null; } };
     for (const cue of cues) {
       if (cue.start - previousEnd > 1500) close(previousEnd);
-      const pieces = cue.text.split(sentenceBreak).filter(Boolean);
-      const total = pieces.reduce((sum, piece) => sum + piece.length, 0);
+      const pieces = splitSentences(cue.text);
+      const total = pieces.reduce((sum, piece) => sum + piece.text.length, 0);
       const at = (offset) => cue.start + (cue.end - cue.start) * offset / total;
       let offset = 0;
-      for (const piece of pieces) {
+      for (const { text, ended } of pieces) {
         const start = at(offset);
-        offset += piece.length;
-        if (current && (current.text.length + piece.length > 200 || (current.text.length >= 100 && clause.test(current.text)))) close(start);
-        if (current) current.text = joinText(current.text, piece); else current = { start, text: piece };
-        if (terminal.test(piece)) close(at(offset));
+        offset += text.length;
+        if (current && (current.text.length + text.length > 200 || (current.text.length >= 100 && clause.test(current.text)))) close(start);
+        if (current) current.text = joinText(current.text, text); else current = { start, text };
+        if (ended) close(at(offset));
       }
       previousEnd = cue.end;
     }
