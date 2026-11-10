@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "NoType 网页双语翻译",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "minimum_chrome_version": "119",
-  "description": "通过本机 NoType 翻译网页段落，在原文下方显示中文。再次点击移除译文。",
+  "description": "通过本机 NoType 翻译网页段落，在原文下方显示中文；YouTube 视频页显示双语字幕。再次点击移除译文。",
   "permissions": ["activeTab", "nativeMessaging", "storage", "webNavigation"],
   "action": { "default_title": "NoType：翻译当前页 / 移除译文" },
   "background": { "service_worker": "background.js" },
@@ -13,5 +13,14 @@
     "all_frames": true,
     "match_origin_as_fallback": true,
     "run_at": "document_idle"
+  }, {
+    "matches": ["https://www.youtube.com/*"],
+    "js": ["youtube-bridge.js"],
+    "world": "MAIN",
+    "run_at": "document_start"
+  }, {
+    "matches": ["https://www.youtube.com/*"],
+    "js": ["youtube.js"],
+    "run_at": "document_start"
   }]
 }

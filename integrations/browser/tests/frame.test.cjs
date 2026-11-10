@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-function harness() {
+function harness(extra = {}) {
   let ready, listener, hidden, starts = 0, stops = 0;
   const sent = [];
   const context = {
@@ -13,7 +13,9 @@ function harness() {
     } },
     __noTypeToggleTranslation() { starts++; context.__noTypeBilingual = { stop() { stops++; delete context.__noTypeBilingual; } }; },
     addEventListener(name, fn) { if (name === 'pagehide') hidden = fn; },
+    ...extra,
   };
+  context.top ??= context;
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../extension/frame.js'), 'utf8'), context);
   return { context, sent, ready: (active) => ready({ active }), hidden: () => hidden(),
     command: (type, extra = {}) => listener({ type, ...extra }, {}, () => {}), counts: () => ({ starts, stops }) };
@@ -53,4 +55,16 @@ test('channel errors reach a completed page without restarting translation', () 
   h.command('notype.error', { error: '请先登录 NoType' });
   assert.equal(error, '请先登录 NoType');
   assert.equal(h.counts().starts, 1);
+});
+test('YouTube watch pages start subtitle mode; frames inside YouTube stay idle', () => {
+  let subtitles = 0;
+  const youtube = { applies: () => true, start() { subtitles++; } };
+  const watch = harness({ __noTypeYouTubeSubtitles: youtube }); watch.command('notype.start');
+  assert.equal(subtitles, 1); assert.equal(watch.counts().starts, 0);
+  const home = harness({ __noTypeYouTubeSubtitles: { applies: () => false, start() { subtitles++; } } }); home.command('notype.start');
+  assert.equal(subtitles, 1); assert.equal(home.counts().starts, 1);
+  const chat = harness({ top: {}, location: { ancestorOrigins: ['https://www.youtube.com'] } }); chat.command('notype.start');
+  assert.equal(chat.counts().starts, 0);
+  const embed = harness({ top: {}, location: { ancestorOrigins: ['https://www.youtube.com', 'https://example.com'] } }); embed.command('notype.start');
+  assert.equal(embed.counts().starts, 1);
 });
