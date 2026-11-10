@@ -20,7 +20,10 @@ pub use stream::CodexResponseStreamAccumulator;
 
 use crate::PartialCallback;
 use crate::codex_auth::{CodexAuthStore, CodexCredentials, CodexModelResolver};
-use crate::protocol::{TranslationItem, decode_browser_batch, validate_browser_batch};
+use crate::protocol::{
+    BatchError, TranslationItem, TranslationResult, decode_browser_batch, utf16_len,
+    validate_browser_batch,
+};
 use stream::{CodexResponseRequest, LineBuffer};
 
 pub const REWRITE_MODEL: &str = "gpt-5.6-terra";
@@ -58,6 +61,8 @@ pub enum AiError {
     Network(#[from] reqwest::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Batch(#[from] BatchError),
 }
 
 fn request_failed_message(status: u16, body: &str) -> String {
@@ -69,6 +74,18 @@ fn request_failed_message(status: u16, body: &str) -> String {
 }
 
 impl AiError {
+    /// A log-safe label: the variant and HTTP status, without bodies or page text.
+    fn diagnostic_name(&self) -> String {
+        match self {
+            Self::RequestFailed(status, _) => format!("RequestFailed({status})"),
+            Self::Network(error) if error.is_timeout() => "Network(timeout)".into(),
+            Self::Network(_) => "Network".into(),
+            Self::Io(error) => format!("Io({:?})", error.kind()),
+            Self::Batch(error) => error.to_string(),
+            other => format!("{other:?}"),
+        }
+    }
+
     fn is_timeout(&self) -> bool {
         match self {
             Self::TimedOut | Self::RequestTimedOut => true,
@@ -298,9 +315,31 @@ impl AiRewriteService {
         &self,
         items: &[TranslationItem],
         on_partial: Option<PartialCallback>,
-    ) -> Result<Vec<TranslationItem>, AiError> {
+    ) -> Result<Vec<TranslationResult>, AiError> {
         validate_browser_batch(items).map_err(|_| AiError::InvalidResponse)?;
         let input = serde_json::to_string(items).map_err(|_| AiError::InvalidResponse)?;
+        let started = std::time::Instant::now();
+        let chars: usize = items.iter().map(|item| utf16_len(&item.text)).sum();
+        // Counts, positions and error kinds only; page text and translations stay out of the journal.
+        let log_failure = |error: &AiError, output: Option<&str>| {
+            let shape = output.map_or_else(
+                || "output=none".to_owned(),
+                |output| {
+                    let lines = output.split('\n').filter(|line| !line.is_empty()).count();
+                    format!(
+                        "output_chars={} output_lines={lines}",
+                        output.chars().count()
+                    )
+                },
+            );
+            tracing::warn!(
+                target: "notype::browser_bridge",
+                "batch_failed items={} chars={chars} {shape} elapsed_ms={} reason={}",
+                items.len(),
+                started.elapsed().as_millis(),
+                error.diagnostic_name()
+            );
+        };
         let on_text = |partial: &str| forward(&on_partial, partial);
         let output = tokio::select! {
             biased;
@@ -311,10 +350,33 @@ impl AiRewriteService {
                 Some(TRANSLATION_REASONING_EFFORT),
                 self.timeouts.selection_request,
                 &on_text,
-            ) => result?,
-            () = tokio::time::sleep(self.timeouts.selection_translation) => return Err(AiError::TranslationTimedOut),
+            ) => result,
+            () = tokio::time::sleep(self.timeouts.selection_translation) => Err(AiError::TranslationTimedOut),
         };
-        decode_browser_batch(&output, items).map_err(|_| AiError::InvalidResponse)
+        let output = output.inspect_err(|error| log_failure(error, None))?;
+        let results = decode_browser_batch(&output, items).map_err(|error| {
+            let error = AiError::from(error);
+            log_failure(&error, Some(&output));
+            error
+        })?;
+        let empty: Vec<String> = results
+            .iter()
+            .zip(items)
+            .enumerate()
+            .filter(|(_, (result, _))| result.error.is_some())
+            .map(|(index, (_, item))| format!("{}:{}", index + 1, item.text.chars().count()))
+            .collect();
+        if !empty.is_empty() {
+            // Positions and source lengths only: enough to tell sound tags from real sentences.
+            tracing::warn!(
+                target: "notype::browser_bridge",
+                "batch_empty_items items={} chars={chars} empty={} elapsed_ms={}",
+                items.len(),
+                empty.join(","),
+                started.elapsed().as_millis()
+            );
+        }
+        Ok(results)
     }
 
     /// Settings check: asks the configured Codex model for `OK`.
@@ -955,7 +1017,11 @@ mod tests {
         let result = service(&home, &server, AiTimeouts::default())
             .translate_browser_batch(&items, None)
             .await;
-        let texts: Vec<String> = result.unwrap().into_iter().map(|item| item.text).collect();
+        let texts: Vec<String> = result
+            .unwrap()
+            .into_iter()
+            .map(|item| item.text.unwrap())
+            .collect();
         assert_eq!(texts, ["第一段", "第二段"]);
         let body: serde_json::Value = serde_json::from_slice(&server.requests()[0].body).unwrap();
         assert_eq!(body["instructions"], BROWSER_TRANSLATION_PROMPT);

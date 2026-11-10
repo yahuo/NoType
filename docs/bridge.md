@@ -173,4 +173,6 @@ Pi, Claude Code, and Codex CLI are supported for local TUI sessions. Remote SSH 
 /usr/bin/log show --last 10m --style compact --info --predicate 'subsystem == "com.opensource.notype" AND category == "BrowserBridge"'
 ```
 
+Linux 守护进程把同类诊断写入 `journalctl --user -u notype`：`batch_failed` 记录段数、字符数、输出字符/行数、耗时和原因（行号或缺失条目序号），`batch_empty_items` 记录空译文条目的序号与原文长度。
+
 首个进度帧可能只有 JSON 前缀，不等同于首个可显示中文字。页面分别显示等待模型响应、接收译文和完成状态；0.4.0 全部已识别段落提前排队，无需等待滚动。0.4.1 的模型翻译错误只标记对应批次失败，其余继续，主页面可统一重试失败段落；连接不可用、缺少登录态和 busy 仍停止当前标签页。模型网络等待/总时限仍为 60/180 秒，连接程序和扩展分别以 190/195 秒作为外层等待上限。
