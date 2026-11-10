@@ -173,6 +173,29 @@
     return sentences;
   }
 
+  // A long sentence's translation is shown about one line at a time. Above 36 full-width characters
+  // (Latin counts half), clauses cut after Chinese punctuation are grouped up to 28, and the group
+  // shown follows the share of the sentence's time already played, weighted by width.
+  const width = (text) => Array.from(text).reduce((sum, char) => sum + (char.codePointAt(0) >= 0x2e80 ? 1 : 0.5), 0);
+  function translationAt(text, progress) {
+    if (width(text) <= 36) return text;
+    const groups = [];
+    for (const clause of text.match(/[^，。！？；：]+(?:[，。！？；：]+[”’」』）)]*|$)/gu) || []) {
+      const piece = clause.trim();
+      if (!piece) continue;
+      const last = groups.at(-1);
+      if (last && last.width + width(piece) <= 28) { last.text += piece; last.width += width(piece); }
+      else groups.push({ text: piece, width: width(piece) });
+    }
+    const total = groups.reduce((sum, group) => sum + group.width, 0);
+    let covered = 0;
+    for (const group of groups) {
+      covered += group.width;
+      if (progress * total < covered) return group.text;
+    }
+    return groups.at(-1)?.text ?? text;
+  }
+
   function findCue(cues, time) {
     let low = 0, high = cues.length;
     while (low < high) {
@@ -481,7 +504,8 @@
         const sentence = track.sentences[findCue(track.sentences, time)];
         const entry = sentence && needsTranslation(sentence.text) ? translations.get(sentence.text) : null;
         setLine(original, cue?.text || "");
-        setLine(translated, entry?.status === "done" ? entry.result : "");
+        const progress = sentence && sentence.end > sentence.start ? (time - sentence.start) / (sentence.end - sentence.start) : 0;
+        setLine(translated, entry?.status === "done" ? translationAt(entry.result, progress) : "");
         waiting = !!entry && ["pending", "waiting"].includes(entry.status) && !stopped;
         schedule(time, video.playbackRate);
       }
@@ -513,5 +537,5 @@
     tick();
   }
 
-  globalThis.__noTypeYouTubeSubtitles = { applies, start, parseTimedText, buildCues, buildSentences, findCue, capture };
+  globalThis.__noTypeYouTubeSubtitles = { applies, start, parseTimedText, buildCues, buildSentences, translationAt, findCue, capture };
 })();

@@ -72,6 +72,23 @@ test('sentences cross caption lines, split inside a line and get interpolated ti
   assert.equal(yt.findCue(sentences, 3500), 1);
   assert.equal(yt.findCue(sentences, 6000), -1);
 });
+test('a long translation is shown a line-sized clause group at a time, following playback', () => {
+  const yt = load();
+  const text = '我们可以看到，就在这里，我有一个漂亮的窗格，里面列出了我所有的空间，下方则是我的所有代理，而且我还能获得一直以来从 tmux 之类的工具中享受的所有便利功能。';
+  const first = '我们可以看到，就在这里，我有一个漂亮的窗格，';
+  const second = '里面列出了我所有的空间，下方则是我的所有代理，';
+  const third = '而且我还能获得一直以来从 tmux 之类的工具中享受的所有便利功能。';
+  assert.equal(first + second + third, text);
+  assert.equal(yt.translationAt(text, 0), first);
+  assert.equal(yt.translationAt(text, 0.2), first);
+  assert.equal(yt.translationAt(text, 0.4), second);
+  assert.equal(yt.translationAt(text, 0.9), third);
+  assert.equal(yt.translationAt(text, 1.5), third);
+  assert.equal(yt.translationAt('短句，不用切。', 0.9), '短句，不用切。');
+  assert.equal(yt.translationAt('译文：vid1 line 0 explains the topic.', 0.9), '译文：vid1 line 0 explains the topic.');
+  const plainLong = '没有标点的一整段很长很长的译文'.repeat(3);
+  assert.equal(yt.translationAt(plainLong, 0.5), plainLong);
+});
 test('titles, initials and decimals do not end a sentence; quotes and ?! runs stay with it', () => {
   const yt = load();
   const texts = (text) => plain(yt.buildSentences([{ start: 0, end: 1000, text }]).map((s) => s.text));
