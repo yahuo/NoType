@@ -8,7 +8,7 @@ globalThis.__noTypeToggleTranslation = () => {
   const candidates = "p,h1,h2,h3,h4,h5,h6,li,blockquote,td,th,div,section,article";
   const excluded = "script,style,noscript,pre,textarea,input,select,button,nav,header:not(article header):not(main header),[role='banner'],footer," +
     "svg,math,iframe,[hidden],[aria-hidden='true'],[translate='no'],.notranslate," +
-    "[role='navigation'],[role='menu'],[role='button'],notype-translation,notype-status";
+    "[role='navigation'],[role='menu'],[role='button'],notype-translation,notype-status,.html5-video-player,notype-subtitle";
   const nodes = [];
   let active = true;
   let observer;

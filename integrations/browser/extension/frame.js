@@ -1,7 +1,14 @@
 (() => {
   let controlled = false;
   function start() {
-    if (!globalThis.__noTypeBilingual) globalThis.__noTypeToggleTranslation();
+    if (globalThis.__noTypeBilingual) return;
+    // YouTube watch pages translate subtitles only, not the page around the player.
+    const youtube = globalThis.__noTypeYouTubeSubtitles;
+    if (youtube?.applies()) { youtube.start(); return; }
+    // Frames inside a YouTube page (live chat, ads) are left alone.
+    const origins = globalThis.location?.ancestorOrigins;
+    if (globalThis.top !== globalThis && origins?.[origins.length - 1] === "https://www.youtube.com") return;
+    globalThis.__noTypeToggleTranslation();
   }
   globalThis.__noTypeStopTab = () => {
     globalThis.__noTypeBilingual?.stop();
