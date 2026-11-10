@@ -21,6 +21,13 @@ struct NoTypeTranslationItem: Codable, Equatable, Sendable {
     let text: String
 }
 
+/// One entry of a batch reply: `text` on success, or `error` when only this item failed.
+struct NoTypeTranslationResult: Codable, Equatable, Sendable {
+    let id: String
+    var text: String? = nil
+    var error: String? = nil
+}
+
 // Owned by the app's MainActor. Browser batches share two slots; editor and
 // other bridge operations retain exclusive access. Tokens outlive cancellation
 // only until that operation's defer runs, and cannot release a newer owner.
@@ -49,7 +56,10 @@ enum NoTypeBrowserBatch {
         else { throw AIRewriteError.invalidResponse }
     }
 
-    static func decode(_ text: String, for items: [NoTypeTranslationItem]) throws -> [NoTypeTranslationItem] {
+    static let emptyTextError = "模型返回了空译文。"
+
+    /// Throws when the reply as a whole cannot be trusted; an empty translation fails only its own item.
+    static func decode(_ text: String, for items: [NoTypeTranslationItem]) throws -> [NoTypeTranslationResult] {
         let lines = text.split(separator: "\n").filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         let result = try lines.enumerated().map { index, line in
             guard let item = try? JSONDecoder().decode(NoTypeTranslationItem.self, from: Data(line.utf8)) else {
@@ -68,10 +78,13 @@ enum NoTypeBrowserBatch {
                 missing: missing, unexpected: unexpected, duplicates: duplicates
             )
         }
-        let byID = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0) })
-        let empty = items.indices.filter { byID[items[$0].id]?.text.trimmed.isEmpty ?? true }.map { $0 + 1 }
-        guard empty.isEmpty else { throw NoTypeBrowserBatchError.emptyText(positions: empty) }
-        return items.compactMap { byID[$0.id] }
+        let byID = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0.text) })
+        return items.map { item in
+            guard let text = byID[item.id], !text.trimmed.isEmpty else {
+                return NoTypeTranslationResult(id: item.id, error: emptyTextError)
+            }
+            return NoTypeTranslationResult(id: item.id, text: text)
+        }
     }
 }
 
@@ -80,7 +93,6 @@ enum NoTypeBrowserBatch {
 enum NoTypeBrowserBatchError: LocalizedError, Equatable {
     case unparsableLine(line: Int, lines: Int)
     case mismatch(expected: Int, returned: Int, missing: [Int], unexpected: Int, duplicates: Int)
-    case emptyText(positions: [Int])
 
     var errorDescription: String? {
         switch self {
@@ -89,8 +101,6 @@ enum NoTypeBrowserBatchError: LocalizedError, Equatable {
         case .mismatch(let expected, let returned, let missing, let unexpected, let duplicates):
             let list = missing.isEmpty ? "无" : missing.map(String.init).joined(separator: ",")
             return "译文与原文不对应：期望 \(expected) 条，返回 \(returned) 条，缺第 \(list) 条，多余 \(unexpected) 条，重复 \(duplicates) 条。"
-        case .emptyText(let positions):
-            return "译文为空：第 \(positions.map(String.init).joined(separator: ",")) 条。"
         }
     }
 }
@@ -145,7 +155,7 @@ struct NoTypeBridgeResponse: Codable, Equatable, Sendable {
     let ok: Bool
     let text: String?
     let error: Failure?
-    var items: [NoTypeTranslationItem]? = nil
+    var items: [NoTypeTranslationResult]? = nil
     var partial: Bool? = nil
 
     static func success(id: String, text: String? = nil) -> NoTypeBridgeResponse {

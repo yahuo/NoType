@@ -323,6 +323,21 @@ test("model failure isolates one batch and only an explicit retry submits its te
   assert.equal(h.broadcasts.at(-1).message.count, 0);
 });
 
+test("an item-level failure keeps the rest of the batch and is not cached", () => {
+  const h = harness(), client = h.connect();
+  client.send({ id: "r0", items: [{ id: "a", text: "Hello" }, { id: "b", text: "[Music]" }] }); h.flush();
+  const native = h.natives[0], sent = native.sent[0];
+  native.onMessage.emit({ version: 1, id: sent.id, ok: true,
+    items: [{ id: sent.items[0].id, text: "你好" }, { id: sent.items[1].id, error: "模型返回了空译文。" }] });
+  h.flush();
+  assert.deepEqual(Array.from(client.replies.at(-1).items, i => [i.id, i.text, i.error]),
+    [["a", "你好", undefined], ["b", undefined, "模型返回了空译文。"]]);
+  assert.equal(h.broadcasts.at(-1).message.count, 1);
+  client.send({ id: "retry", items: [{ id: "a", text: "Hello" }, { id: "b", text: "[Music]" }] }); h.flush();
+  const retried = h.natives.flatMap(port => port.sent).at(-1);
+  assert.deepEqual(Array.from(retried.items, i => i.text), ["[Music]"]);
+});
+
 test("a native host exiting after a model failure cannot cancel replacement work", () => {
   const h = harness(), client = h.connect();
   for (let i = 0; i < 3; i++) client.send({ items: [{ id: `p${i}`, text: `${i}`.repeat(7000) }] });

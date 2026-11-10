@@ -752,7 +752,10 @@ func browserBatchValidatesLimitsAndMapsOutOfOrderResults() throws {
     #expect(throws: (any Error).self) { try NoTypeBrowserBatch.validate([.init(id: "x", text: String(repeating: "x", count: 12001))]) }
     #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"你好\"}", for: items) }
     #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"你好\"}\n{\"id\":\"a\",\"text\":\"世界\"}", for: items) }
-    #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"\"}\n{\"id\":\"b\",\"text\":\"世界\"}", for: items) }
+    let partial = try NoTypeBrowserBatch.decode("{\"id\":\"a\",\"text\":\"\"}\n{\"id\":\"b\",\"text\":\"世界\"}", for: items)
+    #expect(partial == [.init(id: "a", error: NoTypeBrowserBatch.emptyTextError), .init(id: "b", text: "世界")])
+    let encoded = String(decoding: try JSONEncoder().encode(partial[0]), as: UTF8.self)
+    #expect(!encoded.contains("\"text\""))
 }
 
 @Test
@@ -772,9 +775,9 @@ func browserBatchDecodeReportsWhyOutputWasRejected() {
     #expect(throws: NoTypeBrowserBatchError.mismatch(expected: 3, returned: 3, missing: [3], unexpected: 0, duplicates: 1)) {
         try NoTypeBrowserBatch.decode([line("a"), line("b"), line("b")].joined(separator: "\n"), for: items)
     }
-    #expect(throws: NoTypeBrowserBatchError.emptyText(positions: [1, 3])) {
-        try NoTypeBrowserBatch.decode([line("a", " "), line("b"), line("c", "")].joined(separator: "\n"), for: items)
-    }
+    let empty = try? NoTypeBrowserBatch.decode([line("a", " "), line("b"), line("c", "")].joined(separator: "\n"), for: items)
+    #expect(empty?.map(\.error) == [NoTypeBrowserBatch.emptyTextError, nil, NoTypeBrowserBatch.emptyTextError])
+    #expect(empty?[1].text == "你好")
     let message = NoTypeBrowserBatchError.mismatch(expected: 12, returned: 11, missing: [4, 5], unexpected: 1, duplicates: 0).errorDescription
     #expect(message == "译文与原文不对应：期望 12 条，返回 11 条，缺第 4,5 条，多余 1 条，重复 0 条。")
     #expect(AIRewriteService.diagnosticName(AIRewriteError.incompleteStream) == "AIRewriteError.incompleteStream")
@@ -796,7 +799,7 @@ func browserBatchExpandsOnlyShortTexts() throws {
         try NoTypeBrowserBatch.validate((0..<4).map { .init(id: "p\($0)", text: String(repeating: "x", count: 1501)) })
     }
     let output = try short.reversed().map { String(decoding: try JSONEncoder().encode($0), as: UTF8.self) }.joined(separator: "\n")
-    #expect(try NoTypeBrowserBatch.decode(output, for: short) == short)
+    #expect(try NoTypeBrowserBatch.decode(output, for: short) == short.map { .init(id: $0.id, text: $0.text) })
     #expect(throws: (any Error).self) { try NoTypeBrowserBatch.decode(output, for: Array(short.prefix(11))) }
 }
 

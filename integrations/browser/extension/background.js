@@ -252,14 +252,16 @@ function createSession(tabId) {
     if (!Array.isArray(results) || results.length !== group.length ||
         new Set(results.map(item => item?.id)).size !== group.length ||
         results.some(item => !item || !group.some(entry => entry.id === item.id) ||
-          typeof item.text !== 'string' || !item.text.trim())) {
+          !(typeof item.text === 'string' && item.text.trim()) && !(typeof item.error === 'string' && item.error))) {
       reject(group, '批量译文不完整或段落 ID 不匹配。'); return;
     }
     const requests = owners(group);
     for (const entry of group) {
-      entry.result = results.find(item => item.id === entry.id).text;
+      // NoType fails single items (for example an empty translation) without failing the batch.
+      const item = results.find(result => result.id === entry.id);
       entries.delete(entry.text);
-      remember(entry.text, entry.result);
+      if (typeof item.text === 'string' && item.text.trim()) { entry.result = item.text; remember(entry.text, entry.result); }
+      else entry.error = item.error;
     }
     requests.forEach(request => {
       complete(request);
