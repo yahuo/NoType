@@ -206,16 +206,10 @@
   // Groups switch together with the original line: each group belongs to the caption line playing
   // at its midpoint (sentence time maps to width), and shows while that line does. A line holding
   // several groups shares its time among them by width; a line holding none keeps the group around it.
-  // Chinese subtitle style: no trailing ，。；：、 and an ideographic space in place of inner
-  // ，。；、. ？！…, quotes and book-title marks stay. Applied to the displayed group only, after
-  // the punctuation has done its job of splitting the sentence.
+  // Chinese subtitle style: a displayed group drops its trailing ，。；：、 (also before closing
+  // quotes); ？！…, quotes and punctuation inside the line stay.
   function subtitlePunctuation(text) {
-    return text
-      .replace(/[，。；：、]+(?=[”’」』）》]*$)/u, "")
-      .replace(/[，。；、]+(?=[”’」』）》])/gu, "")
-      .replace(/\s*[，。；、]+\s*/gu, "\u3000")
-      .replace(/\s*\u3000[\s\u3000]*/gu, "\u3000")
-      .replace(/^[\s\u3000]+|[\s\u3000]+$/gu, "");
+    return text.replace(/[，。；：、]+(?=[”’」』）》]*$)/u, "").trim();
   }
   function translationAt(text, sentence, cue, time) {
     const duration = sentence.end - sentence.start;

@@ -166,16 +166,15 @@ test('drops sound tags and lines left without words', () => {
   assert.deepEqual(plain(yt.parseTimedText('<timedtext><body><p t="0" d="900">[MUSIC PLAYING]</p><p t="900" d="900">Hi [ unclear ] there</p></body></timedtext>')),
     [{ start: 900, duration: 900, text: 'Hi there' }]);
 });
-test('tidies translation punctuation for subtitles', () => {
+test('drops only trailing pause marks from translation lines', () => {
   const yt = load();
   const tidy = yt.subtitlePunctuation;
-  assert.equal(tidy('好的，我们开始吧。'), '好的\u3000我们开始吧');
-  assert.equal(tidy('第一，第二；第三、第四：'), '第一\u3000第二\u3000第三\u3000第四');
+  assert.equal(tidy('好的，我们开始吧。'), '好的，我们开始吧');
+  assert.equal(tidy('第一，第二；第三、第四：'), '第一，第二；第三、第四');
   assert.equal(tidy('真的吗？太好了！'), '真的吗？太好了！');
   assert.equal(tidy('然后……'), '然后……');
   assert.equal(tidy('他说：“走吧。”'), '他说：“走吧”');
-  assert.equal(tidy('“走吧。”他说。'), '“走吧”他说');
-  assert.equal(tidy('读了《三体》，很好看。'), '读了《三体》\u3000很好看');
+  assert.equal(tidy('“走吧。”他说，'), '“走吧。”他说');
   assert.equal(tidy('售价 1,000 美元。'), '售价 1,000 美元');
   assert.equal(tidy('。'), '');
 });
