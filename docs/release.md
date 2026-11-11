@@ -32,7 +32,7 @@ open dist/NoType.app
 
 仓库已经提供了打包脚本：
 
-发布前同步 `packaging/Info.plist`、`NoType.xcodeproj/project.pbxproj` 和 `scripts/generate_xcodeproj.rb` 中的版本号与构建号。当前版本为 `2.0.1`，构建号为 `3`。`NOTYPE_VERSION` 只影响产物文件名，不能代替包内版本更新。
+发布前同步 `packaging/Info.plist`、`NoType.xcodeproj/project.pbxproj` 和 `scripts/generate_xcodeproj.rb` 中的版本号与构建号。当前版本为 `2.1.0`，构建号为 `4`。Linux 版本号在 `linux/Cargo.toml` 与 `linux/Cargo.lock` 中同步。`NOTYPE_VERSION` 只影响产物文件名，不能代替包内版本更新。
 
 ```bash
 make package
@@ -42,7 +42,19 @@ make package
 
 - `dist/release/NoType-<version>-macOS.zip`
 - `dist/release/NoType-<version>-macOS.dmg`
+- `dist/release/NoType-<version>-browser-extension.zip`
 - `dist/release/SHA256SUMS.txt`
+
+`SHA256SUMS.txt` 覆盖 `dist/release/` 中所有 `NoType-<version>-*` 文件。
+
+### Linux 二进制
+
+Linux 二进制在 Omarchy（x86_64）上从发布提交构建，打包后复制到 Mac 的 `dist/release/`，再用 `NOTYPE_SKIP_BUILD=1 make package` 重新生成校验和：
+
+```bash
+cargo build --release --locked --manifest-path linux/Cargo.toml
+tar -C linux/target/release -czf NoType-<version>-linux-x86_64.tar.gz notype
+```
 
 `.github/workflows/ci.yml` 在 `push`、`pull_request`、`workflow_dispatch` 时运行测试和打包检查，只保存 CI artifact。打 `v*` tag 不会触发云端发布，GitHub Release 使用本机产物。
 
@@ -76,6 +88,8 @@ codesign --verify --deep --strict dist/NoType.app
 
 - `NoType-<version>-macOS.dmg`
 - `NoType-<version>-macOS.zip`
+- `NoType-<version>-browser-extension.zip`
+- `NoType-<version>-linux-x86_64.tar.gz`
 - `SHA256SUMS.txt`
 
 Release 文案至少写清楚：
@@ -91,13 +105,15 @@ Release 文案至少写清楚：
 
 ```bash
 git push origin master
-git tag -a v2.0.1 -m 'NoType 2.0.1'
-git push origin v2.0.1
-gh release create v2.0.1 \
-  dist/release/NoType-2.0.1-macOS.zip \
-  dist/release/NoType-2.0.1-macOS.dmg \
+git tag -a v2.1.0 -m 'NoType 2.1.0'
+git push origin v2.1.0
+gh release create v2.1.0 \
+  dist/release/NoType-2.1.0-macOS.zip \
+  dist/release/NoType-2.1.0-macOS.dmg \
+  dist/release/NoType-2.1.0-browser-extension.zip \
+  dist/release/NoType-2.1.0-linux-x86_64.tar.gz \
   dist/release/SHA256SUMS.txt \
-  --verify-tag --title 'NoType 2.0.1' --notes-file /path/to/release-notes.md
+  --verify-tag --title 'NoType 2.1.0' --notes-file /path/to/release-notes.md
 ```
 
 发布后重新下载附件，核对 SHA256、包内版本、签名和启动情况。构建通过或签名有效不代表已完成真人麦克风与目标应用操作验收。

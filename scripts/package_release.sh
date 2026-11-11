@@ -10,6 +10,8 @@ VERSION="${NOTYPE_VERSION:-$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVer
 ARTIFACT_BASENAME="NoType-${VERSION}-macOS"
 ZIP_PATH="$RELEASE_DIR/${ARTIFACT_BASENAME}.zip"
 DMG_PATH="$RELEASE_DIR/${ARTIFACT_BASENAME}.dmg"
+EXTENSION_DIR="$ROOT_DIR/integrations/browser/extension"
+EXTENSION_ZIP_PATH="$RELEASE_DIR/${ARTIFACT_BASENAME%-macOS}-browser-extension.zip"
 CHECKSUM_PATH="$RELEASE_DIR/SHA256SUMS.txt"
 SKIP_BUILD="${NOTYPE_SKIP_BUILD:-0}"
 
@@ -28,11 +30,20 @@ create_dmg() {
     "$DMG_PATH"
 }
 
+create_extension_zip() {
+  rm -f "$EXTENSION_ZIP_PATH"
+  (
+    cd "$EXTENSION_DIR"
+    zip -q -r -X "$EXTENSION_ZIP_PATH" . -x '.*' '*/.*'
+  )
+}
+
+# Covers every NoType-<version>-* artifact, including a Linux tarball copied in beforehand.
 write_checksums() {
   rm -f "$CHECKSUM_PATH"
   (
     cd "$RELEASE_DIR"
-    shasum -a 256 "${ARTIFACT_BASENAME}.zip" "${ARTIFACT_BASENAME}.dmg" > "$CHECKSUM_PATH"
+    shasum -a 256 "NoType-${VERSION}-"* > "$CHECKSUM_PATH"
   )
 }
 
@@ -53,9 +64,11 @@ codesign --verify --deep --strict "$APP_PATH"
 echo "Creating release artifacts for NoType $VERSION..."
 create_zip
 create_dmg
+create_extension_zip
 write_checksums
 
 echo "Done."
 echo "ZIP: $ZIP_PATH"
 echo "DMG: $DMG_PATH"
+echo "Extension: $EXTENSION_ZIP_PATH"
 echo "SHA256: $CHECKSUM_PATH"
