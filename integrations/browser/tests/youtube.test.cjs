@@ -139,3 +139,18 @@ test('subtitle mode applies only to the top-level watch page', () => {
   assert.equal(load(new URL('https://www.youtube.com/')).applies(), false);
   assert.equal(load(new URL('https://www.youtube.com/shorts/abc')).applies(), false);
 });
+test('normalizes subtitle settings, scales the size and hides only a replaced original', () => {
+  const yt = load();
+  assert.deepEqual(plain(yt.subtitleSettings({})), { showOriginal: true, scale: 100 });
+  assert.deepEqual(plain(yt.subtitleSettings({ youtubeShowOriginal: false, youtubeFontScale: 125 })), { showOriginal: false, scale: 125 });
+  assert.deepEqual(plain(yt.subtitleSettings({ youtubeShowOriginal: 'no', youtubeFontScale: 'big' })), { showOriginal: true, scale: 100 });
+  assert.equal(yt.subtitleSettings({ youtubeFontScale: 500 }).scale, 160);
+  assert.equal(yt.subtitleSettings({ youtubeFontScale: 10 }).scale, 70);
+  assert.equal(yt.subtitleSize(480, 100), 20);
+  assert.equal(yt.subtitleSize(480, 150), 30);
+  assert.equal(yt.subtitleSize(2000, 100), 38);
+  assert.equal(yt.subtitleSize(100, 70), 10);
+  assert.deepEqual(plain(yt.subtitleLines('Hello', '你好', true)), { original: 'Hello', translated: '你好' });
+  assert.deepEqual(plain(yt.subtitleLines('Hello', '你好', false)), { original: '', translated: '你好' });
+  assert.deepEqual(plain(yt.subtitleLines('[Music]', '', false)), { original: '[Music]', translated: '' });
+});

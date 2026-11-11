@@ -69,7 +69,9 @@ async (page) => {
     const video = document.querySelector('video');
     video.addEventListener('seeked', resolve, { once: true }); video.currentTime = time;
   }), time);
-  await worker.evaluate(async (id) => { await stopTab(id); Object.assign(testNative, { requests: [], hold: false, slowText: null, failText: null }); }, tabId);
+  const settings = (values) => worker.evaluate((values) => chrome.storage.sync.set(values), values);
+  const size = () => page.evaluate(() => document.querySelector('notype-subtitle').style.getPropertyValue('--notype-size'));
+  await worker.evaluate(async (id) => { await chrome.storage.sync.clear(); await stopTab(id); Object.assign(testNative, { requests: [], hold: false, slowText: null, failText: null }); }, tabId);
 
   // 1. CC was already on before the click: the passively captured XHR track is used.
   await page.goto('https://www.youtube.com/watch?v=vid1');
@@ -100,6 +102,15 @@ async (page) => {
   sent = await texts();
   check(sent.some((text) => index(text) === 99) && new Set(sent).size === sent.length, 'Seek window missing or duplicated');
 
+  // Settings apply live: hiding the original leaves only the translation, the scale resizes it.
+  check(await size() === '23px', `Default subtitle size ${await size()}`);
+  await settings({ youtubeShowOriginal: false, youtubeFontScale: 150 });
+  await showing('', `译文：${line('vid1', 75)}`);
+  await page.waitForFunction(() => document.querySelector('notype-subtitle').style.getPropertyValue('--notype-size') === '34px');
+  await settings({ youtubeShowOriginal: true, youtubeFontScale: 100 });
+  await showing(line('vid1', 75), `译文：${line('vid1', 75)}`);
+  check(await size() === '23px', `Reset subtitle size ${await size()}`);
+
   // 3. In-page navigation to another video uses its fetch-loaded track.
   await page.evaluate(() => navigateTo('vid2'));
   await seek(0);
@@ -127,6 +138,11 @@ async (page) => {
     return /条字幕翻译失败/.test(pill.textContent) && !pill.disabled;
   });
   check(await page.evaluate(() => loads.length) === 1, 'Captions were requested more than once');
+  // With the original hidden, a sentence without a translation still shows its original.
+  await settings({ youtubeShowOriginal: false });
+  await page.waitForTimeout(200);
+  await showing(line('vid3', 0), '');
+  await settings({ youtubeShowOriginal: true });
   await worker.evaluate(() => { testNative.failText = null; });
   await pill.click();
   await showing(line('vid3', 0), `译文：${line('vid3', 0)}`);

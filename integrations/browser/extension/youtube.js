@@ -274,6 +274,24 @@
     return globalThis.top === globalThis && location.hostname === "www.youtube.com" && location.pathname === "/watch";
   }
 
+  // Stored in chrome.storage.sync by options.html; missing or invalid values fall back to these.
+  const settingDefaults = { youtubeShowOriginal: true, youtubeFontScale: 100 };
+  function subtitleSettings(stored) {
+    const scale = Number(stored?.youtubeFontScale);
+    return {
+      showOriginal: stored?.youtubeShowOriginal !== false,
+      scale: Number.isFinite(scale) ? Math.min(160, Math.max(70, Math.round(scale))) : settingDefaults.youtubeFontScale,
+    };
+  }
+  // Follows the player height like native captions, then applies the user's scale.
+  function subtitleSize(height, scale) {
+    return Math.round(Math.min(38, Math.max(14, height * 0.042)) * scale / 100);
+  }
+  // With the original hidden, it still stands in while a sentence has no translation to show.
+  function subtitleLines(cue, translation, showOriginal) {
+    return { original: showOriginal || !translation ? cue : "", translated: translation };
+  }
+
   const viewStyle = ":host{all:initial!important;position:absolute!important;inset:0!important;z-index:41!important;display:block!important;pointer-events:none!important}" +
     ".box{position:absolute;left:4%;right:4%;bottom:var(--notype-bottom,60px);display:flex;flex-direction:column;align-items:center;gap:.12em;" +
     "font:500 var(--notype-size,20px)/1.35 'YouTube Noto',Roboto,'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;text-align:center;transition:bottom .2s}" +
@@ -297,9 +315,23 @@
     let lastPressed = null, captionsWanted = true, scheduledAt = -Infinity, scheduledTime = NaN;
     let host, box, original, translated, pill, sheet, layoutKey = "", player = null;
     let results = 0, failuresKey = "", failures = 0, failureReason = "";
+    let settings = subtitleSettings(settingDefaults);
+    function loadSettings() {
+      chrome.storage.sync.get(settingDefaults).then((stored) => {
+        if (stopped) return;
+        settings = subtitleSettings(stored);
+        layoutKey = "";
+      }, () => {});
+    }
+    function settingsChanged(changes, area) {
+      if (area === "sync" && Object.keys(changes).some((key) => key in settingDefaults)) loadSettings();
+    }
+    chrome.storage.onChanged.addListener(settingsChanged);
+    loadSettings();
 
     function stop() {
       stopped = true;
+      chrome.storage.onChanged.removeListener(settingsChanged);
       cancelAnimationFrame(frame);
       const old = port;
       port = null;
@@ -489,7 +521,7 @@
       const height = target.clientHeight;
       const controls = !target.classList.contains("ytp-autohide");
       const bottom = controls ? (target.querySelector(".ytp-chrome-bottom")?.offsetHeight || 48) + 14 : Math.round(height * 0.05);
-      const size = Math.round(Math.min(38, Math.max(14, height * 0.042)));
+      const size = subtitleSize(height, settings.scale);
       const key = `${bottom}:${size}`;
       if (key === layoutKey) return;
       layoutKey = key;
@@ -529,8 +561,9 @@
         const cue = track.cues[findCue(track.cues, time)];
         const sentence = track.sentences[findCue(track.sentences, time)];
         const entry = sentence && needsTranslation(sentence.text) ? translations.get(sentence.text) : null;
-        setLine(original, cue?.text || "");
-        setLine(translated, entry?.status === "done" ? translationAt(entry.result, sentence, cue, time) : "");
+        const lines = subtitleLines(cue?.text || "", entry?.status === "done" ? translationAt(entry.result, sentence, cue, time) : "", settings.showOriginal);
+        setLine(original, lines.original);
+        setLine(translated, lines.translated);
         waiting = !!entry && ["pending", "waiting"].includes(entry.status) && !stopped;
         schedule(time, video.playbackRate);
       }
@@ -562,5 +595,8 @@
     tick();
   }
 
-  globalThis.__noTypeYouTubeSubtitles = { applies, start, parseTimedText, buildCues, buildSentences, translationAt, findCue, capture };
+  globalThis.__noTypeYouTubeSubtitles = {
+    applies, start, parseTimedText, buildCues, buildSentences, translationAt, findCue, capture,
+    subtitleSettings, subtitleSize, subtitleLines,
+  };
 })();

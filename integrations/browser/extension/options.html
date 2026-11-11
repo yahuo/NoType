@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>NoType 设置</title>
+  <style>
+    :root { color-scheme: light dark; --muted: #5f6368; --line: #dadce0; }
+    @media (prefers-color-scheme: dark) { :root { --muted: #9aa0a6; --line: #3c4043; } }
+    body { margin: 0; padding: 16px 20px 20px; min-width: 360px; font: 14px/1.5 system-ui, -apple-system, "PingFang SC", sans-serif; }
+    h1 { margin: 0 0 12px; font-size: 15px; font-weight: 600; }
+    .row { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 4px 16px; padding: 12px 0; border-top: 1px solid var(--line); }
+    .hint { grid-column: 1 / -1; color: var(--muted); font-size: 12px; }
+    .scale { display: flex; align-items: center; gap: 10px; }
+    output { min-width: 3.2em; text-align: right; font-variant-numeric: tabular-nums; }
+    button { margin-top: 8px; }
+  </style>
+</head>
+<body>
+  <h1>YouTube 双语字幕</h1>
+  <div class="row">
+    <label for="original">显示原文字幕</label>
+    <input id="original" type="checkbox">
+    <div class="hint">关闭后只显示中文；还没有译文或无需翻译的字幕（如中文、音效标记）仍显示原文。</div>
+  </div>
+  <div class="row">
+    <label for="scale">字幕字号</label>
+    <span class="scale"><input id="scale" type="range" min="70" max="160" step="10"><output id="scale-value" for="scale"></output></span>
+    <div class="hint">在随播放器大小自动调整的字号上缩放，原文比译文小一号。修改即时生效。</div>
+  </div>
+  <button id="reset" type="button">恢复默认</button>
+  <script src="options.js"></script>
+</body>
+</html>
