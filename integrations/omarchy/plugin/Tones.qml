@@ -12,7 +12,6 @@ QtObject {
   readonly property color error: Color.urgent
 
   readonly property string glyphMic: String.fromCodePoint(0xF036C)
-  readonly property string glyphMicOff: String.fromCodePoint(0xF036D)
   readonly property string glyphTranslate: String.fromCodePoint(0xF05CA)
   readonly property string glyphSelection: String.fromCodePoint(0xF036A)
   readonly property string glyphCog: String.fromCodePoint(0xF0493)
@@ -21,6 +20,7 @@ QtObject {
   readonly property string glyphAlert: String.fromCodePoint(0xF0026)
   readonly property string glyphCheck: String.fromCodePoint(0xF012C)
   readonly property string glyphCheckCircle: String.fromCodePoint(0xF05E0)
+  readonly property string glyphEllipsisCircle: String.fromCodePoint(0xF07C3)
   readonly property string glyphCloseCircle: String.fromCodePoint(0xF0159)
   readonly property string glyphCircle: String.fromCodePoint(0xF0130)
   readonly property string glyphChevron: String.fromCodePoint(0xF0140)

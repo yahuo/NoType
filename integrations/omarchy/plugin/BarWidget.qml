@@ -3,10 +3,12 @@ import Quickshell
 import qs.Commons
 import qs.Ui
 
-// Bar indicator plus the popover of the macOS menu bar item. Dim when idle
-// (or hidden with `hideWhenIdle`), urgent and pulsing while recording,
-// spinning while transcribing or refining. Left click opens the popover,
-// middle click toggles recording, right click cancels.
+// Bar indicator plus the popover of the macOS menu bar item. The icon matches
+// the macOS template images in the bar's foreground color: a calm waveform
+// when idle, a taller one while recording, then ellipsis, check or warning
+// circles. Dim only while the daemon is offline; `hideWhenIdle` hides it when
+// idle. Left click opens the popover, middle click toggles recording, right
+// click cancels.
 Panel {
   id: root
 
@@ -171,8 +173,6 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  onRecordingChanged: if (!root.recording) pulseLayer.opacity = 1
-  onBusyChanged: if (!root.busy) button.textRotation = 0
   onOpenedChanged: {
     if (root.opened && root.service) root.service.refreshSnapshot()
     if (!root.opened) root.actionMessage = ""
@@ -189,43 +189,49 @@ Panel {
     onTriggered: root.lookupService()
   }
 
-  SequentialAnimation {
-    running: root.recording && root.visible
-    loops: Animation.Infinite
-    NumberAnimation { target: pulseLayer; property: "opacity"; to: 0.5; duration: 650; easing.type: Easing.InOutSine }
-    NumberAnimation { target: pulseLayer; property: "opacity"; to: 1; duration: 650; easing.type: Easing.InOutSine }
-  }
+  // MenuBarIconProvider.makeWaveform: 2pt bars, 1.5pt gaps, round caps.
+  Component {
+    id: waveform
 
-  NumberAnimation {
-    target: button
-    property: "textRotation"
-    from: 0
-    to: 360
-    duration: 900
-    loops: Animation.Infinite
-    running: root.busy && root.visible
-  }
+    Item {
+      readonly property var heights: root.recording ? [6, 10, 14, 10, 6] : [4, 7, 11, 7, 4]
+      readonly property real barWidth: 2
+      readonly property real gap: 1.5
+      width: 18
+      height: 18
 
-  Item {
-    id: pulseLayer
-    anchors.fill: parent
-
-    BarIconButton {
-      id: button
-      anchors.fill: parent
-      bar: root.bar
-      text: !root.online ? tones.glyphMicOff
-        : (root.busy ? tones.glyphLoading
-        : (root.failed ? tones.glyphAlert
-        : (root.done ? tones.glyphCheck : tones.glyphMic)))
-      active: root.recording || root.failed
-      dimmed: root.idle
-      tooltipText: "NoType · " + root.statusLabel
-      onPressed: function(b) {
-        if (b === Qt.MiddleButton) root.run(["record", "toggle"])
-        else if (b === Qt.RightButton) root.run(["cancel"])
-        else root.toggle()
+      Repeater {
+        model: parent.heights
+        delegate: Rectangle {
+          required property int index
+          required property real modelData
+          x: (18 - (5 * 2 + 4 * 1.5)) / 2 + index * (2 + 1.5)
+          y: (18 - modelData) / 2
+          width: 2
+          height: modelData
+          radius: 1
+          color: button.foreground
+        }
       }
+    }
+  }
+
+  BarIconButton {
+    id: button
+    anchors.fill: parent
+    bar: root.bar
+    // The bounds of the idle and recording waveforms share their width, so
+    // the bar scales both alike and only the height changes.
+    iconComponent: root.busy || root.failed || root.done ? null : waveform
+    text: root.busy ? tones.glyphEllipsisCircle
+      : (root.failed ? tones.glyphAlert
+      : (root.done ? tones.glyphCheckCircle : ""))
+    dimmed: !root.online
+    tooltipText: "NoType · " + root.statusLabel
+    onPressed: function(b) {
+      if (b === Qt.MiddleButton) root.run(["record", "toggle"])
+      else if (b === Qt.RightButton) root.run(["cancel"])
+      else root.toggle()
     }
   }
 

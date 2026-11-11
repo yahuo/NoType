@@ -6,7 +6,7 @@ Omarchy 桌面壳（quickshell）插件，id 为 `notype`。插件只读取 `not
 | --- | --- | --- |
 | `Service.qml` | service | 唯一的 `notype status --follow` 进程；守护进程退出后约 2 秒重连，期间视为离线 |
 | `Overlay.qml` | panel | 底部居中的听写 HUD（不接收输入、不抢焦点）、划词中文翻译卡片，以及按需创建的设置窗口和环境检查窗口 |
-| `BarWidget.qml` | bar-widget | 状态栏麦克风图标：左键打开菜单，中键 `notype record toggle`，右键 `notype cancel` |
+| `BarWidget.qml` | bar-widget | 状态栏波形图标（与 macOS 菜单栏一致）：左键打开菜单，中键 `notype record toggle`，右键 `notype cancel` |
 | `SettingsWindow.qml` | 窗口 | 对应 macOS 设置窗口的 Speech 和 AI Rewrite 两页，读写 `notype settings` |
 | `SetupWindow.qml` | 窗口 | 对应 macOS 引导页，列出 `notype doctor` 的环境检查 |
 
@@ -44,7 +44,7 @@ omarchy bar move notype --section left
 "bar": { "layout": { "right": [ { "id": "notype", "hideWhenIdle": false } ] } }
 ```
 
-`hideWhenIdle: true` 在空闲和离线时隐藏图标，默认只是变暗。也可以用命令设置：`omarchy bar set notype hideWhenIdle true --json`。
+`hideWhenIdle: true` 在空闲和离线时隐藏图标；默认一直显示，只在守护进程离线时变暗。也可以用命令设置：`omarchy bar set notype hideWhenIdle true --json`。
 
 插件是否启用取决于 `shell.json` 中是否引用了 `notype`。把图标从状态栏移除会同时停用 HUD 和翻译卡片。只想要 HUD、不要图标时，删掉 `bar.layout` 里的条目，并在顶层 `plugins` 中加入：
 
