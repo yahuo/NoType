@@ -68,3 +68,13 @@ test('YouTube watch pages start subtitle mode; frames inside YouTube stay idle',
   const embed = harness({ top: {}, location: { ancestorOrigins: ['https://www.youtube.com', 'https://example.com'] } }); embed.command('notype.start');
   assert.equal(embed.counts().starts, 1);
 });
+test('top frames report the browser theme and its changes; child frames stay quiet', () => {
+  let change;
+  const media = { matches: true, addEventListener(name, fn) { if (name === 'change') change = fn; } };
+  const top = harness({ matchMedia: () => media });
+  assert.deepEqual(top.sent.filter((m) => m.type === 'notype.scheme').map((m) => m.dark), [true]);
+  media.matches = false; change();
+  assert.equal(top.sent.at(-1).type, 'notype.scheme'); assert.equal(top.sent.at(-1).dark, false);
+  const child = harness({ matchMedia: () => media, top: {} });
+  assert.equal(child.sent.some((m) => m.type === 'notype.scheme'), false);
+});

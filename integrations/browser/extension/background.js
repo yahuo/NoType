@@ -1,6 +1,8 @@
 const HOST = "com.opensource.notype.browser";
 const sessions = new Map();
 const tabKey = (id) => `translation:${id}`;
+// Toolbar waveform variant last applied; null until a page reports the theme.
+let iconScheme = null;
 
 async function stopTab(tabId) {
   await chrome.storage.session.remove(tabKey(tabId));
@@ -46,6 +48,14 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (message?.type === "notype.stop") {
     stopTab(sender.tab.id).then(() => reply({ ok: true }));
     return true;
+  }
+  if (message?.type === "notype.scheme") {
+    const scheme = message.dark === true ? "dark" : "light";
+    if (scheme !== iconScheme) {
+      iconScheme = scheme;
+      chrome.action.setIcon({ path: { 16: `icons/wave-${scheme}-16.png`, 32: `icons/wave-${scheme}-32.png` } }).catch(() => {});
+    }
+    return;
   }
   if (message?.type === "notype.retry") {
     chrome.tabs.sendMessage(sender.tab.id, { type: "notype.retry" }).then(() => reply({ ok: true })).catch(() => reply({ ok: false }));
