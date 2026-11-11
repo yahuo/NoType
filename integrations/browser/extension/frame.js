@@ -31,4 +31,12 @@
     if (state?.active && !controlled) start();
   }).catch(() => {});
   addEventListener("pagehide", () => globalThis.__noTypeBilingual?.stop());
+  // The service worker cannot read the browser theme; top frames report it so
+  // the toolbar waveform stays legible, like a macOS template image.
+  if (globalThis.top === globalThis && typeof globalThis.matchMedia === "function") {
+    const dark = globalThis.matchMedia("(prefers-color-scheme: dark)");
+    const report = () => chrome.runtime.sendMessage({ type: "notype.scheme", dark: dark.matches }).catch(() => {});
+    report();
+    dark.addEventListener?.("change", report);
+  }
 })();

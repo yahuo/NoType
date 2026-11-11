@@ -11,7 +11,7 @@ function harness() {
   const natives = [], broadcasts = [], timers = new Set(), state = {};
   const immediate = new Set();
   const chrome = {
-    action: { onClicked: event(), async setBadgeText() {}, async setTitle() {} },
+    action: { onClicked: event(), async setBadgeText() {}, async setTitle() {}, icons: [], async setIcon(details) { this.icons.push(details.path[16]); } },
     tabs: { onRemoved: event(), async sendMessage(tabId, message, options) { broadcasts.push({ tabId, message, options }); } },
     webNavigation: { onCommitted: event() },
     storage: { session: {
@@ -420,4 +420,10 @@ test("retry is broadcast to the whole tab without restarting completed frames", 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(h.broadcasts.at(-1).message.type, "notype.retry");
   assert.equal(h.broadcasts.at(-1).options, undefined);
+});
+test("the toolbar waveform follows the reported browser theme", () => {
+  const h = harness(), sender = { id: "own-id", tab: { id: 1 }, frameId: 0, url: "https://example.test/" };
+  const report = (dark, from = sender) => h.chrome.runtime.onMessage.emit({ type: "notype.scheme", dark }, from, () => {});
+  report(true); report(true); report(false); report(true, { ...sender, id: "other" });
+  assert.deepEqual(h.chrome.action.icons, ["icons/wave-dark-16.png", "icons/wave-light-16.png"]);
 });
