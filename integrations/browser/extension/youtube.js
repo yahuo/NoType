@@ -15,6 +15,12 @@
   function clean(text) {
     return text.replace(/[​﻿]/g, "").replace(/\s+/g, " ").trim();
   }
+  // Sound tags ([Music], [Applause], ［笑］) are dropped; a line left without letters or digits
+  // (♪, a lone dash) is dropped with them.
+  function caption(text) {
+    const line = clean(text.replace(/[[［][^[\]［］\n]{1,40}[\]］]/g, " "));
+    return /[\p{L}\p{N}]/u.test(line) ? line : "";
+  }
   function decodeEntities(text) {
     const named = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
     return text.replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos|nbsp);/gi, (match, name) => {
@@ -39,7 +45,7 @@
       for (const event of Array.isArray(data?.events) ? data.events : []) {
         const start = number(event?.tStartMs);
         if (start === null || !Array.isArray(event.segs)) continue;
-        const line = clean(event.segs.map((segment) => typeof segment?.utf8 === "string" ? segment.utf8 : "").join(""));
+        const line = caption(event.segs.map((segment) => typeof segment?.utf8 === "string" ? segment.utf8 : "").join(""));
         if (line) raw.push({ start, duration: number(event.dDurationMs) ?? 0, text: line });
       }
       return raw;
@@ -51,7 +57,7 @@
       const duration = number(attribute(ms ? "d" : "dur")) ?? 0;
       if (start === null) continue;
       // Strip tags before decoding; srv1 escapes entities twice (&amp;#39;).
-      const line = clean(decodeEntities(decodeEntities(match[3].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, ""))));
+      const line = caption(decodeEntities(decodeEntities(match[3].replace(/<br\s*\/?>/gi, " ").replace(/<[^>]*>/g, ""))));
       if (line) raw.push({ start: ms ? start : start * 1000, duration: ms ? duration : duration * 1000, text: line });
     }
     return raw;
