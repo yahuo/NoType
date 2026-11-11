@@ -154,3 +154,15 @@ test('normalizes subtitle settings, scales the size and hides only a replaced or
   assert.deepEqual(plain(yt.subtitleLines('Hello', '你好', false)), { original: '', translated: '你好' });
   assert.deepEqual(plain(yt.subtitleLines('[Music]', '', false)), { original: '[Music]', translated: '' });
 });
+test('drops sound tags and lines left without words', () => {
+  const yt = load();
+  const json3 = JSON.stringify({ events: [
+    { tStartMs: 0, dDurationMs: 1000, segs: [{ utf8: '[Music]' }] },
+    { tStartMs: 1000, dDurationMs: 1000, segs: [{ utf8: '[Applause] Thank you [laughs] all.' }] },
+    { tStartMs: 2000, dDurationMs: 1000, segs: [{ utf8: '♪ ♪' }] },
+    { tStartMs: 3000, dDurationMs: 1000, segs: [{ utf8: '- ［笑］' }] },
+    { tStartMs: 4000, dDurationMs: 1000, segs: [{ utf8: '♪ la la ♪' }] }] });
+  assert.deepEqual(plain(yt.parseTimedText(json3)).map((cue) => cue.text), ['Thank you all.', '♪ la la ♪']);
+  assert.deepEqual(plain(yt.parseTimedText('<timedtext><body><p t="0" d="900">[MUSIC PLAYING]</p><p t="900" d="900">Hi [ unclear ] there</p></body></timedtext>')),
+    [{ start: 900, duration: 900, text: 'Hi there' }]);
+});
