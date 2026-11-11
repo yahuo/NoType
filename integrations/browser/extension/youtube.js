@@ -206,6 +206,17 @@
   // Groups switch together with the original line: each group belongs to the caption line playing
   // at its midpoint (sentence time maps to width), and shows while that line does. A line holding
   // several groups shares its time among them by width; a line holding none keeps the group around it.
+  // Chinese subtitle style: no trailing ，。；：、 and an ideographic space in place of inner
+  // ，。；、. ？！…, quotes and book-title marks stay. Applied to the displayed group only, after
+  // the punctuation has done its job of splitting the sentence.
+  function subtitlePunctuation(text) {
+    return text
+      .replace(/[，。；：、]+(?=[”’」』）》]*$)/u, "")
+      .replace(/[，。；、]+(?=[”’」』）》])/gu, "")
+      .replace(/\s*[，。；、]+\s*/gu, "\u3000")
+      .replace(/\s*\u3000[\s\u3000]*/gu, "\u3000")
+      .replace(/^[\s\u3000]+|[\s\u3000]+$/gu, "");
+  }
   function translationAt(text, sentence, cue, time) {
     const duration = sentence.end - sentence.start;
     const groups = translationGroups(text, duration);
@@ -567,7 +578,7 @@
         const cue = track.cues[findCue(track.cues, time)];
         const sentence = track.sentences[findCue(track.sentences, time)];
         const entry = sentence && needsTranslation(sentence.text) ? translations.get(sentence.text) : null;
-        const lines = subtitleLines(cue?.text || "", entry?.status === "done" ? translationAt(entry.result, sentence, cue, time) : "", settings.showOriginal);
+        const lines = subtitleLines(cue?.text || "", entry?.status === "done" ? subtitlePunctuation(translationAt(entry.result, sentence, cue, time)) : "", settings.showOriginal);
         setLine(original, lines.original);
         setLine(translated, lines.translated);
         waiting = !!entry && ["pending", "waiting"].includes(entry.status) && !stopped;
@@ -603,6 +614,6 @@
 
   globalThis.__noTypeYouTubeSubtitles = {
     applies, start, parseTimedText, buildCues, buildSentences, translationAt, findCue, capture,
-    subtitleSettings, subtitleSize, subtitleLines,
+    subtitleSettings, subtitleSize, subtitleLines, subtitlePunctuation,
   };
 })();
