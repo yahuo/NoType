@@ -5,87 +5,55 @@
 <h1 align="center">NoType</h1>
 
 <p align="center">
-  一个面向 macOS 的菜单栏语音输入应用。<br>
-  按下快捷键，说话，文字回到你当前聚焦的输入框里。
+  No Type, Just Talk, Happy Coding!<br>
+  按下快捷键，说话，文字回到你正在输入的地方。
 </p>
 
 <p align="center">
-  基于 SwiftUI、AppKit、Codex / Doubao 语音转写、AI Rewrite 和英文翻译构建。
+  <a href="https://github.com/yahuo/NoType/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/yahuo/NoType"></a>
+  <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://github.com/yahuo/NoType/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/yahuo/NoType/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/yahuo/NoType/actions/workflows/linux.yml"><img alt="Linux" src="https://github.com/yahuo/NoType/actions/workflows/linux.yml/badge.svg"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Omarchy%20Linux-lightgrey">
 </p>
 
-## NoType 是什么
+NoType 是一个开源的桌面语音输入与翻译工具。写代码、回消息、填表单时，按一下快捷键开始说话，结束后文字直接粘贴回当前输入框，不用切到另一个转写工具，也不用手动复制粘贴。
 
-NoType 想解决的是一件很具体的事：当你已经在写代码、回消息、记笔记、填表单时，不想切到另一个转写工具，也不想手动复制粘贴，只想按一下快捷键就开始说话，然后让文字回到你原本正在操作的地方。
+它以 macOS 菜单栏应用为主，同时提供 Linux（Omarchy）版本、Chrome / Edge 网页双语翻译扩展，以及 Pi、Claude Code、Codex CLI 等终端 Agent 的草稿翻译集成。
 
-它不是一个“大而全”的输入法，也不是一个重型会议纪要系统，而是一个更轻、更近、更适合桌面工作流的语音输入工具。
+## 功能
 
-## 为什么值得用
+### macOS 应用
 
-- 菜单栏常驻，不抢桌面主场景
-- `Option + Space` 启动语音输入，`Option + Shift + Space` 翻译成英文
-- Codex 转写复用本机登录态，结束录音后整段识别并直接输入；也可选择 Doubao 流式转写
-- Doubao 模式可选 `AI Rewrite`，把口语稿整理成更适合直接发送或交给 AI 执行的文字
-- 统一走剪贴板 + `Cmd + V` 注入，对非原生编辑器更稳
-- 粘贴前会在 CJK 输入法下临时切到 ASCII，粘贴后恢复输入法和原剪贴板
-- 配置、打包、调试链路都在仓库里，适合继续二开
+| 快捷键 | 作用 |
+| --- | --- |
+| `Option + Space` | 开始 / 结束语音输入，结果粘贴回当前输入框 |
+| `Option + Shift + Space` | 有选中文本时翻译成英文并替换；没有选中时说话，插入英文 |
+| `Option + Control + Space` | 选中文字翻译成中文，在浮窗中阅读，不修改原文 |
+| `Option + Esc` | 取消录音、转写、改写或翻译 |
 
-## 当前已经支持
+- **两种转写引擎**：Codex 复用本机登录态，录音结束后整段识别；Doubao 流式识别实时显示文字，可选 `AI Rewrite` 把口语稿整理成适合发送或交给 AI 执行的文字。
+- **Neo 语音助手**：自定义唤醒词，支持连续对话、插话打断和语音结束会话；通过本机 Codex 联网搜索、读取屏幕和操作应用。
+- **稳定的文本注入**：统一走剪贴板 + `Cmd + V`；在中文、日文、韩文输入法下临时切到 ASCII，完成后恢复输入法和原剪贴板；没有可编辑焦点时把结果留在剪贴板。
+- **菜单栏常驻**：带 `Setup`、`Settings` 和底部悬浮 HUD，录音时显示波形或实时文字。
 
-- 仅菜单栏运行的 macOS 14+ 应用，带 `Setup`、`Settings` 和底部悬浮 HUD
-- `Option + Space` 全局热键，`Option + Shift + Space` 进入英文翻译；`Option + Esc` 可取消
-- 同一主热键按一次开始录音，再按一次结束
-- Codex 内部听写：复用本机登录态，自动识别语言，上传完整录音后返回文字；直接输入，不额外调用 rewrite
-- Doubao Streaming ASR，支持 `English`、`简体中文`、`繁體中文`、`日本語`、`한국어`
-- Doubao 模式的 `AI Rewrite` 可选开关：
-  - 关闭时走 `Literal`，直接使用 ASR 最终文本
-  - 打开且 Codex 登录态可用时走 `Writing`，先进行轻量改写再插入
-- 英文翻译：
-  - 有选中文本时，`Option + Shift + Space` 会直接翻译选中文本并替换
-  - 没有选中文本时，`Option + Shift + Space` 会先录音，再把语音转写结果翻译成英文
-  - 本地 Unix socket bridge 可让 Pi、Claude Code 和 Codex CLI 翻译并替换 TUI draft，不依赖终端 AX 输入框
-- 选词中文翻译：选中文字后按 `Option + Control + Space`，在独立浮窗阅读中文译文，原文保持不变；支持滚动、展开原文和复制译文
-- Codex 模式录音时显示波形，结束后等待完整转写；Doubao 模式显示实时文本，在 `AI Rewrite` 阶段显示流式改写结果
-- 文本注入统一走剪贴板 + 模拟 `Cmd + V`
-- 如果没有可编辑焦点，则不会强行注入，而是把结果保留到剪贴板供手动粘贴
-- 在中文、日文、韩文输入法下粘贴前会临时切到 `ABC/US`，完成后恢复
+### Linux（Omarchy）
 
-## 适合谁
+Rust 守护进程以 systemd 用户服务运行，配合 Hyprland 快捷键和 Omarchy 桌面壳插件，提供与 macOS 版相同的听写、英文翻译、选词中文翻译和桥接能力；可选 fcitx5 addon 支持在任意输入框三连空格翻译。见 [integrations/omarchy/README.md](./integrations/omarchy/README.md)。
 
-- 希望在 macOS 上做“按键即说话”的轻量语音输入用户
-- 已经在用火山引擎 Doubao ASR，希望接入桌面工作流的人
-- 想研究菜单栏应用、全局热键、Accessibility 文本注入、Doubao ASR 和 LLM Rewrite 的开发者
-- 想把现有 MVP 继续打磨成可分发产品的开源贡献者
+### 浏览器双语翻译
 
-## 项目状态
+Chrome / Edge 扩展，点击工具栏按钮后在原文下方流式显示中文译文，支持 iframe。YouTube 视频页显示原文 + 中文双语字幕，可在设置页隐藏原文、调整字号。macOS 和 Linux 通用，见 [integrations/browser/README.md](./integrations/browser/README.md)。
 
-NoType 目前处于早期可用阶段：
+### 终端 Agent 草稿翻译
 
-- 主路径已经可跑通
-- 适合自用、调试和持续迭代
-- 还没有把安装、签名、分发、兼容性打磨到“普通用户无脑即用”的程度
+通过本地 Unix socket bridge，把 Pi、Claude Code、Codex CLI 输入框里的中文草稿翻译成英文并替换，不依赖终端的辅助功能输入框。Pi 和 Claude Code 支持三连空格触发。见 [docs/bridge.md](./docs/bridge.md)。
 
-如果你想要一个可修改、可验证、可继续演进的基础版本，这个仓库已经足够开始。
+## 安装
 
-## 技术栈
+### macOS（Apple Silicon，macOS 14+）
 
-- Swift 6
-- SwiftUI + AppKit
-- macOS Accessibility / Carbon Hotkey / AVFoundation / Text Input Sources
-- Doubao Streaming ASR WebSocket 协议
-- Codex OAuth + Codex Responses SSE streaming
-
-## 系统要求
-
-- macOS 14+
-- Codex 模式需要有效的本机 `codex login` 登录态；Doubao 模式需要已开通的流式语音识别资源
-- 如果启用 `AI Rewrite` 或翻译，也需要本机已完成 `codex login`
-- 允许应用访问：
-  - Microphone
-  - Accessibility
-
-## 快速开始
-
-### Homebrew 安装（Apple Silicon）
+Homebrew：
 
 ```bash
 brew install --cask ssdev-labs/tap/notype
@@ -93,60 +61,62 @@ brew install --cask ssdev-labs/tap/notype
 
 后续使用 `brew upgrade --cask notype` 升级。已经手动安装相同版本时，可用 `brew install --cask --adopt ssdev-labs/tap/notype` 纳入 Homebrew 管理。
 
+也可以从 [Releases](https://github.com/yahuo/NoType/releases/latest) 下载 DMG 或 ZIP，把 `NoType.app` 放进 `/Applications`。
+
 当前下载包使用 Apple Development 签名，未经过 Apple 公证；首次打开若被拦截，请在「系统设置 → 隐私与安全性」中允许 NoType。
 
-### 直接运行
+首次启动后打开 `Setup` 授权：
+
+- 麦克风：语音输入
+- 辅助功能：读取选区和粘贴文本
+- 语音识别：Neo 离线唤醒
+
+Codex 听写、AI Rewrite、翻译和 Neo 需要本机已完成 `codex login`；Neo 还需要安装 Codex 桌面应用。Doubao 模式需要自行配置凭证。
+
+### Linux（Omarchy）
+
+```bash
+git clone https://github.com/yahuo/NoType.git
+cd NoType
+integrations/omarchy/install.sh --browser --pi
+```
+
+安装脚本会编译 Rust 守护进程、安装 systemd 用户服务、Hyprland 快捷键和桌面壳插件。不想本地编译时，可把 Release 附件中的 x86_64 二进制放到 `linux/target/release/notype`，再加 `--no-build` 运行。依赖和配置见 [integrations/omarchy/README.md](./integrations/omarchy/README.md)。
+
+### 浏览器扩展
+
+扩展需要配合本地连接程序使用，安装步骤见 [integrations/browser/README.md](./integrations/browser/README.md)。
+
+## 从源码构建（macOS）
+
+直接运行：
 
 ```bash
 swift run NoType
 ```
 
-应用启动后会出现在菜单栏。第一次使用时，先打开 `Setup` 完成权限授权，再到 `Settings` 配置 Doubao 凭证。
-
-### 构建并安装到 `/Applications`
+构建并安装到 `/Applications`：
 
 ```bash
 make install
 ```
 
-如果只想产出签名后的 `.app` bundle：
+只产出签名后的 `dist/NoType.app`：
 
 ```bash
 make build
 ```
 
-构建脚本会：
+构建脚本以 `release` 模式编译，生成图标并组装 `.app`。签名优先使用本机的 `Developer ID Application`，其次 `Apple Development`，都没有时使用 ad-hoc 签名；也可用 `NOTYPE_CODESIGN_IDENTITY` 指定。
 
-- 以 `release` 模式构建可执行文件
-- 生成应用图标
-- 组装 `.app` bundle
-- 使用 ad-hoc 签名
-- 输出到 `dist/NoType.app`
-
-直接预览最新包：
-
-```bash
-make run
-```
-
-### 在 Xcode 中开发
-
-先生成工程：
+在 Xcode 中开发：
 
 ```bash
 ruby scripts/generate_xcodeproj.rb
 open NoType.xcodeproj
 ```
 
-然后在 Xcode 中：
-
-1. 选择 `NoType` target。
-2. 打开 `Signing & Capabilities`。
-3. 启用 `Automatically manage signing`。
-4. 选择你的开发团队。
-5. Run 或 Archive。
-
-本地开发通常使用 `Apple Development` 签名即可。如果你暂时不加入付费 Apple Developer Program，也可以生成实验性二进制给他人试用，但这类构建没有 `Developer ID` 和 notarization，首次安装时需要用户手动绕过 Gatekeeper。
+选择 `NoType` target，在 `Signing & Capabilities` 中启用 `Automatically manage signing` 并选择开发团队，然后 Run 或 Archive。
 
 ## 配置 Doubao ASR
 
@@ -280,14 +250,19 @@ NOTYPE_NOTARY_PROFILE=AC_NOTARY make notarize
 ```text
 Sources/NoType/App         应用状态、生命周期和主流程
 Sources/NoType/Models      配置、状态和数据模型
-Sources/NoType/Services    音频采集、热键、ASR、AI Rewrite、权限、文本插入等服务
+Sources/NoType/Services    音频采集、热键、ASR、AI Rewrite、Neo、权限、文本插入等服务
 Sources/NoType/Views       菜单栏、设置、HUD、引导界面
 Sources/NoType/Support     PCM 与转写文本处理辅助工具
 Sources/NoTypeEditor       Claude/Codex external-editor 代理
 Sources/NoTypeEditorCore   external-editor draft 解析逻辑
-scripts/                   构建、图标、Xcode 工程生成脚本
-packaging/                 App bundle 资源与图标
 Tests/NoTypeTests          测试
+linux/                     Linux 版 Rust 守护进程
+scripts/                   构建、打包、图标、Xcode 工程生成脚本
+packaging/                 App bundle 资源与图标
+site/                      官网静态站
+integrations/browser       Chrome / Edge 网页双语翻译扩展与本地连接程序
+integrations/omarchy       Omarchy 安装脚本、systemd 服务、Hyprland 快捷键和桌面壳插件
+integrations/fcitx5        fcitx5 三连空格翻译 addon
 integrations/pi            Pi TUI 的 NoType bridge 扩展
 integrations/claude-code   Claude Code 输入框内三连空格翻译的 mod
 integrations/agent-editor  Claude Code / Codex CLI 的 external-editor 安装脚本
@@ -296,35 +271,33 @@ integrations/agent-editor  Claude Code / Codex CLI 的 external-editor 安装脚
 ## Roadmap
 
 - [x] 菜单栏主流程、快捷键、录音、转写、文本插入
-- [x] Doubao 主链与基础设置
-- [x] 可选 AI Rewrite
-- [x] 语音英文翻译与选中文本英文翻译
+- [x] Codex 整段转写与 Doubao 流式转写，可选 AI Rewrite
+- [x] 语音英文翻译、选中文本英文翻译和选词中文翻译
+- [x] Neo 语音助手
 - [x] Pi、Claude Code、Codex CLI 的本地 draft 翻译 bridge
-- [x] 跨输入法的剪贴板注入与恢复
-- [ ] 更完整的安装与分发流程
+- [x] Chrome / Edge 网页双语翻译与 YouTube 双语字幕
+- [x] Linux（Omarchy）版本
+- [ ] Developer ID 签名与 notarization
+- [ ] 自动更新
 - [ ] 更稳定的跨应用文本插入兼容性
-- [ ] 更细的 AI Rewrite 风格和强度控制
 - [ ] 更清晰的产品级 onboarding 和错误提示
-- [ ] 自动更新、发布产物和更完整的 CI
 
 ## 参与共建
 
-欢迎提 issue、提 PR，或者直接把它 fork 成更适合你自己的版本。
+欢迎提 issue、提 PR，或者直接 fork 成更适合你自己的版本。
 
-如果你准备参与修改，比较值得先看的目录是：
-
-- `Sources/NoType/App`
-- `Sources/NoType/Services`
-- `Sources/NoType/Views`
-- `scripts/`
+比较值得先看的目录是 `Sources/NoType/App`、`Sources/NoType/Services`、`Sources/NoType/Views`、`linux/src` 和 `integrations/`。提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/)。
 
 ## 当前边界
 
-- 当前目标平台只有 macOS。
+- macOS 发布包只提供 Apple Silicon（arm64），未经过 Apple notarization。
+- Linux 版本面向 Omarchy（Arch Linux + Hyprland + quickshell），其他发行版和桌面环境未验证。
 - 裸 `Fn/Globe` 会和 macOS Emoji/输入法入口冲突，因此默认使用 `Option + Space` 和 `Option + Shift + Space`。
 - 文本插入统一依赖 Accessibility + 模拟粘贴，不再走 AX 直写优先。
-- `AI Rewrite` 依赖本机 Codex 登录态和 Codex 后端可用性。
-- 英文翻译同样依赖本机 Codex 登录态和 Codex 后端可用性。
+- Codex 转写、`AI Rewrite`、翻译和 Neo 依赖本机 Codex 登录态和 Codex 后端可用性；Codex 语音使用内部接口，可用性取决于服务端。
 - Agent TUI bridge 当前只支持本机进程；远程 SSH 会话需要额外转发 socket。
 - Doubao 协议兼容性以当前仓库实现为准，升级资源协议时需要重新核对字段和握手行为。
-- 它已经是一个能工作的 MVP，但还不是面向普通用户大规模分发的最终形态。
+
+## 许可证
+
+[MIT](./LICENSE) © 2026 yahuo
