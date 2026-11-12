@@ -17,7 +17,7 @@
   <img alt="Platforms" src="https://img.shields.io/badge/platform-macOS%2014%2B%20%7C%20Omarchy%20Linux-lightgrey">
 </p>
 
-https://github.com/user-attachments/assets/cd08e141-3cfa-43fa-a9b2-0ccab52a3140
+https://github.com/user-attachments/assets/28f527fa-9dab-4e55-8b01-f386d93d98eb
 
 NoType 是一个开源的桌面语音输入与翻译工具。写代码、回消息、填表单时，按一下快捷键开始说话，结束后文字直接粘贴回当前输入框，不用切到另一个转写工具，也不用手动复制粘贴。
 
