@@ -26,9 +26,9 @@ use crate::protocol::{
 };
 use stream::{CodexResponseRequest, LineBuffer};
 
-pub const REWRITE_MODEL: &str = "gpt-5.6-terra";
+pub const REWRITE_MODEL: &str = "gpt-6.1-terra";
 pub const REWRITE_REASONING_EFFORT: &str = "high";
-pub const TRANSLATION_MODEL: &str = "gpt-5.6-luna";
+pub const TRANSLATION_MODEL: &str = "gpt-6-luna";
 pub const TRANSLATION_REASONING_EFFORT: &str = "none";
 pub const CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
 // An HTTP/2 connection used within this window is assumed to still be pooled.
@@ -689,11 +689,11 @@ mod tests {
         assert!(request.headers().get("chatgpt-account-id").is_none());
         let body: serde_json::Value =
             serde_json::from_slice(request.body().unwrap().as_bytes().unwrap()).unwrap();
-        assert_eq!(body["model"], "gpt-5.6-terra");
+        assert_eq!(body["model"], "gpt-6.1-terra");
         assert_eq!(body["reasoning"]["effort"], "high");
         assert_eq!(
             (TRANSLATION_MODEL, TRANSLATION_REASONING_EFFORT),
-            ("gpt-5.6-luna", "none")
+            ("gpt-6-luna", "none")
         );
     }
 

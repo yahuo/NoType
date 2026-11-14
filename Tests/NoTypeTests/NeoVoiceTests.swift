@@ -146,6 +146,10 @@ func neoSelectedVoiceIsSentToRealtimeSession(voice: NeoVoice) throws {
         #expect(settings.neoExecutionModel == .luna)
         #expect(settings.neoReasoningEffort == .medium)
     }
+    for (saved, expected) in [("gpt-5.6-luna", NeoExecutionModel.luna), ("gpt-5.6-terra", .terra), ("gpt-5.6-sol", .sol)] {
+        let json = "{\"appID\":\"saved\",\"neoExecutionModel\":\"\(saved)\"}"
+        #expect(try JSONDecoder().decode(AppSettings.self, from: Data(json.utf8)).neoExecutionModel == expected)
+    }
     #expect(NeoReasoningEffort.allCases.map(\.rawValue) == ["low", "medium", "high"])
     for model in NeoExecutionModel.allCases {
         for effort in NeoReasoningEffort.allCases {

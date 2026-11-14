@@ -82,9 +82,9 @@ private final class RewriteDeadline: @unchecked Sendable {
 
 actor AIRewriteService {
     private static let browserLogger = Logger(subsystem: "com.opensource.notype", category: "BrowserBridge")
-    static let rewriteModel = "gpt-5.6-terra"
+    static let rewriteModel = "gpt-6.1-terra"
     static let rewriteReasoningEffort = "high"
-    static let translationModel = "gpt-5.6-luna"
+    static let translationModel = "gpt-6-luna"
     static let translationReasoningEffort = "none"
     static let codexResponsesURL = URL(string: "https://chatgpt.com/backend-api/codex/responses")!
     // An HTTP/2 connection used within this window is assumed to still be pooled.

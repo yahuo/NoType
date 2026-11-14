@@ -94,12 +94,22 @@ enum NeoVoice: String, Codable, CaseIterable, Identifiable {
 }
 
 enum NeoExecutionModel: String, Codable, CaseIterable, Identifiable {
-    case luna = "gpt-5.6-luna"
-    case terra = "gpt-5.6-terra"
-    case sol = "gpt-5.6-sol"
+    case luna = "gpt-6-luna"
+    case terra = "gpt-6.1-terra"
+    case sol = "gpt-6.1-sol"
     case astra = "gpt-6-astra"
 
     var id: String { rawValue }
+
+    /// Accepts current names and names saved by earlier versions, keeping the selected tier.
+    init?(savedValue: String) {
+        switch savedValue {
+        case "gpt-5.6-luna": self = .luna
+        case "gpt-5.6-terra": self = .terra
+        case "gpt-5.6-sol": self = .sol
+        default: self.init(rawValue: savedValue)
+        }
+    }
 }
 
 enum NeoReasoningEffort: String, Codable, CaseIterable, Identifiable {
@@ -190,7 +200,7 @@ struct AppSettings: Codable, Equatable {
         neoWakePhrase = Self.normalizedNeoWakePhrase(try container.decodeIfPresent(String.self, forKey: .neoWakePhrase) ?? "") ?? Self.defaultNeoWakePhrase
         neoVoice = NeoVoice(rawValue: try container.decodeIfPresent(String.self, forKey: .neoVoice) ?? "") ?? .juniper
         neoSpeechGuidance = try container.decodeIfPresent(String.self, forKey: .neoSpeechGuidance) ?? ""
-        neoExecutionModel = NeoExecutionModel(rawValue: try container.decodeIfPresent(String.self, forKey: .neoExecutionModel) ?? "") ?? .luna
+        neoExecutionModel = NeoExecutionModel(savedValue: try container.decodeIfPresent(String.self, forKey: .neoExecutionModel) ?? "") ?? .luna
         neoReasoningEffort = NeoReasoningEffort(rawValue: try container.decodeIfPresent(String.self, forKey: .neoReasoningEffort) ?? "") ?? .medium
         appID = try container.decodeIfPresent(String.self, forKey: .appID) ?? ""
 
