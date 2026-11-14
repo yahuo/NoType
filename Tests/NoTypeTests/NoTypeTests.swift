@@ -561,7 +561,7 @@ func aiRewriteRequestUsesBalancedTerraProfile() throws {
     let body = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
     let reasoning = try #require(body["reasoning"] as? [String: Any])
 
-    #expect(body["model"] as? String == "gpt-5.6-terra")
+    #expect(body["model"] as? String == "gpt-6.1-terra")
     #expect(reasoning["effort"] as? String == "high")
 }
 
@@ -585,7 +585,7 @@ func aiTranslationRequestUsesFastLunaProfile() throws {
     let body = try #require(JSONSerialization.jsonObject(with: bodyData) as? [String: Any])
     let reasoning = try #require(body["reasoning"] as? [String: Any])
 
-    #expect(body["model"] as? String == "gpt-5.6-luna")
+    #expect(body["model"] as? String == "gpt-6-luna")
     #expect(reasoning["effort"] as? String == "none")
 }
 
